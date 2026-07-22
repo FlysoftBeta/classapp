@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Talos II</title>
+    <style>
+      html,
+      body,
+      #shell {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #fff;
+        color: #737373;
+        font:
+          12px system-ui,
+          sans-serif;
+      }
+      #shell {
+        display: grid;
+        place-items: center;
+      }
+      .status {
+        text-align: center;
+      }
+      .error {
+        max-width: 32rem;
+        padding: 1rem;
+        color: #b91c1c;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="shell"><div class="status">正在加载应用…</div></div>
+    <script>
+      (() => {
+        const DB = "classapp-runtime";
+        const open = () =>
+          new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB, 1);
+            request.onupgradeneeded = () => {
+              const db = request.result;
+              if (!db.objectStoreNames.contains("bundles"))
+                db.createObjectStore("bundles", { keyPath: "buildId" });
+              if (!db.objectStoreNames.contains("resources")) {
+                const store = db.createObjectStore("resources", {
+                  keyPath: "key",
+                });
+                store.createIndex("by-class-and-touch", [
+                  "resourceClass",
+                  "touchedAt",
+                ]);
+              }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        const idb = (request) =>
+          new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        const storeBundle = async (db, manifest, body) => {
+          db.transaction("bundles", "readwrite").objectStore("bundles").put({
+            buildId: manifest.buildId,
+            body,
+            installedAt: Date.now(),
+            active: true,
+          });
+          localStorage.setItem("classapp-active-build", manifest.buildId);
+        };
+        const boot = async () => {
+          const db = await open();
+          let record = null;
+          const active = localStorage.getItem("classapp-active-build");
+          if (active)
+            record = await idb(
+              db.transaction("bundles").objectStore("bundles").get(active),
+            );
+          try {
+            const manifest = await fetch("/app/manifest.json", {
+              cache: "no-store",
+            }).then((r) => {
+              if (!r.ok) throw new Error(`manifest ${r.status}`);
+              return r.json();
+            });
+            if (!record) {
+              const body = await fetch(manifest.bundle, {
+                cache: "no-store",
+              }).then((r) => {
+                if (!r.ok) throw new Error(`bundle ${r.status}`);
+                return r.blob();
+              });
+              record = { buildId: manifest.buildId, body };
+              await storeBundle(db, manifest, body);
+            }
+          } catch (error) {
+            if (!record) throw error;
+          }
+          const url = URL.createObjectURL(record.body);
+          try {
+            await import(url);
+          } finally {
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          }
+        };
+        boot().catch((error) => {
+          document.getElementById("shell").innerHTML =
+            `<div class="error">应用无法加载。请检查网络后刷新。<br><small>${String(error)}</small></div>`;
+        });
+      })();
+    </script>
+  </body>
+</html>

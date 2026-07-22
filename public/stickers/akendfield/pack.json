@@ -1,0 +1,270 @@
+{
+  "id": "akendfield",
+  "name": "终末地",
+  "stickers": {
+    "akendfield-a-01": {
+      "name": "akendfield-a-01",
+      "path": "/stickers/akendfield/akendfield-a-01.png"
+    },
+    "akendfield-a-02": {
+      "name": "akendfield-a-02",
+      "path": "/stickers/akendfield/akendfield-a-02.png"
+    },
+    "akendfield-a-03": {
+      "name": "akendfield-a-03",
+      "path": "/stickers/akendfield/akendfield-a-03.png"
+    },
+    "akendfield-a-04": {
+      "name": "akendfield-a-04",
+      "path": "/stickers/akendfield/akendfield-a-04.png"
+    },
+    "akendfield-a-05": {
+      "name": "akendfield-a-05",
+      "path": "/stickers/akendfield/akendfield-a-05.png"
+    },
+    "akendfield-a-06": {
+      "name": "akendfield-a-06",
+      "path": "/stickers/akendfield/akendfield-a-06.png"
+    },
+    "akendfield-a-07": {
+      "name": "akendfield-a-07",
+      "path": "/stickers/akendfield/akendfield-a-07.png"
+    },
+    "akendfield-a-08": {
+      "name": "akendfield-a-08",
+      "path": "/stickers/akendfield/akendfield-a-08.png"
+    },
+    "akendfield-a-09": {
+      "name": "akendfield-a-09",
+      "path": "/stickers/akendfield/akendfield-a-09.png"
+    },
+    "akendfield-a-10": {
+      "name": "akendfield-a-10",
+      "path": "/stickers/akendfield/akendfield-a-10.png"
+    },
+    "akendfield-a-11": {
+      "name": "akendfield-a-11",
+      "path": "/stickers/akendfield/akendfield-a-11.png"
+    },
+    "akendfield-a-12": {
+      "name": "akendfield-a-12",
+      "path": "/stickers/akendfield/akendfield-a-12.png"
+    },
+    "akendfield-a-13": {
+      "name": "akendfield-a-13",
+      "path": "/stickers/akendfield/akendfield-a-13.png"
+    },
+    "akendfield-a-14": {
+      "name": "akendfield-a-14",
+      "path": "/stickers/akendfield/akendfield-a-14.png"
+    },
+    "akendfield-a-15": {
+      "name": "akendfield-a-15",
+      "path": "/stickers/akendfield/akendfield-a-15.png"
+    },
+    "akendfield-a-16": {
+      "name": "akendfield-a-16",
+      "path": "/stickers/akendfield/akendfield-a-16.png"
+    },
+    "akendfield-b-1": {
+      "name": "akendfield-b-1",
+      "path": "/stickers/akendfield/akendfield-b-1.png"
+    },
+    "akendfield-b-10": {
+      "name": "akendfield-b-10",
+      "path": "/stickers/akendfield/akendfield-b-10.png"
+    },
+    "akendfield-b-11": {
+      "name": "akendfield-b-11",
+      "path": "/stickers/akendfield/akendfield-b-11.png"
+    },
+    "akendfield-b-12": {
+      "name": "akendfield-b-12",
+      "path": "/stickers/akendfield/akendfield-b-12.png"
+    },
+    "akendfield-b-13": {
+      "name": "akendfield-b-13",
+      "path": "/stickers/akendfield/akendfield-b-13.png"
+    },
+    "akendfield-b-14": {
+      "name": "akendfield-b-14",
+      "path": "/stickers/akendfield/akendfield-b-14.png"
+    },
+    "akendfield-b-15": {
+      "name": "akendfield-b-15",
+      "path": "/stickers/akendfield/akendfield-b-15.png"
+    },
+    "akendfield-b-16": {
+      "name": "akendfield-b-16",
+      "path": "/stickers/akendfield/akendfield-b-16.png"
+    },
+    "akendfield-b-17": {
+      "name": "akendfield-b-17",
+      "path": "/stickers/akendfield/akendfield-b-17.png"
+    },
+    "akendfield-b-18": {
+      "name": "akendfield-b-18",
+      "path": "/stickers/akendfield/akendfield-b-18.png"
+    },
+    "akendfield-b-2": {
+      "name": "akendfield-b-2",
+      "path": "/stickers/akendfield/akendfield-b-2.png"
+    },
+    "akendfield-b-3": {
+      "name": "akendfield-b-3",
+      "path": "/stickers/akendfield/akendfield-b-3.png"
+    },
+    "akendfield-b-4": {
+      "name": "akendfield-b-4",
+      "path": "/stickers/akendfield/akendfield-b-4.png"
+    },
+    "akendfield-b-5": {
+      "name": "akendfield-b-5",
+      "path": "/stickers/akendfield/akendfield-b-5.png"
+    },
+    "akendfield-b-6": {
+      "name": "akendfield-b-6",
+      "path": "/stickers/akendfield/akendfield-b-6.png"
+    },
+    "akendfield-b-7": {
+      "name": "akendfield-b-7",
+      "path": "/stickers/akendfield/akendfield-b-7.png"
+    },
+    "akendfield-b-8": {
+      "name": "akendfield-b-8",
+      "path": "/stickers/akendfield/akendfield-b-8.png"
+    },
+    "akendfield-b-9": {
+      "name": "akendfield-b-9",
+      "path": "/stickers/akendfield/akendfield-b-9.png"
+    },
+    "akendfield-c-01": {
+      "name": "akendfield-c-01",
+      "path": "/stickers/akendfield/akendfield-c-01.png"
+    },
+    "akendfield-c-02": {
+      "name": "akendfield-c-02",
+      "path": "/stickers/akendfield/akendfield-c-02.png"
+    },
+    "akendfield-c-03": {
+      "name": "akendfield-c-03",
+      "path": "/stickers/akendfield/akendfield-c-03.png"
+    },
+    "akendfield-c-04": {
+      "name": "akendfield-c-04",
+      "path": "/stickers/akendfield/akendfield-c-04.png"
+    },
+    "akendfield-c-05": {
+      "name": "akendfield-c-05",
+      "path": "/stickers/akendfield/akendfield-c-05.png"
+    },
+    "akendfield-c-06": {
+      "name": "akendfield-c-06",
+      "path": "/stickers/akendfield/akendfield-c-06.png"
+    },
+    "akendfield-c-07": {
+      "name": "akendfield-c-07",
+      "path": "/stickers/akendfield/akendfield-c-07.png"
+    },
+    "akendfield-c-08": {
+      "name": "akendfield-c-08",
+      "path": "/stickers/akendfield/akendfield-c-08.png"
+    },
+    "akendfield-c-09": {
+      "name": "akendfield-c-09",
+      "path": "/stickers/akendfield/akendfield-c-09.png"
+    },
+    "akendfield-c-10": {
+      "name": "akendfield-c-10",
+      "path": "/stickers/akendfield/akendfield-c-10.png"
+    },
+    "akendfield-c-11": {
+      "name": "akendfield-c-11",
+      "path": "/stickers/akendfield/akendfield-c-11.png"
+    },
+    "akendfield-c-12": {
+      "name": "akendfield-c-12",
+      "path": "/stickers/akendfield/akendfield-c-12.png"
+    },
+    "akendfield-c-13": {
+      "name": "akendfield-c-13",
+      "path": "/stickers/akendfield/akendfield-c-13.png"
+    },
+    "akendfield-c-14": {
+      "name": "akendfield-c-14",
+      "path": "/stickers/akendfield/akendfield-c-14.png"
+    },
+    "akendfield-c-15": {
+      "name": "akendfield-c-15",
+      "path": "/stickers/akendfield/akendfield-c-15.png"
+    },
+    "akendfield-c-16": {
+      "name": "akendfield-c-16",
+      "path": "/stickers/akendfield/akendfield-c-16.png"
+    },
+    "akendfield-d-1": {
+      "name": "akendfield-d-1",
+      "path": "/stickers/akendfield/akendfield-d-1.png"
+    },
+    "akendfield-d-10": {
+      "name": "akendfield-d-10",
+      "path": "/stickers/akendfield/akendfield-d-10.png"
+    },
+    "akendfield-d-11": {
+      "name": "akendfield-d-11",
+      "path": "/stickers/akendfield/akendfield-d-11.png"
+    },
+    "akendfield-d-12": {
+      "name": "akendfield-d-12",
+      "path": "/stickers/akendfield/akendfield-d-12.png"
+    },
+    "akendfield-d-13": {
+      "name": "akendfield-d-13",
+      "path": "/stickers/akendfield/akendfield-d-13.png"
+    },
+    "akendfield-d-14": {
+      "name": "akendfield-d-14",
+      "path": "/stickers/akendfield/akendfield-d-14.png"
+    },
+    "akendfield-d-15": {
+      "name": "akendfield-d-15",
+      "path": "/stickers/akendfield/akendfield-d-15.png"
+    },
+    "akendfield-d-16": {
+      "name": "akendfield-d-16",
+      "path": "/stickers/akendfield/akendfield-d-16.png"
+    },
+    "akendfield-d-2": {
+      "name": "akendfield-d-2",
+      "path": "/stickers/akendfield/akendfield-d-2.png"
+    },
+    "akendfield-d-3": {
+      "name": "akendfield-d-3",
+      "path": "/stickers/akendfield/akendfield-d-3.png"
+    },
+    "akendfield-d-4": {
+      "name": "akendfield-d-4",
+      "path": "/stickers/akendfield/akendfield-d-4.png"
+    },
+    "akendfield-d-5": {
+      "name": "akendfield-d-5",
+      "path": "/stickers/akendfield/akendfield-d-5.png"
+    },
+    "akendfield-d-6": {
+      "name": "akendfield-d-6",
+      "path": "/stickers/akendfield/akendfield-d-6.png"
+    },
+    "akendfield-d-7": {
+      "name": "akendfield-d-7",
+      "path": "/stickers/akendfield/akendfield-d-7.png"
+    },
+    "akendfield-d-8": {
+      "name": "akendfield-d-8",
+      "path": "/stickers/akendfield/akendfield-d-8.png"
+    },
+    "akendfield-d-9": {
+      "name": "akendfield-d-9",
+      "path": "/stickers/akendfield/akendfield-d-9.png"
+    }
+  }
+}

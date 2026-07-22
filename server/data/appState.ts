@@ -1,0 +1,90 @@
+import type BetterSqlite3 from "better-sqlite3";
+
+export const IDLE_LOCK_TIMEOUT_MINUTES = 5;
+export const PENDING_UPDATE_KEY = "pending_update_at";
+
+export function getPendingUpdateAt(db: BetterSqlite3.Database): string | null {
+  const row = db
+    .prepare("SELECT value FROM config WHERE key = ?")
+    .get(PENDING_UPDATE_KEY) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setPendingUpdateAt(
+  db: BetterSqlite3.Database,
+  value: string,
+): void {
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run(
+    PENDING_UPDATE_KEY,
+    value,
+  );
+}
+
+export function clearPendingUpdate(db: BetterSqlite3.Database): void {
+  db.prepare("DELETE FROM config WHERE key = ?").run(PENDING_UPDATE_KEY);
+}
+
+export function getIdleLockEnabled(db: BetterSqlite3.Database): boolean {
+  const row = db
+    .prepare("SELECT value FROM config WHERE key = 'idle_lock_enabled'")
+    .get() as { value: string } | undefined;
+  return row?.value === "1";
+}
+
+export function setIdleLockEnabled(
+  db: BetterSqlite3.Database,
+  enabled: boolean,
+): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO config (key, value) VALUES ('idle_lock_enabled', ?)",
+  ).run(enabled ? "1" : "0");
+}
+
+export function getSystemLocked(db: BetterSqlite3.Database): boolean {
+  const row = db
+    .prepare("SELECT value FROM config WHERE key = 'system_locked'")
+    .get() as { value: string } | undefined;
+  return row?.value === "1";
+}
+
+export function setSystemLocked(
+  db: BetterSqlite3.Database,
+  locked: boolean,
+): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO config (key, value) VALUES ('system_locked', ?)",
+  ).run(locked ? "1" : "0");
+}
+
+export function touchActivity(
+  db: BetterSqlite3.Database,
+  clientId: string,
+): void {
+  db.prepare(
+    `INSERT INTO client_last_active (client_id, last_at)
+     VALUES (?, datetime('now'))
+     ON CONFLICT(client_id) DO UPDATE SET last_at = datetime('now')`,
+  ).run(clientId);
+}
+
+export function getClientLastActiveAt(
+  db: BetterSqlite3.Database,
+  clientId: string,
+): string | null {
+  const row = db
+    .prepare("SELECT last_at FROM client_last_active WHERE client_id = ?")
+    .get(clientId) as { last_at: string } | undefined;
+  return row?.last_at ?? null;
+}
+
+export function getMinutesSinceTimestamp(
+  db: BetterSqlite3.Database,
+  timestamp: string,
+): number {
+  const row = db
+    .prepare(
+      "SELECT CAST((julianday('now') - julianday(?)) * 24 * 60 AS REAL) AS minutes",
+    )
+    .get(timestamp) as { minutes: number };
+  return row.minutes;
+}

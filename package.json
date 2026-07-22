@@ -1,0 +1,61 @@
+{
+  "name": "classapp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "tsx watch --clear-screen=false server/dev.ts",
+    "dev:client": "vite",
+    "build": "sh ./build.sh",
+    "infini2:build": "node lib/infini2/scripts/build-wasm.mjs",
+    "docs:infini2": "node lib/infini2/scripts/build-docs.mjs",
+    "test:offline-sync": "tsx scripts/test-offline-sync.mts",
+    "test:clients": "tsx scripts/test-client-management.mts",
+    "test:infini2:rust": "node lib/infini2/scripts/test-rust.mjs",
+    "test:infini2:ts": "tsx --test lib/infini2/data/controller.test.ts lib/infini2/dom/coordinates.test.ts",
+    "test:infini2:browser": "tsx lib/infini2/tests/test-browser.mts",
+    "test:infini2": "npm run test:infini2:rust && npm run infini2:build && npm run test:infini2:ts && npm run test:infini2:browser",
+    "test:protocol": "tsx scripts/test-protocol-contracts.mts",
+    "test:tomato": "tsx scripts/test-tomato-quota.mts",
+    "test:e2e:chrome70": "npm run build && tsx scripts/test-chrome70-e2e.mts",
+    "lint": "tsc --noEmit; eslint",
+    "format": "prettier . --write"
+  },
+  "browserslist": [
+    "chrome >=70"
+  ],
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.11",
+    "@mui/material": "^7.3.11",
+    "@napi-rs/canvas": "^1.0.2",
+    "better-sqlite3": "^13.0.1",
+    "bufferutil": "^4.1.0",
+    "cheerio": "^1.2.0",
+    "core-js": "^3.49.0",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.1.200",
+    "playwright": "^1.61.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "ws": "^8.21.1",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.0.4",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^8.1.5"
+  }
+}

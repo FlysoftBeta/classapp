@@ -1,0 +1,1826 @@
+{
+  "id": "starrail",
+  "name": "星穹铁道",
+  "stickers": {
+    "starrail_009880bc": {
+      "name": "starrail_009880bc",
+      "path": "/stickers/starrail/starrail_009880bc.png"
+    },
+    "starrail_00a3d44a": {
+      "name": "starrail_00a3d44a",
+      "path": "/stickers/starrail/starrail_00a3d44a.png"
+    },
+    "starrail_01ba7be8": {
+      "name": "starrail_01ba7be8",
+      "path": "/stickers/starrail/starrail_01ba7be8.png"
+    },
+    "starrail_01f4e124": {
+      "name": "starrail_01f4e124",
+      "path": "/stickers/starrail/starrail_01f4e124.png"
+    },
+    "starrail_03e90c5c": {
+      "name": "starrail_03e90c5c",
+      "path": "/stickers/starrail/starrail_03e90c5c.png"
+    },
+    "starrail_04fe1d9b": {
+      "name": "starrail_04fe1d9b",
+      "path": "/stickers/starrail/starrail_04fe1d9b.png"
+    },
+    "starrail_055e1ef7": {
+      "name": "starrail_055e1ef7",
+      "path": "/stickers/starrail/starrail_055e1ef7.png"
+    },
+    "starrail_07ba4272": {
+      "name": "starrail_07ba4272",
+      "path": "/stickers/starrail/starrail_07ba4272.png"
+    },
+    "starrail_07f5f501": {
+      "name": "starrail_07f5f501",
+      "path": "/stickers/starrail/starrail_07f5f501.png"
+    },
+    "starrail_088fa96d": {
+      "name": "starrail_088fa96d",
+      "path": "/stickers/starrail/starrail_088fa96d.png"
+    },
+    "starrail_0a528ee3": {
+      "name": "starrail_0a528ee3",
+      "path": "/stickers/starrail/starrail_0a528ee3.png"
+    },
+    "starrail_0ac5d86b": {
+      "name": "starrail_0ac5d86b",
+      "path": "/stickers/starrail/starrail_0ac5d86b.png"
+    },
+    "starrail_0afc01df": {
+      "name": "starrail_0afc01df",
+      "path": "/stickers/starrail/starrail_0afc01df.png"
+    },
+    "starrail_0ce84077": {
+      "name": "starrail_0ce84077",
+      "path": "/stickers/starrail/starrail_0ce84077.png"
+    },
+    "starrail_0dbf2732": {
+      "name": "starrail_0dbf2732",
+      "path": "/stickers/starrail/starrail_0dbf2732.png"
+    },
+    "starrail_0de0f4da": {
+      "name": "starrail_0de0f4da",
+      "path": "/stickers/starrail/starrail_0de0f4da.png"
+    },
+    "starrail_0ee412bf": {
+      "name": "starrail_0ee412bf",
+      "path": "/stickers/starrail/starrail_0ee412bf.png"
+    },
+    "starrail_0ff026ce": {
+      "name": "starrail_0ff026ce",
+      "path": "/stickers/starrail/starrail_0ff026ce.png"
+    },
+    "starrail_101f3515": {
+      "name": "starrail_101f3515",
+      "path": "/stickers/starrail/starrail_101f3515.png"
+    },
+    "starrail_108637aa": {
+      "name": "starrail_108637aa",
+      "path": "/stickers/starrail/starrail_108637aa.png"
+    },
+    "starrail_1093d71e": {
+      "name": "starrail_1093d71e",
+      "path": "/stickers/starrail/starrail_1093d71e.png"
+    },
+    "starrail_111af754": {
+      "name": "starrail_111af754",
+      "path": "/stickers/starrail/starrail_111af754.png"
+    },
+    "starrail_127b2961": {
+      "name": "starrail_127b2961",
+      "path": "/stickers/starrail/starrail_127b2961.png"
+    },
+    "starrail_12889a26": {
+      "name": "starrail_12889a26",
+      "path": "/stickers/starrail/starrail_12889a26.png"
+    },
+    "starrail_12aef7fe": {
+      "name": "starrail_12aef7fe",
+      "path": "/stickers/starrail/starrail_12aef7fe.png"
+    },
+    "starrail_142a88e7": {
+      "name": "starrail_142a88e7",
+      "path": "/stickers/starrail/starrail_142a88e7.png"
+    },
+    "starrail_14734d53": {
+      "name": "starrail_14734d53",
+      "path": "/stickers/starrail/starrail_14734d53.png"
+    },
+    "starrail_158c1791": {
+      "name": "starrail_158c1791",
+      "path": "/stickers/starrail/starrail_158c1791.png"
+    },
+    "starrail_1701af7a": {
+      "name": "starrail_1701af7a",
+      "path": "/stickers/starrail/starrail_1701af7a.png"
+    },
+    "starrail_1759c312": {
+      "name": "starrail_1759c312",
+      "path": "/stickers/starrail/starrail_1759c312.png"
+    },
+    "starrail_17cdcb2e": {
+      "name": "starrail_17cdcb2e",
+      "path": "/stickers/starrail/starrail_17cdcb2e.png"
+    },
+    "starrail_182f2653": {
+      "name": "starrail_182f2653",
+      "path": "/stickers/starrail/starrail_182f2653.png"
+    },
+    "starrail_18379324": {
+      "name": "starrail_18379324",
+      "path": "/stickers/starrail/starrail_18379324.png"
+    },
+    "starrail_1855de38": {
+      "name": "starrail_1855de38",
+      "path": "/stickers/starrail/starrail_1855de38.png"
+    },
+    "starrail_18625674": {
+      "name": "starrail_18625674",
+      "path": "/stickers/starrail/starrail_18625674.png"
+    },
+    "starrail_18f413f5": {
+      "name": "starrail_18f413f5",
+      "path": "/stickers/starrail/starrail_18f413f5.png"
+    },
+    "starrail_18fc24e1": {
+      "name": "starrail_18fc24e1",
+      "path": "/stickers/starrail/starrail_18fc24e1.png"
+    },
+    "starrail_19093a9a": {
+      "name": "starrail_19093a9a",
+      "path": "/stickers/starrail/starrail_19093a9a.png"
+    },
+    "starrail_1a68cd72": {
+      "name": "starrail_1a68cd72",
+      "path": "/stickers/starrail/starrail_1a68cd72.png"
+    },
+    "starrail_1baa11cd": {
+      "name": "starrail_1baa11cd",
+      "path": "/stickers/starrail/starrail_1baa11cd.png"
+    },
+    "starrail_1bda9012": {
+      "name": "starrail_1bda9012",
+      "path": "/stickers/starrail/starrail_1bda9012.png"
+    },
+    "starrail_1c2383ca": {
+      "name": "starrail_1c2383ca",
+      "path": "/stickers/starrail/starrail_1c2383ca.png"
+    },
+    "starrail_1c3ad7e5": {
+      "name": "starrail_1c3ad7e5",
+      "path": "/stickers/starrail/starrail_1c3ad7e5.png"
+    },
+    "starrail_1c714e4d": {
+      "name": "starrail_1c714e4d",
+      "path": "/stickers/starrail/starrail_1c714e4d.png"
+    },
+    "starrail_1cc13d4b": {
+      "name": "starrail_1cc13d4b",
+      "path": "/stickers/starrail/starrail_1cc13d4b.png"
+    },
+    "starrail_1d948c3c": {
+      "name": "starrail_1d948c3c",
+      "path": "/stickers/starrail/starrail_1d948c3c.png"
+    },
+    "starrail_1de66027": {
+      "name": "starrail_1de66027",
+      "path": "/stickers/starrail/starrail_1de66027.png"
+    },
+    "starrail_1e87d508": {
+      "name": "starrail_1e87d508",
+      "path": "/stickers/starrail/starrail_1e87d508.png"
+    },
+    "starrail_1ecf8294": {
+      "name": "starrail_1ecf8294",
+      "path": "/stickers/starrail/starrail_1ecf8294.png"
+    },
+    "starrail_1eec65e8": {
+      "name": "starrail_1eec65e8",
+      "path": "/stickers/starrail/starrail_1eec65e8.png"
+    },
+    "starrail_1f3002ce": {
+      "name": "starrail_1f3002ce",
+      "path": "/stickers/starrail/starrail_1f3002ce.png"
+    },
+    "starrail_20092856": {
+      "name": "starrail_20092856",
+      "path": "/stickers/starrail/starrail_20092856.png"
+    },
+    "starrail_20296ffb": {
+      "name": "starrail_20296ffb",
+      "path": "/stickers/starrail/starrail_20296ffb.png"
+    },
+    "starrail_203e2609": {
+      "name": "starrail_203e2609",
+      "path": "/stickers/starrail/starrail_203e2609.png"
+    },
+    "starrail_20b22c39": {
+      "name": "starrail_20b22c39",
+      "path": "/stickers/starrail/starrail_20b22c39.png"
+    },
+    "starrail_20c8a35b": {
+      "name": "starrail_20c8a35b",
+      "path": "/stickers/starrail/starrail_20c8a35b.png"
+    },
+    "starrail_212433ce": {
+      "name": "starrail_212433ce",
+      "path": "/stickers/starrail/starrail_212433ce.png"
+    },
+    "starrail_2124c202": {
+      "name": "starrail_2124c202",
+      "path": "/stickers/starrail/starrail_2124c202.png"
+    },
+    "starrail_21d8840e": {
+      "name": "starrail_21d8840e",
+      "path": "/stickers/starrail/starrail_21d8840e.png"
+    },
+    "starrail_21e5b8dc": {
+      "name": "starrail_21e5b8dc",
+      "path": "/stickers/starrail/starrail_21e5b8dc.png"
+    },
+    "starrail_21e5bd01": {
+      "name": "starrail_21e5bd01",
+      "path": "/stickers/starrail/starrail_21e5bd01.png"
+    },
+    "starrail_229e0ade": {
+      "name": "starrail_229e0ade",
+      "path": "/stickers/starrail/starrail_229e0ade.png"
+    },
+    "starrail_235277df": {
+      "name": "starrail_235277df",
+      "path": "/stickers/starrail/starrail_235277df.png"
+    },
+    "starrail_242fcf5b": {
+      "name": "starrail_242fcf5b",
+      "path": "/stickers/starrail/starrail_242fcf5b.png"
+    },
+    "starrail_24419c4f": {
+      "name": "starrail_24419c4f",
+      "path": "/stickers/starrail/starrail_24419c4f.png"
+    },
+    "starrail_244bcefb": {
+      "name": "starrail_244bcefb",
+      "path": "/stickers/starrail/starrail_244bcefb.png"
+    },
+    "starrail_247dab95": {
+      "name": "starrail_247dab95",
+      "path": "/stickers/starrail/starrail_247dab95.png"
+    },
+    "starrail_24b4f77f": {
+      "name": "starrail_24b4f77f",
+      "path": "/stickers/starrail/starrail_24b4f77f.png"
+    },
+    "starrail_251bf82e": {
+      "name": "starrail_251bf82e",
+      "path": "/stickers/starrail/starrail_251bf82e.png"
+    },
+    "starrail_2553dfcd": {
+      "name": "starrail_2553dfcd",
+      "path": "/stickers/starrail/starrail_2553dfcd.png"
+    },
+    "starrail_263079d8": {
+      "name": "starrail_263079d8",
+      "path": "/stickers/starrail/starrail_263079d8.png"
+    },
+    "starrail_27fa759d": {
+      "name": "starrail_27fa759d",
+      "path": "/stickers/starrail/starrail_27fa759d.png"
+    },
+    "starrail_28c76f17": {
+      "name": "starrail_28c76f17",
+      "path": "/stickers/starrail/starrail_28c76f17.png"
+    },
+    "starrail_295f66a9": {
+      "name": "starrail_295f66a9",
+      "path": "/stickers/starrail/starrail_295f66a9.png"
+    },
+    "starrail_29d2262c": {
+      "name": "starrail_29d2262c",
+      "path": "/stickers/starrail/starrail_29d2262c.png"
+    },
+    "starrail_2a40d718": {
+      "name": "starrail_2a40d718",
+      "path": "/stickers/starrail/starrail_2a40d718.png"
+    },
+    "starrail_2a4d92ad": {
+      "name": "starrail_2a4d92ad",
+      "path": "/stickers/starrail/starrail_2a4d92ad.png"
+    },
+    "starrail_2be2c71a": {
+      "name": "starrail_2be2c71a",
+      "path": "/stickers/starrail/starrail_2be2c71a.png"
+    },
+    "starrail_2c905f1a": {
+      "name": "starrail_2c905f1a",
+      "path": "/stickers/starrail/starrail_2c905f1a.png"
+    },
+    "starrail_2e505d5e": {
+      "name": "starrail_2e505d5e",
+      "path": "/stickers/starrail/starrail_2e505d5e.png"
+    },
+    "starrail_2e9aad9a": {
+      "name": "starrail_2e9aad9a",
+      "path": "/stickers/starrail/starrail_2e9aad9a.png"
+    },
+    "starrail_2ee5e6a1": {
+      "name": "starrail_2ee5e6a1",
+      "path": "/stickers/starrail/starrail_2ee5e6a1.png"
+    },
+    "starrail_2f6fc765": {
+      "name": "starrail_2f6fc765",
+      "path": "/stickers/starrail/starrail_2f6fc765.png"
+    },
+    "starrail_30bb8cc0": {
+      "name": "starrail_30bb8cc0",
+      "path": "/stickers/starrail/starrail_30bb8cc0.png"
+    },
+    "starrail_30ce72a0": {
+      "name": "starrail_30ce72a0",
+      "path": "/stickers/starrail/starrail_30ce72a0.png"
+    },
+    "starrail_316b92a8": {
+      "name": "starrail_316b92a8",
+      "path": "/stickers/starrail/starrail_316b92a8.png"
+    },
+    "starrail_3298ec9c": {
+      "name": "starrail_3298ec9c",
+      "path": "/stickers/starrail/starrail_3298ec9c.png"
+    },
+    "starrail_33977f94": {
+      "name": "starrail_33977f94",
+      "path": "/stickers/starrail/starrail_33977f94.png"
+    },
+    "starrail_34460559": {
+      "name": "starrail_34460559",
+      "path": "/stickers/starrail/starrail_34460559.png"
+    },
+    "starrail_3505465d": {
+      "name": "starrail_3505465d",
+      "path": "/stickers/starrail/starrail_3505465d.png"
+    },
+    "starrail_35a605bd": {
+      "name": "starrail_35a605bd",
+      "path": "/stickers/starrail/starrail_35a605bd.png"
+    },
+    "starrail_35b342f7": {
+      "name": "starrail_35b342f7",
+      "path": "/stickers/starrail/starrail_35b342f7.png"
+    },
+    "starrail_36145989": {
+      "name": "starrail_36145989",
+      "path": "/stickers/starrail/starrail_36145989.png"
+    },
+    "starrail_36c63269": {
+      "name": "starrail_36c63269",
+      "path": "/stickers/starrail/starrail_36c63269.png"
+    },
+    "starrail_3734b8d2": {
+      "name": "starrail_3734b8d2",
+      "path": "/stickers/starrail/starrail_3734b8d2.png"
+    },
+    "starrail_383fde30": {
+      "name": "starrail_383fde30",
+      "path": "/stickers/starrail/starrail_383fde30.png"
+    },
+    "starrail_38c13976": {
+      "name": "starrail_38c13976",
+      "path": "/stickers/starrail/starrail_38c13976.png"
+    },
+    "starrail_396cc624": {
+      "name": "starrail_396cc624",
+      "path": "/stickers/starrail/starrail_396cc624.png"
+    },
+    "starrail_3977db2f": {
+      "name": "starrail_3977db2f",
+      "path": "/stickers/starrail/starrail_3977db2f.png"
+    },
+    "starrail_3a17c305": {
+      "name": "starrail_3a17c305",
+      "path": "/stickers/starrail/starrail_3a17c305.png"
+    },
+    "starrail_3a479c4a": {
+      "name": "starrail_3a479c4a",
+      "path": "/stickers/starrail/starrail_3a479c4a.png"
+    },
+    "starrail_3aafcd77": {
+      "name": "starrail_3aafcd77",
+      "path": "/stickers/starrail/starrail_3aafcd77.png"
+    },
+    "starrail_3af817c3": {
+      "name": "starrail_3af817c3",
+      "path": "/stickers/starrail/starrail_3af817c3.png"
+    },
+    "starrail_3bb0180b": {
+      "name": "starrail_3bb0180b",
+      "path": "/stickers/starrail/starrail_3bb0180b.png"
+    },
+    "starrail_3db1b518": {
+      "name": "starrail_3db1b518",
+      "path": "/stickers/starrail/starrail_3db1b518.png"
+    },
+    "starrail_3e067815": {
+      "name": "starrail_3e067815",
+      "path": "/stickers/starrail/starrail_3e067815.png"
+    },
+    "starrail_3e3da67e": {
+      "name": "starrail_3e3da67e",
+      "path": "/stickers/starrail/starrail_3e3da67e.png"
+    },
+    "starrail_3e795c55": {
+      "name": "starrail_3e795c55",
+      "path": "/stickers/starrail/starrail_3e795c55.png"
+    },
+    "starrail_3f09a350": {
+      "name": "starrail_3f09a350",
+      "path": "/stickers/starrail/starrail_3f09a350.png"
+    },
+    "starrail_3f17ff28": {
+      "name": "starrail_3f17ff28",
+      "path": "/stickers/starrail/starrail_3f17ff28.png"
+    },
+    "starrail_3f5f13a4": {
+      "name": "starrail_3f5f13a4",
+      "path": "/stickers/starrail/starrail_3f5f13a4.png"
+    },
+    "starrail_3f73cb6e": {
+      "name": "starrail_3f73cb6e",
+      "path": "/stickers/starrail/starrail_3f73cb6e.png"
+    },
+    "starrail_40760d80": {
+      "name": "starrail_40760d80",
+      "path": "/stickers/starrail/starrail_40760d80.png"
+    },
+    "starrail_41dd1225": {
+      "name": "starrail_41dd1225",
+      "path": "/stickers/starrail/starrail_41dd1225.png"
+    },
+    "starrail_42bd49fc": {
+      "name": "starrail_42bd49fc",
+      "path": "/stickers/starrail/starrail_42bd49fc.png"
+    },
+    "starrail_42c64cc4": {
+      "name": "starrail_42c64cc4",
+      "path": "/stickers/starrail/starrail_42c64cc4.png"
+    },
+    "starrail_441cd008": {
+      "name": "starrail_441cd008",
+      "path": "/stickers/starrail/starrail_441cd008.png"
+    },
+    "starrail_449bba7f": {
+      "name": "starrail_449bba7f",
+      "path": "/stickers/starrail/starrail_449bba7f.png"
+    },
+    "starrail_45c97a58": {
+      "name": "starrail_45c97a58",
+      "path": "/stickers/starrail/starrail_45c97a58.png"
+    },
+    "starrail_4636ef85": {
+      "name": "starrail_4636ef85",
+      "path": "/stickers/starrail/starrail_4636ef85.png"
+    },
+    "starrail_463c4041": {
+      "name": "starrail_463c4041",
+      "path": "/stickers/starrail/starrail_463c4041.png"
+    },
+    "starrail_46d2df5f": {
+      "name": "starrail_46d2df5f",
+      "path": "/stickers/starrail/starrail_46d2df5f.png"
+    },
+    "starrail_46e23164": {
+      "name": "starrail_46e23164",
+      "path": "/stickers/starrail/starrail_46e23164.png"
+    },
+    "starrail_4727f7cd": {
+      "name": "starrail_4727f7cd",
+      "path": "/stickers/starrail/starrail_4727f7cd.png"
+    },
+    "starrail_476c6bbf": {
+      "name": "starrail_476c6bbf",
+      "path": "/stickers/starrail/starrail_476c6bbf.png"
+    },
+    "starrail_47ba9da7": {
+      "name": "starrail_47ba9da7",
+      "path": "/stickers/starrail/starrail_47ba9da7.png"
+    },
+    "starrail_48f31729": {
+      "name": "starrail_48f31729",
+      "path": "/stickers/starrail/starrail_48f31729.png"
+    },
+    "starrail_49229e56": {
+      "name": "starrail_49229e56",
+      "path": "/stickers/starrail/starrail_49229e56.png"
+    },
+    "starrail_49353db9": {
+      "name": "starrail_49353db9",
+      "path": "/stickers/starrail/starrail_49353db9.png"
+    },
+    "starrail_49427354": {
+      "name": "starrail_49427354",
+      "path": "/stickers/starrail/starrail_49427354.png"
+    },
+    "starrail_499226eb": {
+      "name": "starrail_499226eb",
+      "path": "/stickers/starrail/starrail_499226eb.png"
+    },
+    "starrail_4a28536b": {
+      "name": "starrail_4a28536b",
+      "path": "/stickers/starrail/starrail_4a28536b.png"
+    },
+    "starrail_4afaa47a": {
+      "name": "starrail_4afaa47a",
+      "path": "/stickers/starrail/starrail_4afaa47a.png"
+    },
+    "starrail_4b10872c": {
+      "name": "starrail_4b10872c",
+      "path": "/stickers/starrail/starrail_4b10872c.png"
+    },
+    "starrail_4bc6667a": {
+      "name": "starrail_4bc6667a",
+      "path": "/stickers/starrail/starrail_4bc6667a.png"
+    },
+    "starrail_4c0132b3": {
+      "name": "starrail_4c0132b3",
+      "path": "/stickers/starrail/starrail_4c0132b3.png"
+    },
+    "starrail_4c01e4e2": {
+      "name": "starrail_4c01e4e2",
+      "path": "/stickers/starrail/starrail_4c01e4e2.png"
+    },
+    "starrail_4c7d6964": {
+      "name": "starrail_4c7d6964",
+      "path": "/stickers/starrail/starrail_4c7d6964.png"
+    },
+    "starrail_4e67cd6a": {
+      "name": "starrail_4e67cd6a",
+      "path": "/stickers/starrail/starrail_4e67cd6a.png"
+    },
+    "starrail_4e87d12a": {
+      "name": "starrail_4e87d12a",
+      "path": "/stickers/starrail/starrail_4e87d12a.png"
+    },
+    "starrail_4f692838": {
+      "name": "starrail_4f692838",
+      "path": "/stickers/starrail/starrail_4f692838.png"
+    },
+    "starrail_508fe716": {
+      "name": "starrail_508fe716",
+      "path": "/stickers/starrail/starrail_508fe716.png"
+    },
+    "starrail_51949325": {
+      "name": "starrail_51949325",
+      "path": "/stickers/starrail/starrail_51949325.png"
+    },
+    "starrail_52bc5831": {
+      "name": "starrail_52bc5831",
+      "path": "/stickers/starrail/starrail_52bc5831.png"
+    },
+    "starrail_5378b6f0": {
+      "name": "starrail_5378b6f0",
+      "path": "/stickers/starrail/starrail_5378b6f0.png"
+    },
+    "starrail_54a6f4b1": {
+      "name": "starrail_54a6f4b1",
+      "path": "/stickers/starrail/starrail_54a6f4b1.png"
+    },
+    "starrail_54af146c": {
+      "name": "starrail_54af146c",
+      "path": "/stickers/starrail/starrail_54af146c.png"
+    },
+    "starrail_54be06b7": {
+      "name": "starrail_54be06b7",
+      "path": "/stickers/starrail/starrail_54be06b7.png"
+    },
+    "starrail_553bdb51": {
+      "name": "starrail_553bdb51",
+      "path": "/stickers/starrail/starrail_553bdb51.png"
+    },
+    "starrail_55a9f267": {
+      "name": "starrail_55a9f267",
+      "path": "/stickers/starrail/starrail_55a9f267.png"
+    },
+    "starrail_55affd71": {
+      "name": "starrail_55affd71",
+      "path": "/stickers/starrail/starrail_55affd71.png"
+    },
+    "starrail_55d2cffe": {
+      "name": "starrail_55d2cffe",
+      "path": "/stickers/starrail/starrail_55d2cffe.png"
+    },
+    "starrail_566dfe60": {
+      "name": "starrail_566dfe60",
+      "path": "/stickers/starrail/starrail_566dfe60.png"
+    },
+    "starrail_56f952e2": {
+      "name": "starrail_56f952e2",
+      "path": "/stickers/starrail/starrail_56f952e2.png"
+    },
+    "starrail_5747fabb": {
+      "name": "starrail_5747fabb",
+      "path": "/stickers/starrail/starrail_5747fabb.png"
+    },
+    "starrail_5788d2c0": {
+      "name": "starrail_5788d2c0",
+      "path": "/stickers/starrail/starrail_5788d2c0.png"
+    },
+    "starrail_581c87ea": {
+      "name": "starrail_581c87ea",
+      "path": "/stickers/starrail/starrail_581c87ea.png"
+    },
+    "starrail_5874333a": {
+      "name": "starrail_5874333a",
+      "path": "/stickers/starrail/starrail_5874333a.png"
+    },
+    "starrail_58885bfc": {
+      "name": "starrail_58885bfc",
+      "path": "/stickers/starrail/starrail_58885bfc.png"
+    },
+    "starrail_58bf175a": {
+      "name": "starrail_58bf175a",
+      "path": "/stickers/starrail/starrail_58bf175a.png"
+    },
+    "starrail_58d36faf": {
+      "name": "starrail_58d36faf",
+      "path": "/stickers/starrail/starrail_58d36faf.png"
+    },
+    "starrail_5975e457": {
+      "name": "starrail_5975e457",
+      "path": "/stickers/starrail/starrail_5975e457.png"
+    },
+    "starrail_59a7cded": {
+      "name": "starrail_59a7cded",
+      "path": "/stickers/starrail/starrail_59a7cded.png"
+    },
+    "starrail_59c3b461": {
+      "name": "starrail_59c3b461",
+      "path": "/stickers/starrail/starrail_59c3b461.png"
+    },
+    "starrail_5ac7eb08": {
+      "name": "starrail_5ac7eb08",
+      "path": "/stickers/starrail/starrail_5ac7eb08.png"
+    },
+    "starrail_5c167529": {
+      "name": "starrail_5c167529",
+      "path": "/stickers/starrail/starrail_5c167529.png"
+    },
+    "starrail_5caeb6d3": {
+      "name": "starrail_5caeb6d3",
+      "path": "/stickers/starrail/starrail_5caeb6d3.png"
+    },
+    "starrail_5cfb13c6": {
+      "name": "starrail_5cfb13c6",
+      "path": "/stickers/starrail/starrail_5cfb13c6.png"
+    },
+    "starrail_5d1c4c32": {
+      "name": "starrail_5d1c4c32",
+      "path": "/stickers/starrail/starrail_5d1c4c32.png"
+    },
+    "starrail_5d292077": {
+      "name": "starrail_5d292077",
+      "path": "/stickers/starrail/starrail_5d292077.png"
+    },
+    "starrail_5d4c86d9": {
+      "name": "starrail_5d4c86d9",
+      "path": "/stickers/starrail/starrail_5d4c86d9.png"
+    },
+    "starrail_5d7a6126": {
+      "name": "starrail_5d7a6126",
+      "path": "/stickers/starrail/starrail_5d7a6126.png"
+    },
+    "starrail_5e251bbb": {
+      "name": "starrail_5e251bbb",
+      "path": "/stickers/starrail/starrail_5e251bbb.png"
+    },
+    "starrail_5e5c1479": {
+      "name": "starrail_5e5c1479",
+      "path": "/stickers/starrail/starrail_5e5c1479.png"
+    },
+    "starrail_5ee5302f": {
+      "name": "starrail_5ee5302f",
+      "path": "/stickers/starrail/starrail_5ee5302f.png"
+    },
+    "starrail_5f0ec9ea": {
+      "name": "starrail_5f0ec9ea",
+      "path": "/stickers/starrail/starrail_5f0ec9ea.png"
+    },
+    "starrail_5f3d1d5a": {
+      "name": "starrail_5f3d1d5a",
+      "path": "/stickers/starrail/starrail_5f3d1d5a.png"
+    },
+    "starrail_5f8d98fc": {
+      "name": "starrail_5f8d98fc",
+      "path": "/stickers/starrail/starrail_5f8d98fc.png"
+    },
+    "starrail_5fc42220": {
+      "name": "starrail_5fc42220",
+      "path": "/stickers/starrail/starrail_5fc42220.png"
+    },
+    "starrail_60880c2e": {
+      "name": "starrail_60880c2e",
+      "path": "/stickers/starrail/starrail_60880c2e.png"
+    },
+    "starrail_60f8c722": {
+      "name": "starrail_60f8c722",
+      "path": "/stickers/starrail/starrail_60f8c722.png"
+    },
+    "starrail_614a4f3d": {
+      "name": "starrail_614a4f3d",
+      "path": "/stickers/starrail/starrail_614a4f3d.png"
+    },
+    "starrail_61fc2868": {
+      "name": "starrail_61fc2868",
+      "path": "/stickers/starrail/starrail_61fc2868.png"
+    },
+    "starrail_62dd1967": {
+      "name": "starrail_62dd1967",
+      "path": "/stickers/starrail/starrail_62dd1967.png"
+    },
+    "starrail_63a5ea5e": {
+      "name": "starrail_63a5ea5e",
+      "path": "/stickers/starrail/starrail_63a5ea5e.png"
+    },
+    "starrail_64f39962": {
+      "name": "starrail_64f39962",
+      "path": "/stickers/starrail/starrail_64f39962.png"
+    },
+    "starrail_64feb29c": {
+      "name": "starrail_64feb29c",
+      "path": "/stickers/starrail/starrail_64feb29c.png"
+    },
+    "starrail_656c8776": {
+      "name": "starrail_656c8776",
+      "path": "/stickers/starrail/starrail_656c8776.png"
+    },
+    "starrail_671c3933": {
+      "name": "starrail_671c3933",
+      "path": "/stickers/starrail/starrail_671c3933.png"
+    },
+    "starrail_6741eac5": {
+      "name": "starrail_6741eac5",
+      "path": "/stickers/starrail/starrail_6741eac5.png"
+    },
+    "starrail_67bfc052": {
+      "name": "starrail_67bfc052",
+      "path": "/stickers/starrail/starrail_67bfc052.png"
+    },
+    "starrail_67dc5844": {
+      "name": "starrail_67dc5844",
+      "path": "/stickers/starrail/starrail_67dc5844.png"
+    },
+    "starrail_67fd2817": {
+      "name": "starrail_67fd2817",
+      "path": "/stickers/starrail/starrail_67fd2817.png"
+    },
+    "starrail_686e8316": {
+      "name": "starrail_686e8316",
+      "path": "/stickers/starrail/starrail_686e8316.png"
+    },
+    "starrail_6875c35e": {
+      "name": "starrail_6875c35e",
+      "path": "/stickers/starrail/starrail_6875c35e.png"
+    },
+    "starrail_68ee41e6": {
+      "name": "starrail_68ee41e6",
+      "path": "/stickers/starrail/starrail_68ee41e6.png"
+    },
+    "starrail_6a046c24": {
+      "name": "starrail_6a046c24",
+      "path": "/stickers/starrail/starrail_6a046c24.png"
+    },
+    "starrail_6ac81523": {
+      "name": "starrail_6ac81523",
+      "path": "/stickers/starrail/starrail_6ac81523.png"
+    },
+    "starrail_6ae73d04": {
+      "name": "starrail_6ae73d04",
+      "path": "/stickers/starrail/starrail_6ae73d04.png"
+    },
+    "starrail_6b7c96e2": {
+      "name": "starrail_6b7c96e2",
+      "path": "/stickers/starrail/starrail_6b7c96e2.png"
+    },
+    "starrail_6b9be5af": {
+      "name": "starrail_6b9be5af",
+      "path": "/stickers/starrail/starrail_6b9be5af.png"
+    },
+    "starrail_6be3e6f7": {
+      "name": "starrail_6be3e6f7",
+      "path": "/stickers/starrail/starrail_6be3e6f7.png"
+    },
+    "starrail_6cf9413c": {
+      "name": "starrail_6cf9413c",
+      "path": "/stickers/starrail/starrail_6cf9413c.png"
+    },
+    "starrail_6d1cf5cd": {
+      "name": "starrail_6d1cf5cd",
+      "path": "/stickers/starrail/starrail_6d1cf5cd.png"
+    },
+    "starrail_6d9e8f2d": {
+      "name": "starrail_6d9e8f2d",
+      "path": "/stickers/starrail/starrail_6d9e8f2d.png"
+    },
+    "starrail_6e2c2e10": {
+      "name": "starrail_6e2c2e10",
+      "path": "/stickers/starrail/starrail_6e2c2e10.png"
+    },
+    "starrail_6fb657a8": {
+      "name": "starrail_6fb657a8",
+      "path": "/stickers/starrail/starrail_6fb657a8.png"
+    },
+    "starrail_70008d1f": {
+      "name": "starrail_70008d1f",
+      "path": "/stickers/starrail/starrail_70008d1f.png"
+    },
+    "starrail_700d14a9": {
+      "name": "starrail_700d14a9",
+      "path": "/stickers/starrail/starrail_700d14a9.png"
+    },
+    "starrail_71c51358": {
+      "name": "starrail_71c51358",
+      "path": "/stickers/starrail/starrail_71c51358.png"
+    },
+    "starrail_71cdb66e": {
+      "name": "starrail_71cdb66e",
+      "path": "/stickers/starrail/starrail_71cdb66e.png"
+    },
+    "starrail_71d085de": {
+      "name": "starrail_71d085de",
+      "path": "/stickers/starrail/starrail_71d085de.png"
+    },
+    "starrail_72ed3544": {
+      "name": "starrail_72ed3544",
+      "path": "/stickers/starrail/starrail_72ed3544.png"
+    },
+    "starrail_74fe939c": {
+      "name": "starrail_74fe939c",
+      "path": "/stickers/starrail/starrail_74fe939c.png"
+    },
+    "starrail_75443c0f": {
+      "name": "starrail_75443c0f",
+      "path": "/stickers/starrail/starrail_75443c0f.png"
+    },
+    "starrail_755b1508": {
+      "name": "starrail_755b1508",
+      "path": "/stickers/starrail/starrail_755b1508.png"
+    },
+    "starrail_762d7234": {
+      "name": "starrail_762d7234",
+      "path": "/stickers/starrail/starrail_762d7234.png"
+    },
+    "starrail_764e185a": {
+      "name": "starrail_764e185a",
+      "path": "/stickers/starrail/starrail_764e185a.png"
+    },
+    "starrail_76576e35": {
+      "name": "starrail_76576e35",
+      "path": "/stickers/starrail/starrail_76576e35.png"
+    },
+    "starrail_7753bb0b": {
+      "name": "starrail_7753bb0b",
+      "path": "/stickers/starrail/starrail_7753bb0b.png"
+    },
+    "starrail_776c682d": {
+      "name": "starrail_776c682d",
+      "path": "/stickers/starrail/starrail_776c682d.png"
+    },
+    "starrail_77968edc": {
+      "name": "starrail_77968edc",
+      "path": "/stickers/starrail/starrail_77968edc.png"
+    },
+    "starrail_77db62b8": {
+      "name": "starrail_77db62b8",
+      "path": "/stickers/starrail/starrail_77db62b8.png"
+    },
+    "starrail_783b56b9": {
+      "name": "starrail_783b56b9",
+      "path": "/stickers/starrail/starrail_783b56b9.png"
+    },
+    "starrail_786be5ce": {
+      "name": "starrail_786be5ce",
+      "path": "/stickers/starrail/starrail_786be5ce.png"
+    },
+    "starrail_78ad3c46": {
+      "name": "starrail_78ad3c46",
+      "path": "/stickers/starrail/starrail_78ad3c46.png"
+    },
+    "starrail_79a0019d": {
+      "name": "starrail_79a0019d",
+      "path": "/stickers/starrail/starrail_79a0019d.png"
+    },
+    "starrail_7a00c7bd": {
+      "name": "starrail_7a00c7bd",
+      "path": "/stickers/starrail/starrail_7a00c7bd.png"
+    },
+    "starrail_7b1ac7b3": {
+      "name": "starrail_7b1ac7b3",
+      "path": "/stickers/starrail/starrail_7b1ac7b3.png"
+    },
+    "starrail_7c5290a9": {
+      "name": "starrail_7c5290a9",
+      "path": "/stickers/starrail/starrail_7c5290a9.png"
+    },
+    "starrail_7cc19415": {
+      "name": "starrail_7cc19415",
+      "path": "/stickers/starrail/starrail_7cc19415.png"
+    },
+    "starrail_7cc9b8b7": {
+      "name": "starrail_7cc9b8b7",
+      "path": "/stickers/starrail/starrail_7cc9b8b7.png"
+    },
+    "starrail_7e6d9f58": {
+      "name": "starrail_7e6d9f58",
+      "path": "/stickers/starrail/starrail_7e6d9f58.png"
+    },
+    "starrail_7f57f2f5": {
+      "name": "starrail_7f57f2f5",
+      "path": "/stickers/starrail/starrail_7f57f2f5.png"
+    },
+    "starrail_7feccf3d": {
+      "name": "starrail_7feccf3d",
+      "path": "/stickers/starrail/starrail_7feccf3d.png"
+    },
+    "starrail_8097c133": {
+      "name": "starrail_8097c133",
+      "path": "/stickers/starrail/starrail_8097c133.png"
+    },
+    "starrail_80abfce1": {
+      "name": "starrail_80abfce1",
+      "path": "/stickers/starrail/starrail_80abfce1.png"
+    },
+    "starrail_81ae1fc1": {
+      "name": "starrail_81ae1fc1",
+      "path": "/stickers/starrail/starrail_81ae1fc1.png"
+    },
+    "starrail_81dcea4c": {
+      "name": "starrail_81dcea4c",
+      "path": "/stickers/starrail/starrail_81dcea4c.png"
+    },
+    "starrail_82b9ffb9": {
+      "name": "starrail_82b9ffb9",
+      "path": "/stickers/starrail/starrail_82b9ffb9.png"
+    },
+    "starrail_83d8ba72": {
+      "name": "starrail_83d8ba72",
+      "path": "/stickers/starrail/starrail_83d8ba72.png"
+    },
+    "starrail_83e4b510": {
+      "name": "starrail_83e4b510",
+      "path": "/stickers/starrail/starrail_83e4b510.png"
+    },
+    "starrail_8427c475": {
+      "name": "starrail_8427c475",
+      "path": "/stickers/starrail/starrail_8427c475.png"
+    },
+    "starrail_850140f6": {
+      "name": "starrail_850140f6",
+      "path": "/stickers/starrail/starrail_850140f6.png"
+    },
+    "starrail_853609d2": {
+      "name": "starrail_853609d2",
+      "path": "/stickers/starrail/starrail_853609d2.png"
+    },
+    "starrail_85911041": {
+      "name": "starrail_85911041",
+      "path": "/stickers/starrail/starrail_85911041.png"
+    },
+    "starrail_85b871af": {
+      "name": "starrail_85b871af",
+      "path": "/stickers/starrail/starrail_85b871af.png"
+    },
+    "starrail_8742e502": {
+      "name": "starrail_8742e502",
+      "path": "/stickers/starrail/starrail_8742e502.png"
+    },
+    "starrail_8775bb19": {
+      "name": "starrail_8775bb19",
+      "path": "/stickers/starrail/starrail_8775bb19.png"
+    },
+    "starrail_8795052a": {
+      "name": "starrail_8795052a",
+      "path": "/stickers/starrail/starrail_8795052a.png"
+    },
+    "starrail_8850c6b2": {
+      "name": "starrail_8850c6b2",
+      "path": "/stickers/starrail/starrail_8850c6b2.png"
+    },
+    "starrail_89e3c174": {
+      "name": "starrail_89e3c174",
+      "path": "/stickers/starrail/starrail_89e3c174.png"
+    },
+    "starrail_8a0356d4": {
+      "name": "starrail_8a0356d4",
+      "path": "/stickers/starrail/starrail_8a0356d4.png"
+    },
+    "starrail_8a5950fe": {
+      "name": "starrail_8a5950fe",
+      "path": "/stickers/starrail/starrail_8a5950fe.png"
+    },
+    "starrail_8a59b43f": {
+      "name": "starrail_8a59b43f",
+      "path": "/stickers/starrail/starrail_8a59b43f.png"
+    },
+    "starrail_8ac9b051": {
+      "name": "starrail_8ac9b051",
+      "path": "/stickers/starrail/starrail_8ac9b051.png"
+    },
+    "starrail_8c1ae3e3": {
+      "name": "starrail_8c1ae3e3",
+      "path": "/stickers/starrail/starrail_8c1ae3e3.png"
+    },
+    "starrail_8c5a5976": {
+      "name": "starrail_8c5a5976",
+      "path": "/stickers/starrail/starrail_8c5a5976.png"
+    },
+    "starrail_8d25f6a8": {
+      "name": "starrail_8d25f6a8",
+      "path": "/stickers/starrail/starrail_8d25f6a8.png"
+    },
+    "starrail_8d744511": {
+      "name": "starrail_8d744511",
+      "path": "/stickers/starrail/starrail_8d744511.png"
+    },
+    "starrail_8d8f3e0a": {
+      "name": "starrail_8d8f3e0a",
+      "path": "/stickers/starrail/starrail_8d8f3e0a.png"
+    },
+    "starrail_8ea5b841": {
+      "name": "starrail_8ea5b841",
+      "path": "/stickers/starrail/starrail_8ea5b841.png"
+    },
+    "starrail_8eea4206": {
+      "name": "starrail_8eea4206",
+      "path": "/stickers/starrail/starrail_8eea4206.png"
+    },
+    "starrail_8fe6ce7d": {
+      "name": "starrail_8fe6ce7d",
+      "path": "/stickers/starrail/starrail_8fe6ce7d.png"
+    },
+    "starrail_90c96b2e": {
+      "name": "starrail_90c96b2e",
+      "path": "/stickers/starrail/starrail_90c96b2e.png"
+    },
+    "starrail_91d58c96": {
+      "name": "starrail_91d58c96",
+      "path": "/stickers/starrail/starrail_91d58c96.png"
+    },
+    "starrail_921d669a": {
+      "name": "starrail_921d669a",
+      "path": "/stickers/starrail/starrail_921d669a.png"
+    },
+    "starrail_92b32d87": {
+      "name": "starrail_92b32d87",
+      "path": "/stickers/starrail/starrail_92b32d87.png"
+    },
+    "starrail_92f5854d": {
+      "name": "starrail_92f5854d",
+      "path": "/stickers/starrail/starrail_92f5854d.png"
+    },
+    "starrail_9316c231": {
+      "name": "starrail_9316c231",
+      "path": "/stickers/starrail/starrail_9316c231.png"
+    },
+    "starrail_94e9643d": {
+      "name": "starrail_94e9643d",
+      "path": "/stickers/starrail/starrail_94e9643d.png"
+    },
+    "starrail_95e340b9": {
+      "name": "starrail_95e340b9",
+      "path": "/stickers/starrail/starrail_95e340b9.png"
+    },
+    "starrail_9605f1f1": {
+      "name": "starrail_9605f1f1",
+      "path": "/stickers/starrail/starrail_9605f1f1.png"
+    },
+    "starrail_9632338e": {
+      "name": "starrail_9632338e",
+      "path": "/stickers/starrail/starrail_9632338e.png"
+    },
+    "starrail_97dc1276": {
+      "name": "starrail_97dc1276",
+      "path": "/stickers/starrail/starrail_97dc1276.png"
+    },
+    "starrail_97f18906": {
+      "name": "starrail_97f18906",
+      "path": "/stickers/starrail/starrail_97f18906.png"
+    },
+    "starrail_9892fbaa": {
+      "name": "starrail_9892fbaa",
+      "path": "/stickers/starrail/starrail_9892fbaa.png"
+    },
+    "starrail_9a8c266b": {
+      "name": "starrail_9a8c266b",
+      "path": "/stickers/starrail/starrail_9a8c266b.png"
+    },
+    "starrail_9ace449d": {
+      "name": "starrail_9ace449d",
+      "path": "/stickers/starrail/starrail_9ace449d.png"
+    },
+    "starrail_9afa11cb": {
+      "name": "starrail_9afa11cb",
+      "path": "/stickers/starrail/starrail_9afa11cb.png"
+    },
+    "starrail_9bebc318": {
+      "name": "starrail_9bebc318",
+      "path": "/stickers/starrail/starrail_9bebc318.png"
+    },
+    "starrail_9bef839d": {
+      "name": "starrail_9bef839d",
+      "path": "/stickers/starrail/starrail_9bef839d.png"
+    },
+    "starrail_9c479e1a": {
+      "name": "starrail_9c479e1a",
+      "path": "/stickers/starrail/starrail_9c479e1a.png"
+    },
+    "starrail_9ca9cddd": {
+      "name": "starrail_9ca9cddd",
+      "path": "/stickers/starrail/starrail_9ca9cddd.png"
+    },
+    "starrail_9d245560": {
+      "name": "starrail_9d245560",
+      "path": "/stickers/starrail/starrail_9d245560.png"
+    },
+    "starrail_9d5cc6ba": {
+      "name": "starrail_9d5cc6ba",
+      "path": "/stickers/starrail/starrail_9d5cc6ba.png"
+    },
+    "starrail_9e39f43d": {
+      "name": "starrail_9e39f43d",
+      "path": "/stickers/starrail/starrail_9e39f43d.png"
+    },
+    "starrail_9ebe7197": {
+      "name": "starrail_9ebe7197",
+      "path": "/stickers/starrail/starrail_9ebe7197.png"
+    },
+    "starrail_9f811241": {
+      "name": "starrail_9f811241",
+      "path": "/stickers/starrail/starrail_9f811241.png"
+    },
+    "starrail_a0a73bbd": {
+      "name": "starrail_a0a73bbd",
+      "path": "/stickers/starrail/starrail_a0a73bbd.png"
+    },
+    "starrail_a0dad7a5": {
+      "name": "starrail_a0dad7a5",
+      "path": "/stickers/starrail/starrail_a0dad7a5.png"
+    },
+    "starrail_a28cc322": {
+      "name": "starrail_a28cc322",
+      "path": "/stickers/starrail/starrail_a28cc322.png"
+    },
+    "starrail_a2da6f74": {
+      "name": "starrail_a2da6f74",
+      "path": "/stickers/starrail/starrail_a2da6f74.png"
+    },
+    "starrail_a2e8b6a1": {
+      "name": "starrail_a2e8b6a1",
+      "path": "/stickers/starrail/starrail_a2e8b6a1.png"
+    },
+    "starrail_a2fa805a": {
+      "name": "starrail_a2fa805a",
+      "path": "/stickers/starrail/starrail_a2fa805a.png"
+    },
+    "starrail_a31963e4": {
+      "name": "starrail_a31963e4",
+      "path": "/stickers/starrail/starrail_a31963e4.png"
+    },
+    "starrail_a320a6a4": {
+      "name": "starrail_a320a6a4",
+      "path": "/stickers/starrail/starrail_a320a6a4.png"
+    },
+    "starrail_a35f0f26": {
+      "name": "starrail_a35f0f26",
+      "path": "/stickers/starrail/starrail_a35f0f26.png"
+    },
+    "starrail_a39681fc": {
+      "name": "starrail_a39681fc",
+      "path": "/stickers/starrail/starrail_a39681fc.png"
+    },
+    "starrail_a3af52bb": {
+      "name": "starrail_a3af52bb",
+      "path": "/stickers/starrail/starrail_a3af52bb.png"
+    },
+    "starrail_a42fd05d": {
+      "name": "starrail_a42fd05d",
+      "path": "/stickers/starrail/starrail_a42fd05d.png"
+    },
+    "starrail_a45ca039": {
+      "name": "starrail_a45ca039",
+      "path": "/stickers/starrail/starrail_a45ca039.png"
+    },
+    "starrail_a4789820": {
+      "name": "starrail_a4789820",
+      "path": "/stickers/starrail/starrail_a4789820.png"
+    },
+    "starrail_a5b84657": {
+      "name": "starrail_a5b84657",
+      "path": "/stickers/starrail/starrail_a5b84657.png"
+    },
+    "starrail_a612eea1": {
+      "name": "starrail_a612eea1",
+      "path": "/stickers/starrail/starrail_a612eea1.png"
+    },
+    "starrail_a66702b9": {
+      "name": "starrail_a66702b9",
+      "path": "/stickers/starrail/starrail_a66702b9.png"
+    },
+    "starrail_a6cc1c0d": {
+      "name": "starrail_a6cc1c0d",
+      "path": "/stickers/starrail/starrail_a6cc1c0d.png"
+    },
+    "starrail_a6e6afe1": {
+      "name": "starrail_a6e6afe1",
+      "path": "/stickers/starrail/starrail_a6e6afe1.png"
+    },
+    "starrail_a8892006": {
+      "name": "starrail_a8892006",
+      "path": "/stickers/starrail/starrail_a8892006.png"
+    },
+    "starrail_a9bf80cc": {
+      "name": "starrail_a9bf80cc",
+      "path": "/stickers/starrail/starrail_a9bf80cc.png"
+    },
+    "starrail_aa27e03e": {
+      "name": "starrail_aa27e03e",
+      "path": "/stickers/starrail/starrail_aa27e03e.png"
+    },
+    "starrail_aa4c1408": {
+      "name": "starrail_aa4c1408",
+      "path": "/stickers/starrail/starrail_aa4c1408.png"
+    },
+    "starrail_ab40a5f4": {
+      "name": "starrail_ab40a5f4",
+      "path": "/stickers/starrail/starrail_ab40a5f4.png"
+    },
+    "starrail_abb219f1": {
+      "name": "starrail_abb219f1",
+      "path": "/stickers/starrail/starrail_abb219f1.png"
+    },
+    "starrail_ac7e7ae1": {
+      "name": "starrail_ac7e7ae1",
+      "path": "/stickers/starrail/starrail_ac7e7ae1.png"
+    },
+    "starrail_ad5e2809": {
+      "name": "starrail_ad5e2809",
+      "path": "/stickers/starrail/starrail_ad5e2809.png"
+    },
+    "starrail_ad77bab3": {
+      "name": "starrail_ad77bab3",
+      "path": "/stickers/starrail/starrail_ad77bab3.png"
+    },
+    "starrail_ad97e4b6": {
+      "name": "starrail_ad97e4b6",
+      "path": "/stickers/starrail/starrail_ad97e4b6.png"
+    },
+    "starrail_ae3bbb4d": {
+      "name": "starrail_ae3bbb4d",
+      "path": "/stickers/starrail/starrail_ae3bbb4d.png"
+    },
+    "starrail_aec4279b": {
+      "name": "starrail_aec4279b",
+      "path": "/stickers/starrail/starrail_aec4279b.png"
+    },
+    "starrail_af0883b3": {
+      "name": "starrail_af0883b3",
+      "path": "/stickers/starrail/starrail_af0883b3.png"
+    },
+    "starrail_b00ef251": {
+      "name": "starrail_b00ef251",
+      "path": "/stickers/starrail/starrail_b00ef251.png"
+    },
+    "starrail_b0be776e": {
+      "name": "starrail_b0be776e",
+      "path": "/stickers/starrail/starrail_b0be776e.png"
+    },
+    "starrail_b17696a1": {
+      "name": "starrail_b17696a1",
+      "path": "/stickers/starrail/starrail_b17696a1.png"
+    },
+    "starrail_b2874e7c": {
+      "name": "starrail_b2874e7c",
+      "path": "/stickers/starrail/starrail_b2874e7c.png"
+    },
+    "starrail_b3107904": {
+      "name": "starrail_b3107904",
+      "path": "/stickers/starrail/starrail_b3107904.png"
+    },
+    "starrail_b3ccaf97": {
+      "name": "starrail_b3ccaf97",
+      "path": "/stickers/starrail/starrail_b3ccaf97.png"
+    },
+    "starrail_b4c928e0": {
+      "name": "starrail_b4c928e0",
+      "path": "/stickers/starrail/starrail_b4c928e0.png"
+    },
+    "starrail_b5cc829c": {
+      "name": "starrail_b5cc829c",
+      "path": "/stickers/starrail/starrail_b5cc829c.png"
+    },
+    "starrail_b6936491": {
+      "name": "starrail_b6936491",
+      "path": "/stickers/starrail/starrail_b6936491.png"
+    },
+    "starrail_b6dbe206": {
+      "name": "starrail_b6dbe206",
+      "path": "/stickers/starrail/starrail_b6dbe206.png"
+    },
+    "starrail_b79c09dc": {
+      "name": "starrail_b79c09dc",
+      "path": "/stickers/starrail/starrail_b79c09dc.png"
+    },
+    "starrail_b8235c62": {
+      "name": "starrail_b8235c62",
+      "path": "/stickers/starrail/starrail_b8235c62.png"
+    },
+    "starrail_b87a0c89": {
+      "name": "starrail_b87a0c89",
+      "path": "/stickers/starrail/starrail_b87a0c89.png"
+    },
+    "starrail_b9a73844": {
+      "name": "starrail_b9a73844",
+      "path": "/stickers/starrail/starrail_b9a73844.png"
+    },
+    "starrail_bb8fc7dd": {
+      "name": "starrail_bb8fc7dd",
+      "path": "/stickers/starrail/starrail_bb8fc7dd.png"
+    },
+    "starrail_bc1efc6f": {
+      "name": "starrail_bc1efc6f",
+      "path": "/stickers/starrail/starrail_bc1efc6f.png"
+    },
+    "starrail_bc2aad94": {
+      "name": "starrail_bc2aad94",
+      "path": "/stickers/starrail/starrail_bc2aad94.png"
+    },
+    "starrail_bcacd809": {
+      "name": "starrail_bcacd809",
+      "path": "/stickers/starrail/starrail_bcacd809.png"
+    },
+    "starrail_bdb51269": {
+      "name": "starrail_bdb51269",
+      "path": "/stickers/starrail/starrail_bdb51269.png"
+    },
+    "starrail_bf0a63e3": {
+      "name": "starrail_bf0a63e3",
+      "path": "/stickers/starrail/starrail_bf0a63e3.png"
+    },
+    "starrail_bf3ad813": {
+      "name": "starrail_bf3ad813",
+      "path": "/stickers/starrail/starrail_bf3ad813.png"
+    },
+    "starrail_bf52a28d": {
+      "name": "starrail_bf52a28d",
+      "path": "/stickers/starrail/starrail_bf52a28d.png"
+    },
+    "starrail_c03c6f64": {
+      "name": "starrail_c03c6f64",
+      "path": "/stickers/starrail/starrail_c03c6f64.png"
+    },
+    "starrail_c066f7dc": {
+      "name": "starrail_c066f7dc",
+      "path": "/stickers/starrail/starrail_c066f7dc.png"
+    },
+    "starrail_c10da657": {
+      "name": "starrail_c10da657",
+      "path": "/stickers/starrail/starrail_c10da657.png"
+    },
+    "starrail_c1ed4248": {
+      "name": "starrail_c1ed4248",
+      "path": "/stickers/starrail/starrail_c1ed4248.png"
+    },
+    "starrail_c28e2400": {
+      "name": "starrail_c28e2400",
+      "path": "/stickers/starrail/starrail_c28e2400.png"
+    },
+    "starrail_c2bed754": {
+      "name": "starrail_c2bed754",
+      "path": "/stickers/starrail/starrail_c2bed754.png"
+    },
+    "starrail_c2e024ef": {
+      "name": "starrail_c2e024ef",
+      "path": "/stickers/starrail/starrail_c2e024ef.png"
+    },
+    "starrail_c30c060c": {
+      "name": "starrail_c30c060c",
+      "path": "/stickers/starrail/starrail_c30c060c.png"
+    },
+    "starrail_c48db80a": {
+      "name": "starrail_c48db80a",
+      "path": "/stickers/starrail/starrail_c48db80a.png"
+    },
+    "starrail_c689a7a2": {
+      "name": "starrail_c689a7a2",
+      "path": "/stickers/starrail/starrail_c689a7a2.png"
+    },
+    "starrail_c8d88f89": {
+      "name": "starrail_c8d88f89",
+      "path": "/stickers/starrail/starrail_c8d88f89.png"
+    },
+    "starrail_c9e30ef6": {
+      "name": "starrail_c9e30ef6",
+      "path": "/stickers/starrail/starrail_c9e30ef6.png"
+    },
+    "starrail_c9f60643": {
+      "name": "starrail_c9f60643",
+      "path": "/stickers/starrail/starrail_c9f60643.png"
+    },
+    "starrail_ca347438": {
+      "name": "starrail_ca347438",
+      "path": "/stickers/starrail/starrail_ca347438.png"
+    },
+    "starrail_cba7dc2f": {
+      "name": "starrail_cba7dc2f",
+      "path": "/stickers/starrail/starrail_cba7dc2f.png"
+    },
+    "starrail_cbcc0aac": {
+      "name": "starrail_cbcc0aac",
+      "path": "/stickers/starrail/starrail_cbcc0aac.png"
+    },
+    "starrail_cd773fa4": {
+      "name": "starrail_cd773fa4",
+      "path": "/stickers/starrail/starrail_cd773fa4.png"
+    },
+    "starrail_ce20cbee": {
+      "name": "starrail_ce20cbee",
+      "path": "/stickers/starrail/starrail_ce20cbee.png"
+    },
+    "starrail_cec2ddea": {
+      "name": "starrail_cec2ddea",
+      "path": "/stickers/starrail/starrail_cec2ddea.png"
+    },
+    "starrail_cee0e913": {
+      "name": "starrail_cee0e913",
+      "path": "/stickers/starrail/starrail_cee0e913.png"
+    },
+    "starrail_cf874846": {
+      "name": "starrail_cf874846",
+      "path": "/stickers/starrail/starrail_cf874846.png"
+    },
+    "starrail_cfd8c4c4": {
+      "name": "starrail_cfd8c4c4",
+      "path": "/stickers/starrail/starrail_cfd8c4c4.png"
+    },
+    "starrail_d0570b7e": {
+      "name": "starrail_d0570b7e",
+      "path": "/stickers/starrail/starrail_d0570b7e.png"
+    },
+    "starrail_d0a0386a": {
+      "name": "starrail_d0a0386a",
+      "path": "/stickers/starrail/starrail_d0a0386a.png"
+    },
+    "starrail_d0f2a278": {
+      "name": "starrail_d0f2a278",
+      "path": "/stickers/starrail/starrail_d0f2a278.png"
+    },
+    "starrail_d170d276": {
+      "name": "starrail_d170d276",
+      "path": "/stickers/starrail/starrail_d170d276.png"
+    },
+    "starrail_d1859ef2": {
+      "name": "starrail_d1859ef2",
+      "path": "/stickers/starrail/starrail_d1859ef2.png"
+    },
+    "starrail_d1a6c1a8": {
+      "name": "starrail_d1a6c1a8",
+      "path": "/stickers/starrail/starrail_d1a6c1a8.png"
+    },
+    "starrail_d2811123": {
+      "name": "starrail_d2811123",
+      "path": "/stickers/starrail/starrail_d2811123.png"
+    },
+    "starrail_d2b3b8e2": {
+      "name": "starrail_d2b3b8e2",
+      "path": "/stickers/starrail/starrail_d2b3b8e2.png"
+    },
+    "starrail_d2fefc25": {
+      "name": "starrail_d2fefc25",
+      "path": "/stickers/starrail/starrail_d2fefc25.png"
+    },
+    "starrail_d307c02e": {
+      "name": "starrail_d307c02e",
+      "path": "/stickers/starrail/starrail_d307c02e.png"
+    },
+    "starrail_d364054d": {
+      "name": "starrail_d364054d",
+      "path": "/stickers/starrail/starrail_d364054d.png"
+    },
+    "starrail_d3af34ab": {
+      "name": "starrail_d3af34ab",
+      "path": "/stickers/starrail/starrail_d3af34ab.png"
+    },
+    "starrail_d3afd413": {
+      "name": "starrail_d3afd413",
+      "path": "/stickers/starrail/starrail_d3afd413.png"
+    },
+    "starrail_d40cee04": {
+      "name": "starrail_d40cee04",
+      "path": "/stickers/starrail/starrail_d40cee04.png"
+    },
+    "starrail_d41df218": {
+      "name": "starrail_d41df218",
+      "path": "/stickers/starrail/starrail_d41df218.png"
+    },
+    "starrail_d58a55f5": {
+      "name": "starrail_d58a55f5",
+      "path": "/stickers/starrail/starrail_d58a55f5.png"
+    },
+    "starrail_d5c8408e": {
+      "name": "starrail_d5c8408e",
+      "path": "/stickers/starrail/starrail_d5c8408e.png"
+    },
+    "starrail_d6f7a5af": {
+      "name": "starrail_d6f7a5af",
+      "path": "/stickers/starrail/starrail_d6f7a5af.png"
+    },
+    "starrail_d7ec99b4": {
+      "name": "starrail_d7ec99b4",
+      "path": "/stickers/starrail/starrail_d7ec99b4.png"
+    },
+    "starrail_d819aab8": {
+      "name": "starrail_d819aab8",
+      "path": "/stickers/starrail/starrail_d819aab8.png"
+    },
+    "starrail_d8d520d2": {
+      "name": "starrail_d8d520d2",
+      "path": "/stickers/starrail/starrail_d8d520d2.png"
+    },
+    "starrail_d8e2fecb": {
+      "name": "starrail_d8e2fecb",
+      "path": "/stickers/starrail/starrail_d8e2fecb.png"
+    },
+    "starrail_d9a6527d": {
+      "name": "starrail_d9a6527d",
+      "path": "/stickers/starrail/starrail_d9a6527d.png"
+    },
+    "starrail_da2615d0": {
+      "name": "starrail_da2615d0",
+      "path": "/stickers/starrail/starrail_da2615d0.png"
+    },
+    "starrail_db2e8d9e": {
+      "name": "starrail_db2e8d9e",
+      "path": "/stickers/starrail/starrail_db2e8d9e.png"
+    },
+    "starrail_dc15a489": {
+      "name": "starrail_dc15a489",
+      "path": "/stickers/starrail/starrail_dc15a489.png"
+    },
+    "starrail_dcc64fe9": {
+      "name": "starrail_dcc64fe9",
+      "path": "/stickers/starrail/starrail_dcc64fe9.png"
+    },
+    "starrail_dd507e82": {
+      "name": "starrail_dd507e82",
+      "path": "/stickers/starrail/starrail_dd507e82.png"
+    },
+    "starrail_dd6e42b5": {
+      "name": "starrail_dd6e42b5",
+      "path": "/stickers/starrail/starrail_dd6e42b5.png"
+    },
+    "starrail_ddc5cce9": {
+      "name": "starrail_ddc5cce9",
+      "path": "/stickers/starrail/starrail_ddc5cce9.png"
+    },
+    "starrail_de30c026": {
+      "name": "starrail_de30c026",
+      "path": "/stickers/starrail/starrail_de30c026.png"
+    },
+    "starrail_df0efa91": {
+      "name": "starrail_df0efa91",
+      "path": "/stickers/starrail/starrail_df0efa91.png"
+    },
+    "starrail_df847943": {
+      "name": "starrail_df847943",
+      "path": "/stickers/starrail/starrail_df847943.png"
+    },
+    "starrail_e0089281": {
+      "name": "starrail_e0089281",
+      "path": "/stickers/starrail/starrail_e0089281.png"
+    },
+    "starrail_e0207a9e": {
+      "name": "starrail_e0207a9e",
+      "path": "/stickers/starrail/starrail_e0207a9e.png"
+    },
+    "starrail_e0d8b07d": {
+      "name": "starrail_e0d8b07d",
+      "path": "/stickers/starrail/starrail_e0d8b07d.png"
+    },
+    "starrail_e2297809": {
+      "name": "starrail_e2297809",
+      "path": "/stickers/starrail/starrail_e2297809.png"
+    },
+    "starrail_e24ac835": {
+      "name": "starrail_e24ac835",
+      "path": "/stickers/starrail/starrail_e24ac835.png"
+    },
+    "starrail_e3bd8b51": {
+      "name": "starrail_e3bd8b51",
+      "path": "/stickers/starrail/starrail_e3bd8b51.png"
+    },
+    "starrail_e42bb288": {
+      "name": "starrail_e42bb288",
+      "path": "/stickers/starrail/starrail_e42bb288.png"
+    },
+    "starrail_e5ab20d2": {
+      "name": "starrail_e5ab20d2",
+      "path": "/stickers/starrail/starrail_e5ab20d2.png"
+    },
+    "starrail_e5f071fd": {
+      "name": "starrail_e5f071fd",
+      "path": "/stickers/starrail/starrail_e5f071fd.png"
+    },
+    "starrail_e60371e9": {
+      "name": "starrail_e60371e9",
+      "path": "/stickers/starrail/starrail_e60371e9.png"
+    },
+    "starrail_e629aab5": {
+      "name": "starrail_e629aab5",
+      "path": "/stickers/starrail/starrail_e629aab5.png"
+    },
+    "starrail_e67880ca": {
+      "name": "starrail_e67880ca",
+      "path": "/stickers/starrail/starrail_e67880ca.png"
+    },
+    "starrail_e684b327": {
+      "name": "starrail_e684b327",
+      "path": "/stickers/starrail/starrail_e684b327.png"
+    },
+    "starrail_e7d51d48": {
+      "name": "starrail_e7d51d48",
+      "path": "/stickers/starrail/starrail_e7d51d48.png"
+    },
+    "starrail_e87bf259": {
+      "name": "starrail_e87bf259",
+      "path": "/stickers/starrail/starrail_e87bf259.png"
+    },
+    "starrail_e9c49b1f": {
+      "name": "starrail_e9c49b1f",
+      "path": "/stickers/starrail/starrail_e9c49b1f.png"
+    },
+    "starrail_e9fa4f7d": {
+      "name": "starrail_e9fa4f7d",
+      "path": "/stickers/starrail/starrail_e9fa4f7d.png"
+    },
+    "starrail_ea84a037": {
+      "name": "starrail_ea84a037",
+      "path": "/stickers/starrail/starrail_ea84a037.png"
+    },
+    "starrail_ea9a6de2": {
+      "name": "starrail_ea9a6de2",
+      "path": "/stickers/starrail/starrail_ea9a6de2.png"
+    },
+    "starrail_eaae5922": {
+      "name": "starrail_eaae5922",
+      "path": "/stickers/starrail/starrail_eaae5922.png"
+    },
+    "starrail_eb3fdedf": {
+      "name": "starrail_eb3fdedf",
+      "path": "/stickers/starrail/starrail_eb3fdedf.png"
+    },
+    "starrail_eb833e46": {
+      "name": "starrail_eb833e46",
+      "path": "/stickers/starrail/starrail_eb833e46.png"
+    },
+    "starrail_ec90d126": {
+      "name": "starrail_ec90d126",
+      "path": "/stickers/starrail/starrail_ec90d126.png"
+    },
+    "starrail_ed681f04": {
+      "name": "starrail_ed681f04",
+      "path": "/stickers/starrail/starrail_ed681f04.png"
+    },
+    "starrail_edcd0408": {
+      "name": "starrail_edcd0408",
+      "path": "/stickers/starrail/starrail_edcd0408.png"
+    },
+    "starrail_ee270f59": {
+      "name": "starrail_ee270f59",
+      "path": "/stickers/starrail/starrail_ee270f59.png"
+    },
+    "starrail_ef1a1d4f": {
+      "name": "starrail_ef1a1d4f",
+      "path": "/stickers/starrail/starrail_ef1a1d4f.png"
+    },
+    "starrail_ef22a175": {
+      "name": "starrail_ef22a175",
+      "path": "/stickers/starrail/starrail_ef22a175.png"
+    },
+    "starrail_ef3e86b1": {
+      "name": "starrail_ef3e86b1",
+      "path": "/stickers/starrail/starrail_ef3e86b1.png"
+    },
+    "starrail_f18f17ee": {
+      "name": "starrail_f18f17ee",
+      "path": "/stickers/starrail/starrail_f18f17ee.png"
+    },
+    "starrail_f2638be1": {
+      "name": "starrail_f2638be1",
+      "path": "/stickers/starrail/starrail_f2638be1.png"
+    },
+    "starrail_f263b9fc": {
+      "name": "starrail_f263b9fc",
+      "path": "/stickers/starrail/starrail_f263b9fc.png"
+    },
+    "starrail_f2fc4346": {
+      "name": "starrail_f2fc4346",
+      "path": "/stickers/starrail/starrail_f2fc4346.png"
+    },
+    "starrail_f37c670e": {
+      "name": "starrail_f37c670e",
+      "path": "/stickers/starrail/starrail_f37c670e.png"
+    },
+    "starrail_f38d00d9": {
+      "name": "starrail_f38d00d9",
+      "path": "/stickers/starrail/starrail_f38d00d9.png"
+    },
+    "starrail_f3adfad0": {
+      "name": "starrail_f3adfad0",
+      "path": "/stickers/starrail/starrail_f3adfad0.png"
+    },
+    "starrail_f4878335": {
+      "name": "starrail_f4878335",
+      "path": "/stickers/starrail/starrail_f4878335.png"
+    },
+    "starrail_f4a9f991": {
+      "name": "starrail_f4a9f991",
+      "path": "/stickers/starrail/starrail_f4a9f991.png"
+    },
+    "starrail_f5aa420b": {
+      "name": "starrail_f5aa420b",
+      "path": "/stickers/starrail/starrail_f5aa420b.png"
+    },
+    "starrail_f607b316": {
+      "name": "starrail_f607b316",
+      "path": "/stickers/starrail/starrail_f607b316.png"
+    },
+    "starrail_f6251d72": {
+      "name": "starrail_f6251d72",
+      "path": "/stickers/starrail/starrail_f6251d72.png"
+    },
+    "starrail_f639d54c": {
+      "name": "starrail_f639d54c",
+      "path": "/stickers/starrail/starrail_f639d54c.png"
+    },
+    "starrail_f6620c71": {
+      "name": "starrail_f6620c71",
+      "path": "/stickers/starrail/starrail_f6620c71.png"
+    },
+    "starrail_f6e4ce1f": {
+      "name": "starrail_f6e4ce1f",
+      "path": "/stickers/starrail/starrail_f6e4ce1f.png"
+    },
+    "starrail_f7128f88": {
+      "name": "starrail_f7128f88",
+      "path": "/stickers/starrail/starrail_f7128f88.png"
+    },
+    "starrail_f74dd878": {
+      "name": "starrail_f74dd878",
+      "path": "/stickers/starrail/starrail_f74dd878.png"
+    },
+    "starrail_f8b24dcb": {
+      "name": "starrail_f8b24dcb",
+      "path": "/stickers/starrail/starrail_f8b24dcb.png"
+    },
+    "starrail_fa6a106d": {
+      "name": "starrail_fa6a106d",
+      "path": "/stickers/starrail/starrail_fa6a106d.png"
+    },
+    "starrail_faee801d": {
+      "name": "starrail_faee801d",
+      "path": "/stickers/starrail/starrail_faee801d.png"
+    },
+    "starrail_fb06bddb": {
+      "name": "starrail_fb06bddb",
+      "path": "/stickers/starrail/starrail_fb06bddb.png"
+    },
+    "starrail_fb936e4f": {
+      "name": "starrail_fb936e4f",
+      "path": "/stickers/starrail/starrail_fb936e4f.png"
+    },
+    "starrail_fcb7d7a4": {
+      "name": "starrail_fcb7d7a4",
+      "path": "/stickers/starrail/starrail_fcb7d7a4.png"
+    },
+    "starrail_fcd00c53": {
+      "name": "starrail_fcd00c53",
+      "path": "/stickers/starrail/starrail_fcd00c53.png"
+    },
+    "starrail_fd95ec37": {
+      "name": "starrail_fd95ec37",
+      "path": "/stickers/starrail/starrail_fd95ec37.png"
+    },
+    "starrail_fe194ebb": {
+      "name": "starrail_fe194ebb",
+      "path": "/stickers/starrail/starrail_fe194ebb.png"
+    },
+    "starrail_fe339736": {
+      "name": "starrail_fe339736",
+      "path": "/stickers/starrail/starrail_fe339736.png"
+    },
+    "starrail_ffdaff1e": {
+      "name": "starrail_ffdaff1e",
+      "path": "/stickers/starrail/starrail_ffdaff1e.png"
+    }
+  }
+}

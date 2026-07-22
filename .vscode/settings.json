@@ -1,0 +1,3 @@
+{
+  "rust-analyzer.linkedProjects": ["./lib/infini2/rust/Cargo.toml"]
+}
