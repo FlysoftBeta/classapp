@@ -12,9 +12,16 @@ async function main(): Promise<void> {
     dataRoot,
     buildId: process.env.CLASSAPP_BUILD_ID ?? "dev",
     ports: [port],
+    securePorts: [],
     bindHost: "127.0.0.1",
     nodeEnv: "development",
     initialAdminPin: "123456",
+    https: {
+      domain: null,
+      certificatePath: null,
+      privateKeyPath: null,
+      rootCertificatePath: null,
+    },
     update: {
       enabled: false,
       stagingDir: path.join(root, "staging"),
@@ -29,7 +36,7 @@ async function main(): Promise<void> {
   const backend = createServer(createHttpHandler(config));
   new WebSocketProtocol("dev").attach(backend);
   backend.listen(port, "127.0.0.1", () =>
-    console.log(`> Backend on http://127.0.0.1:${port}`),
+    console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );
 
   const shutdown = async () => {

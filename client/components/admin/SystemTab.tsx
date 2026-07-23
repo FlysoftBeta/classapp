@@ -24,6 +24,7 @@ import {
   adminCreateBackup,
   adminDeleteBackup,
   adminFetchUpdateStatus,
+  adminFetchHttpsStatus,
   adminDeployPackage,
   adminConfirmUpdate,
   adminRollback,
@@ -33,10 +34,12 @@ import type { ActionData } from "@/shared/protocol/actions";
 
 type BackupFile = ActionData<"adminFetchBackupsAction">["backups"][number];
 type UpdateStatus = ActionData<"adminFetchUpdateStatusAction">;
+type HttpsStatus = ActionData<"adminFetchHttpsStatusAction">;
 
 export function SystemTab({ token }: { token: string }) {
   const [idleLock, setIdleLock] = useState(false);
   const [systemLocked, setSystemLocked] = useState(false);
+  const [httpsRedirect, setHttpsRedirect] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
   const [cfgSaving, setCfgSaving] = useState(false);
   const [cfgMsg, setCfgMsg] = useState("");
@@ -52,6 +55,7 @@ export function SystemTab({ token }: { token: string }) {
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateStatusLoading, setUpdateStatusLoading] = useState(false);
+  const [httpsStatus, setHttpsStatus] = useState<HttpsStatus | null>(null);
 
   const fetchConfig = useCallback(async () => {
     setCfgLoading(true);
@@ -59,6 +63,7 @@ export function SystemTab({ token }: { token: string }) {
     if (d) {
       setIdleLock(!!d.idle_lock_enabled);
       setSystemLocked(!!d.system_locked);
+      setHttpsRedirect(!!d.https_redirect_enabled);
     }
     setCfgLoading(false);
   }, []);
@@ -79,16 +84,23 @@ export function SystemTab({ token }: { token: string }) {
     setUpdateStatusLoading(false);
   }, []);
 
+  const fetchHttpsStatus = useCallback(async () => {
+    const d = await adminFetchHttpsStatus();
+    if (d) setHttpsStatus(d);
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial system tab data
     void fetchConfig();
     void fetchBackups();
     void fetchUpdateStatus();
-  }, [fetchConfig, fetchBackups, fetchUpdateStatus]);
+    void fetchHttpsStatus();
+  }, [fetchConfig, fetchBackups, fetchUpdateStatus, fetchHttpsStatus]);
 
   const handleConfigSave = async (updates: {
     idle_lock_enabled?: boolean;
     system_locked?: boolean;
+    https_redirect_enabled?: boolean;
   }) => {
     setCfgSaving(true);
     setCfgMsg("");
@@ -98,6 +110,10 @@ export function SystemTab({ token }: { token: string }) {
         setIdleLock(updates.idle_lock_enabled);
       if (updates.system_locked !== undefined)
         setSystemLocked(updates.system_locked);
+      if (updates.https_redirect_enabled !== undefined) {
+        setHttpsRedirect(updates.https_redirect_enabled);
+        void fetchHttpsStatus();
+      }
       setCfgMsg("已保存");
     } else {
       setCfgMsg("保存失败");
@@ -239,6 +255,142 @@ export function SystemTab({ token }: { token: string }) {
           {cfgMsg}
         </Typography>
       )}
+
+      {/* ── HTTPS Upgrade ── */}
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+          HTTPS 升级
+        </Typography>
+        {!httpsStatus ? (
+          <CircularProgress size={20} />
+        ) : (
+          <>
+            <Alert
+              severity={
+                httpsStatus.certificate.valid
+                  ? httpsStatus.certificate.days_remaining !== null &&
+                    httpsStatus.certificate.days_remaining <= 30
+                    ? "warning"
+                    : "success"
+                  : "error"
+              }
+              sx={{ mb: 1.5 }}
+            >
+              {httpsStatus.certificate.valid
+                ? `证书有效，距离过期还有 ${httpsStatus.certificate.days_remaining} 天`
+                : httpsStatus.certificate.error || "证书无效"}
+            </Alert>
+            <Table size="small" sx={{ mb: 1.5 }}>
+              <TableBody>
+                <TableRow>
+                  <TableCell>预期域名</TableCell>
+                  <TableCell sx={{ fontFamily: "monospace" }}>
+                    {httpsStatus.domain || "未配置"}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>HTTPS 监听端口</TableCell>
+                  <TableCell>
+                    {httpsStatus.secure_ports.join(", ") || "未配置"}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>证书有效期</TableCell>
+                  <TableCell>
+                    {httpsStatus.certificate.not_before &&
+                    httpsStatus.certificate.not_after
+                      ? `${new Date(
+                          httpsStatus.certificate.not_before,
+                        ).toLocaleDateString()} — ${new Date(
+                          httpsStatus.certificate.not_after,
+                        ).toLocaleDateString()}`
+                      : "—"}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>根 CA</TableCell>
+                  <TableCell>
+                    {httpsStatus.certificate.root_subject || "未提供根证书"}
+                    {httpsStatus.certificate.root_compatible === true
+                      ? "（兼容检查通过）"
+                      : httpsStatus.certificate.root_compatible === false
+                        ? "（生效日期晚于 2020 年）"
+                        : ""}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              路由器 / 内网 DNS 主机记录
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              请在实际负责内网解析的路由器或 DNS 服务器中配置。DuckDNS
+              公网记录不会反映这里的内网目标。
+            </Typography>
+            {httpsStatus.dns_records.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                未检测到可用的局域网地址
+              </Typography>
+            ) : (
+              <Table size="small" sx={{ mt: 0.5, mb: 1 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>类型</TableCell>
+                    <TableCell>主机名</TableCell>
+                    <TableCell>目标地址</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {httpsStatus.dns_records.map((record) => (
+                    <TableRow key={`${record.type}-${record.value}`}>
+                      <TableCell>{record.type}</TableCell>
+                      <TableCell sx={{ fontFamily: "monospace" }}>
+                        {record.name}
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: "monospace" }}>
+                        {record.value}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={httpsRedirect}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    if (
+                      enabled &&
+                      !confirm(
+                        "301 会被浏览器长期缓存，即使以后关闭此开关，已访问过的客户端也可能继续跳转。确认开启？",
+                      )
+                    )
+                      return;
+                    void handleConfigSave({
+                      https_redirect_enabled: enabled,
+                    });
+                  }}
+                  disabled={cfgSaving || !httpsStatus.configured}
+                />
+              }
+              label="将 HTTP shell 入口永久重定向到 HTTPS"
+            />
+            {!httpsStatus.configured && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block" }}
+              >
+                部署包尚未包含完整的域名、证书、私钥与 HTTPS 监听端口。
+              </Typography>
+            )}
+          </>
+        )}
+      </Box>
 
       {/* ── Database Backups ── */}
       <Box sx={{ mt: 3 }}>

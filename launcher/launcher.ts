@@ -39,20 +39,21 @@ let pendingLifecycle: PendingLifecycle | null = null;
 const FAST_CRASH_MS = 15000;
 const MAX_FAST_CRASHES = 3;
 const DEFAULT_PORTS = [80, 81, 82, 83, 84, 85, 86, 88];
+const DEFAULT_SECURE_PORTS = [443];
 // 3-minute hard ceiling — if a freshly applied update has not produced a
 // "confirm" or "rollback" signal by then, the launcher rolls back unilaterally.
 const UPDATE_TIMEOUT_MS = 3 * 60 * 1000;
 
-const PORTS = parsePorts();
+const PORTS = parsePorts("CLASSAPP_PORTS", DEFAULT_PORTS);
 
-function parsePorts() {
-  const raw = process.env.CLASSAPP_PORTS;
-  if (!raw) return DEFAULT_PORTS;
+function parsePorts(name: string, fallback: number[]) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
   const ports = raw
     .split(",")
     .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  return ports.length > 0 ? ports : DEFAULT_PORTS;
+    .filter((n) => Number.isInteger(n) && n > 0 && n <= 65535);
+  return ports.length > 0 ? [...new Set(ports)] : fallback;
 }
 
 function errorMessage(error: unknown): string {
@@ -67,14 +68,61 @@ function readBuildId(appDir: string): string {
   return "dev";
 }
 
+function readHttpsConfig(appDir: string): ClassAppRuntimeConfig["https"] {
+  const httpsDir = path.join(appDir, "https");
+  const configPath = path.join(httpsDir, "config.json");
+  if (!fs.existsSync(configPath)) {
+    return {
+      domain: null,
+      certificatePath: null,
+      privateKeyPath: null,
+      rootCertificatePath: null,
+    };
+  }
+  try {
+    const value = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      domain?: unknown;
+      certificate?: unknown;
+      privateKey?: unknown;
+      rootCertificate?: unknown;
+    };
+    const resolveFile = (name: unknown): string | null =>
+      typeof name === "string" && name ? path.resolve(httpsDir, name) : null;
+    const domain =
+      typeof value.domain === "string" && value.domain.trim()
+        ? value.domain.trim().toLowerCase()
+        : null;
+    return {
+      domain,
+      certificatePath: resolveFile(value.certificate),
+      privateKeyPath: resolveFile(value.privateKey),
+      rootCertificatePath: resolveFile(value.rootCertificate),
+    };
+  } catch (error: unknown) {
+    console.error("[Launcher] HTTPS 配置无效:", errorMessage(error));
+    return {
+      domain: null,
+      certificatePath: null,
+      privateKeyPath: null,
+      rootCertificatePath: null,
+    };
+  }
+}
+
 function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
+  const https = readHttpsConfig(appDir);
+  const securePorts = https.domain
+    ? parsePorts("CLASSAPP_SECURE_PORTS", DEFAULT_SECURE_PORTS)
+    : parsePorts("CLASSAPP_SECURE_PORTS", []);
   return {
     appDir,
     dataRoot: ROOT,
     buildId: readBuildId(appDir),
     ports: PORTS,
+    securePorts,
     bindHost: "0.0.0.0",
     nodeEnv: "production",
+    https,
     update: {
       enabled: true,
       stagingDir: STAGING_DIR,

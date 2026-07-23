@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import { createServer, type Server } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import {
   setRuntimeConfig,
   setRuntimeController,
@@ -21,21 +23,46 @@ export async function bootstrap(
       setTimeout(() => process.exit(exitCode), delayMs);
     },
   });
-  const handler = createHttpHandler(config);
   const protocol = new WebSocketProtocol(config.buildId);
   const servers: Server[] = [];
-  for (const port of config.ports) {
-    const server = createServer(handler);
+  const listen = async (
+    server: Server,
+    protocolName: "http" | "https",
+    port: number,
+  ) => {
     protocol.attach(server);
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(port, config.bindHost, () => {
         server.off("error", reject);
-        console.log(`> Ready on http://localhost:${port}`);
+        console.log(`[Server] ${protocolName}://localhost:${port}`);
         resolve();
       });
     });
     servers.push(server);
+  };
+  for (const port of config.ports) {
+    await listen(
+      createServer(createHttpHandler(config, { secure: false })),
+      "http",
+      port,
+    );
+  }
+  if (config.securePorts.length > 0) {
+    if (!config.https.certificatePath || !config.https.privateKeyPath) {
+      throw new Error("已配置 SECURE_PORTS，但部署包中缺少 HTTPS 证书或私钥");
+    }
+    const tls = {
+      cert: fs.readFileSync(config.https.certificatePath),
+      key: fs.readFileSync(config.https.privateKeyPath),
+    };
+    for (const port of config.securePorts) {
+      await listen(
+        createSecureServer(tls, createHttpHandler(config, { secure: true })),
+        "https",
+        port,
+      );
+    }
   }
   return async () => {
     protocol.close();

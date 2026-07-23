@@ -39,17 +39,24 @@
   <body>
     <div id="shell"><div class="status">正在加载应用…</div></div>
     <script>
-      (() => {
-        const DB = "classapp-runtime";
-        const open = () =>
-          new Promise((resolve, reject) => {
-            const request = indexedDB.open(DB, 1);
-            request.onupgradeneeded = () => {
-              const db = request.result;
+      (function () {
+        if ("serviceWorker" in navigator && window.isSecureContext) {
+          navigator.serviceWorker
+            .register("/service-worker.js", { scope: "/" })
+            .catch(function (error) {
+              console.warn("Service Worker 注册失败，离线入口不可用", error);
+            });
+        }
+        var DB = "classapp-runtime";
+        function open() {
+          return new Promise(function (resolve, reject) {
+            var request = indexedDB.open(DB, 1);
+            request.onupgradeneeded = function () {
+              var db = request.result;
               if (!db.objectStoreNames.contains("bundles"))
                 db.createObjectStore("bundles", { keyPath: "buildId" });
               if (!db.objectStoreNames.contains("resources")) {
-                const store = db.createObjectStore("resources", {
+                var store = db.createObjectStore("resources", {
                   keyPath: "key",
                 });
                 store.createIndex("by-class-and-touch", [
@@ -58,61 +65,123 @@
                 ]);
               }
             };
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = function () {
+              resolve(request.result);
+            };
+            request.onerror = function () {
+              reject(request.error);
+            };
           });
-        const idb = (request) =>
-          new Promise((resolve, reject) => {
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+        }
+        function idb(request) {
+          return new Promise(function (resolve, reject) {
+            request.onsuccess = function () {
+              resolve(request.result);
+            };
+            request.onerror = function () {
+              reject(request.error);
+            };
           });
-        const storeBundle = async (db, manifest, body) => {
-          db.transaction("bundles", "readwrite").objectStore("bundles").put({
-            buildId: manifest.buildId,
-            body,
-            installedAt: Date.now(),
-            active: true,
-          });
-          localStorage.setItem("classapp-active-build", manifest.buildId);
-        };
-        const boot = async () => {
-          const db = await open();
-          let record = null;
-          const active = localStorage.getItem("classapp-active-build");
-          if (active)
-            record = await idb(
-              db.transaction("bundles").objectStore("bundles").get(active),
-            );
-          try {
-            const manifest = await fetch("/app/manifest.json", {
-              cache: "no-store",
-            }).then((r) => {
-              if (!r.ok) throw new Error(`manifest ${r.status}`);
-              return r.json();
+        }
+        function storeBundle(db, manifest, body) {
+          return new Promise(function (resolve, reject) {
+            var transaction = db.transaction("bundles", "readwrite");
+            transaction.objectStore("bundles").put({
+              buildId: manifest.buildId,
+              body: body,
+              installedAt: Date.now(),
+              active: true,
             });
-            if (!record) {
-              const body = await fetch(manifest.bundle, {
+            transaction.oncomplete = function () {
+              localStorage.setItem("classapp-active-build", manifest.buildId);
+              resolve();
+            };
+            transaction.onerror = function () {
+              reject(transaction.error);
+            };
+            transaction.onabort = function () {
+              reject(transaction.error);
+            };
+          });
+        }
+        function loadBundle(body) {
+          var url = URL.createObjectURL(body);
+          return new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.type = "module";
+            script.src = url;
+            script.onload = function () {
+              resolve();
+            };
+            script.onerror = function () {
+              reject(new Error("bundle module load failed"));
+            };
+            document.head.appendChild(script);
+          }).then(
+            function () {
+              setTimeout(function () {
+                URL.revokeObjectURL(url);
+              }, 60000);
+            },
+            function (error) {
+              URL.revokeObjectURL(url);
+              throw error;
+            },
+          );
+        }
+        function boot() {
+          var db;
+          var record = null;
+          return open()
+            .then(function (opened) {
+              db = opened;
+              var active = localStorage.getItem("classapp-active-build");
+              if (!active) return null;
+              return idb(
+                db.transaction("bundles").objectStore("bundles").get(active),
+              );
+            })
+            .then(function (stored) {
+              record = stored;
+              return fetch("/app/manifest.json", {
                 cache: "no-store",
-              }).then((r) => {
-                if (!r.ok) throw new Error(`bundle ${r.status}`);
-                return r.blob();
-              });
-              record = { buildId: manifest.buildId, body };
-              await storeBundle(db, manifest, body);
-            }
-          } catch (error) {
-            if (!record) throw error;
-          }
-          const url = URL.createObjectURL(record.body);
-          try {
-            await import(url);
-          } finally {
-            setTimeout(() => URL.revokeObjectURL(url), 60_000);
-          }
-        };
-        boot().catch((error) => {
+              })
+                .then(function (response) {
+                  if (!response.ok)
+                    throw new Error("manifest " + response.status);
+                  return response.json();
+                })
+                .then(function (manifest) {
+                  if (record) return;
+                  return fetch(manifest.bundle, {
+                    cache: "no-store",
+                  })
+                    .then(function (response) {
+                      if (!response.ok)
+                        throw new Error("bundle " + response.status);
+                      return response.blob();
+                    })
+                    .then(function (body) {
+                      record = {
+                        buildId: manifest.buildId,
+                        body: body,
+                      };
+                      return storeBundle(db, manifest, body);
+                    });
+                })
+                .catch(function (error) {
+                  if (!record) throw error;
+                });
+            })
+            .then(function () {
+              return loadBundle(record.body);
+            });
+        }
+        boot().catch(function (error) {
           document.getElementById("shell").innerHTML =
-            `<div class="error">应用无法加载。请检查网络后刷新。<br><small>${String(error)}</small></div>`;
+            '<div class="error">应用无法加载。请检查网络后刷新。<br><small>' +
+            String(error) +
+            "</small></div>";
         });
       })();
     </script>

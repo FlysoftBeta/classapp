@@ -35,6 +35,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# DuckDNS token, ACME account key, and website private key/certificates
+/scripts/secrets/
+
 # vercel
 .vercel
 

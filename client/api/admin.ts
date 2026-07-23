@@ -19,6 +19,7 @@ const {
   adminFetchConfigAction,
   adminFetchGhostUsersAction,
   adminFetchGroupsAction,
+  adminFetchHttpsStatusAction,
   adminFetchPostsAction,
   adminFetchUpdateStatusAction,
   adminFetchUsersAction,
@@ -292,6 +293,12 @@ export async function adminCreateBackup() {
 
 export async function adminFetchUpdateStatus() {
   const result = await adminFetchUpdateStatusAction();
+  observeActionResult(result);
+  return result.ok ? result.data : null;
+}
+
+export async function adminFetchHttpsStatus() {
+  const result = await adminFetchHttpsStatusAction();
   observeActionResult(result);
   return result.ok ? result.data : null;
 }

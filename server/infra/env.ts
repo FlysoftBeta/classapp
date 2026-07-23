@@ -6,3 +6,4 @@ export const BUILD_ID = runtime.buildId;
 export const DATA_ROOT = runtime.dataRoot;
 export const APP_DIR = runtime.appDir;
 export const PORTS = runtime.ports;
+export const SECURE_PORTS = runtime.securePorts;

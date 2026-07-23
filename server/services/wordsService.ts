@@ -101,11 +101,11 @@ export class WordsService {
         const trimmed = wordsData.trim();
         if (trimmed && trimmed !== "PLACEHOLDER_FOR_WORDS_DATA") {
           const imported = this.importFromText(wordsData);
-          console.log(`Imported ${imported} words from ${wordsFilePath}`);
+          console.log(`[WordsService] Imported ${imported} words from ${wordsFilePath}`);
           return;
         }
       } catch (e) {
-        console.error("Failed to read words.txt:", e);
+        console.error("[WordsService] Failed to read words.txt:", e);
       }
     }
   }

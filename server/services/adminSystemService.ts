@@ -12,6 +12,7 @@ import {
   requestRollback,
 } from "@/server/infra/updateManager";
 import { ServiceError } from "@/server/services/errors";
+import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 
 export type AdminSystemToolAction = "kill-wps" | "shutdown";
 
@@ -44,6 +45,10 @@ export class AdminSystemService {
 
   getUpdateStatus() {
     return getUpdateStatus();
+  }
+
+  getHttpsStatus() {
+    return createHttpsUpgradeService(this.db).getStatus();
   }
 
   confirmUpdate(): void {

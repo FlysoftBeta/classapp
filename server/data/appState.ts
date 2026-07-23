@@ -2,6 +2,7 @@ import type BetterSqlite3 from "better-sqlite3";
 
 export const IDLE_LOCK_TIMEOUT_MINUTES = 5;
 export const PENDING_UPDATE_KEY = "pending_update_at";
+export const HTTPS_REDIRECT_KEY = "https_redirect_enabled";
 
 export function getPendingUpdateAt(db: BetterSqlite3.Database): string | null {
   const row = db
@@ -54,6 +55,23 @@ export function setSystemLocked(
   db.prepare(
     "INSERT OR REPLACE INTO config (key, value) VALUES ('system_locked', ?)",
   ).run(locked ? "1" : "0");
+}
+
+export function getHttpsRedirectEnabled(db: BetterSqlite3.Database): boolean {
+  const row = db
+    .prepare("SELECT value FROM config WHERE key = ?")
+    .get(HTTPS_REDIRECT_KEY) as { value: string } | undefined;
+  return row?.value === "1";
+}
+
+export function setHttpsRedirectEnabled(
+  db: BetterSqlite3.Database,
+  enabled: boolean,
+): void {
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run(
+    HTTPS_REDIRECT_KEY,
+    enabled ? "1" : "0",
+  );
 }
 
 export function touchActivity(

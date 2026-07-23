@@ -1,4 +1,4 @@
-import { PORTS } from "./env";
+import { PORTS, SECURE_PORTS } from "./env";
 
 export function originFromParts(
   protocol: string,
@@ -28,5 +28,7 @@ export function requestHostname(req: Request): string {
 export function originsForRequest(req: Request): string[] {
   const protocol = requestProtocol(req);
   const hostname = requestHostname(req);
-  return PORTS.map((port) => originFromParts(protocol, hostname, port));
+  const ports =
+    protocol === "https:" && SECURE_PORTS.length > 0 ? SECURE_PORTS : PORTS;
+  return ports.map((port) => originFromParts(protocol, hostname, port));
 }

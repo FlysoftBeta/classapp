@@ -24,10 +24,17 @@ function standaloneConfig(): ClassAppRuntimeConfig {
       process.env.NODE_ENV === "production"
         ? [80, 81, 82, 83, 84, 85, 86, 88]
         : [3000],
+    securePorts: [],
     bindHost: "0.0.0.0",
     nodeEnv: process.env.NODE_ENV ?? "production",
     initialAdminPin:
       process.env.NODE_ENV === "production" ? undefined : "123456",
+    https: {
+      domain: null,
+      certificatePath: null,
+      privateKeyPath: null,
+      rootCertificatePath: null,
+    },
     update: {
       enabled: false,
       stagingDir: path.join(dataRoot, "staging"),
@@ -46,7 +53,13 @@ function isRuntimeConfig(value: unknown): value is ClassAppRuntimeConfig {
     Array.isArray(config.ports) &&
     config.ports.every(
       (port) => Number.isInteger(port) && port > 0 && port <= 65535,
-    )
+    ) &&
+    Array.isArray(config.securePorts) &&
+    config.securePorts.every(
+      (port) => Number.isInteger(port) && port > 0 && port <= 65535,
+    ) &&
+    !!config.https &&
+    typeof config.https === "object"
   );
 }
 
@@ -72,7 +85,7 @@ async function start(config: ClassAppRuntimeConfig): Promise<void> {
   const stop = async (signal: NodeJS.Signals) => {
     if (stopping) return;
     stopping = true;
-    console.log(`> Received ${signal}, shutting down...`);
+    console.log(`[Server] ${signal}`);
     const forced = setTimeout(() => process.exit(1), 10_000);
     forced.unref();
     try {
@@ -102,7 +115,7 @@ if (typeof process.send === "function") {
   process.once("message", (message: unknown) => {
     clearTimeout(timeout);
     if (!isBootMessage(message)) {
-      console.error("> Received invalid launcher boot payload");
+      console.error("[Server] invalid launcher boot payload");
       process.exit(1);
     }
     startOrExit(message.payload);

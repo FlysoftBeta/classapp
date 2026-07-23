@@ -46,6 +46,7 @@ const versionSchema = object({
 const configSchema = object({
   idle_lock_enabled: z.boolean(),
   system_locked: z.boolean(),
+  https_redirect_enabled: z.boolean(),
   whitelist_enabled: z.boolean(),
   identity_methods: z.array(z.enum(["mac", "ip", "user_agent"])).min(1),
 });
@@ -88,6 +89,31 @@ const updateStatusSchema = object({
   seconds_remaining: z.number().int().nonnegative(),
   timeout_seconds: z.number().int().nonnegative(),
   disabled: z.boolean(),
+});
+const httpsStatusSchema = object({
+  configured: z.boolean(),
+  domain: z.string().nullable(),
+  secure_ports: z.array(z.number().int().positive()),
+  redirect_enabled: z.boolean(),
+  dns_records: z.array(
+    object({
+      type: z.enum(["A", "AAAA"]),
+      name: z.string(),
+      value: z.string(),
+    }),
+  ),
+  certificate: object({
+    present: z.boolean(),
+    valid: z.boolean(),
+    hostname_valid: z.boolean(),
+    not_before: z.string().nullable(),
+    not_after: z.string().nullable(),
+    days_remaining: z.number().int().nullable(),
+    root_subject: z.string().nullable(),
+    root_valid_from: z.string().nullable(),
+    root_compatible: z.boolean().nullable(),
+    error: z.string().nullable(),
+  }),
 });
 const stickerEntrySchema = object({ name: z.string(), path: z.string() });
 const stickerPackSchema = object({
@@ -279,6 +305,7 @@ export const actionContracts = {
       object({
         idle_lock_enabled: z.boolean().optional(),
         system_locked: z.boolean().optional(),
+        https_redirect_enabled: z.boolean().optional(),
         whitelist_enabled: z.boolean().optional(),
         identity_methods: z
           .array(z.enum(["mac", "ip", "user_agent"]))
@@ -298,6 +325,7 @@ export const actionContracts = {
   ),
   adminDeleteBackupAction: contract(one(nonEmptyString), okSchema),
   adminFetchUpdateStatusAction: contract(noArgs, updateStatusSchema),
+  adminFetchHttpsStatusAction: contract(noArgs, httpsStatusSchema),
   adminConfirmUpdateAction: contract(noArgs, okSchema),
   adminRollbackAction: contract(
     noArgs,

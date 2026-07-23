@@ -9,6 +9,9 @@ import { GET as articleBlob } from "@/server/http/routes/articleBlob";
 import { GET as renderArticle } from "@/server/http/routes/articleRender";
 import { POST as deploy } from "@/server/http/routes/deploy";
 import { GET as downloadBackup } from "@/server/http/routes/backupDownload";
+import { renderServiceWorker } from "@/server/http/serviceWorker";
+import { getDb } from "@/server/infra/db";
+import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -24,13 +27,14 @@ const TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
-function absoluteUrl(req: IncomingMessage): string {
+function absoluteUrl(req: IncomingMessage, secure: boolean): string {
   const protocol =
-    req.headers["x-forwarded-proto"]?.toString().split(",")[0] ?? "http";
+    req.headers["x-forwarded-proto"]?.toString().split(",")[0] ??
+    (secure ? "https" : "http");
   return `${protocol}://${req.headers.host ?? "localhost"}${req.url ?? "/"}`;
 }
 
-function toRequest(req: IncomingMessage): Request {
+function toRequest(req: IncomingMessage, secure: boolean): Request {
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     if (Array.isArray(value))
@@ -38,7 +42,7 @@ function toRequest(req: IncomingMessage): Request {
     else if (value !== undefined) headers.set(name, value);
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
-  return new Request(absoluteUrl(req), {
+  return new Request(absoluteUrl(req, secure), {
     method: req.method,
     headers,
     ...(hasBody
@@ -89,7 +93,11 @@ function safePublicPath(root: string, pathname: string): string | null {
     : null;
 }
 
-export function createHttpHandler(config: ClassAppRuntimeConfig) {
+export function createHttpHandler(
+  config: ClassAppRuntimeConfig,
+  options: { secure?: boolean } = {},
+) {
+  const secure = options.secure === true;
   const clientRoot = path.join(config.appDir, "client");
   const publicRoot = path.join(config.appDir, "public");
   const shellFile = path.join(config.appDir, "shell.html");
@@ -121,15 +129,38 @@ export function createHttpHandler(config: ClassAppRuntimeConfig) {
         res.end();
         return;
       }
+      if (
+        !secure &&
+        (req.method === "GET" || req.method === "HEAD") &&
+        url.pathname === "/" &&
+        config.https.domain &&
+        config.securePorts.length > 0 &&
+        createHttpsUpgradeService(getDb()).isRedirectEnabled()
+      ) {
+        const securePort = config.securePorts[0];
+        const port = securePort === 443 ? "" : `:${securePort}`;
+        res.statusCode = 301;
+        res.setHeader(
+          "Location",
+          `https://${config.https.domain}${port}/${url.search}`,
+        );
+        res.setHeader("Cache-Control", "public, max-age=315360000, immutable");
+        res.setHeader("Content-Length", "0");
+        res.end();
+        return;
+      }
       if (url.pathname === "/") {
-        if (
-          sendFile(
-            shellFile,
-            res,
-            "public, max-age=31536000, stale-if-error=604800",
-          )
-        )
-          return;
+        if (sendFile(shellFile, res, "no-store, max-age=0")) return;
+      }
+      if (url.pathname === "/service-worker.js") {
+        const body = renderServiceWorker(config.buildId);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        res.setHeader("Service-Worker-Allowed", "/");
+        res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+        res.setHeader("Content-Length", Buffer.byteLength(body));
+        res.end(body);
+        return;
       }
       if (url.pathname === "/app/manifest.json") {
         const size = fs.existsSync(bundleFile)
@@ -151,7 +182,7 @@ export function createHttpHandler(config: ClassAppRuntimeConfig) {
           return;
       }
 
-      const request = () => toRequest(req);
+      const request = () => toRequest(req, secure);
       if (req.method === "GET" && url.pathname === "/api/endpoints") {
         await sendResponse(await endpoints(request()), res);
         return;

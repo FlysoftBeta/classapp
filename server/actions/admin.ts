@@ -3,6 +3,7 @@ import { createAdminSystemService } from "@/server/services/adminSystemService";
 import { createClientService } from "@/server/services/clientsService";
 import { ServiceError } from "@/server/services/errors";
 import { createAppStateService } from "@/server/services/appStateService";
+import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 import { expectBoolean, expectString, withActionSession } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
@@ -327,6 +328,7 @@ export async function adminFetchConfigAction() {
     const db = getDb();
     return {
       ...createAppStateService(db).getConfig(),
+      https_redirect_enabled: createHttpsUpgradeService(db).isRedirectEnabled(),
       ...createClientService(db).config(),
     };
   });
@@ -352,6 +354,15 @@ export async function adminUpdateConfigAction(
           ? expectBoolean(input.system_locked, "system_locked must be boolean")
           : undefined,
     });
+    const https = createHttpsUpgradeService(db);
+    if (input.https_redirect_enabled !== undefined) {
+      https.setRedirectEnabled(
+        expectBoolean(
+          input.https_redirect_enabled,
+          "https_redirect_enabled must be boolean",
+        ),
+      );
+    }
     const clientConfig = createClientService(db).updateConfig({
       whitelist_enabled: input.whitelist_enabled,
       identity_methods: input.identity_methods,
@@ -359,6 +370,7 @@ export async function adminUpdateConfigAction(
     return {
       ok: true as const,
       ...appConfig,
+      https_redirect_enabled: https.isRedirectEnabled(),
       ...clientConfig,
     };
   });
@@ -369,6 +381,14 @@ export async function adminFetchBackupsAction() {
     const actor = await session.asActor();
     await actor.requireAdmin();
     return { backups: createAdminSystemService(getDb()).listBackups() };
+  });
+}
+
+export async function adminFetchHttpsStatusAction() {
+  return withActionSession(async (session) => {
+    const actor = await session.asActor();
+    await actor.requireAdmin();
+    return createAdminSystemService(getDb()).getHttpsStatus();
   });
 }
 

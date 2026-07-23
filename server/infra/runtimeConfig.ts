@@ -6,9 +6,16 @@ export interface ClassAppRuntimeConfig {
   dataRoot: string;
   buildId: string;
   ports: number[];
+  securePorts: number[];
   bindHost: string;
   nodeEnv: string;
   initialAdminPin?: string;
+  https: {
+    domain: string | null;
+    certificatePath: string | null;
+    privateKeyPath: string | null;
+    rootCertificatePath: string | null;
+  };
   update: {
     enabled: boolean;
     stagingDir: string;
@@ -46,9 +53,16 @@ function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
       nodeEnv === "production"
         ? [80, 81, 82, 83, 84, 85, 86, 88]
         : [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007],
+    securePorts: [],
     bindHost: "0.0.0.0",
     nodeEnv,
     initialAdminPin: nodeEnv === "production" ? undefined : "123456",
+    https: {
+      domain: null,
+      certificatePath: null,
+      privateKeyPath: null,
+      rootCertificatePath: null,
+    },
     update: {
       enabled: false,
       stagingDir: path.join(dataRoot, "staging"),
@@ -84,11 +98,12 @@ export function setRuntimeController(
 
 export function getPublicRuntimeConfig(): Pick<
   ClassAppRuntimeConfig,
-  "buildId" | "ports"
+  "buildId" | "ports" | "securePorts"
 > {
   const runtime = getRuntimeConfig();
   return {
     buildId: runtime.buildId,
     ports: runtime.ports,
+    securePorts: runtime.securePorts,
   };
 }
