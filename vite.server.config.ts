@@ -20,16 +20,18 @@ export default defineConfig({
     },
   },
   ssr: {
-    // Keep native addons and ws external. Their self-contained runtime files
-    // are assembled by scripts/prepare-runtime-deps.mjs for each release.
+    // Keep native addons, ws, and Playwright external. Their self-contained
+    // runtime files are assembled by scripts/prepare-runtime-deps.mjs for each
+    // release. Playwright's CommonJS dependency graph uses __dirname, which
+    // cannot run when Rollup flattens it into this ESM bundle.
     noExternal: true,
-    external: ["better-sqlite3", "@napi-rs/canvas", "ws"],
+    external: ["better-sqlite3", "@napi-rs/canvas", "ws", "playwright"],
   },
   build: {
     ssr: path.resolve(__dirname, "server/main.ts"),
     outDir: "dist/server",
     emptyOutDir: true,
     target: "node22",
-    rollupOptions: { output: { entryFileNames: "main.mjs" } },
+    rolldownOptions: { output: { entryFileNames: "main.mjs" } },
   },
 });

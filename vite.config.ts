@@ -25,14 +25,14 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: true,
     target: "chrome70",
     cssCodeSplit: false,
-    assetsInlineLimit: 100_000_000,
-    rollupOptions: {
+    assetsInlineLimit: Infinity,
+    rolldownOptions: {
       input: path.resolve(__dirname, "client/main.tsx"),
       output: {
         entryFileNames: "app/app.js",
         chunkFileNames: "app/[name].js",
         assetFileNames: "app/[name][extname]",
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
     },
   },

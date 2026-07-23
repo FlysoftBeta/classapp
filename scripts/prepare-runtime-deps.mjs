@@ -125,6 +125,12 @@ try {
   copyPackage("bufferutil");
   copyPackage("node-gyp-build");
 
+  // Playwright contains CommonJS modules that rely on __dirname, so it stays
+  // external to the server's ESM bundle. Its runtime package and core package
+  // must therefore travel with each deployment.
+  copyPackage("playwright");
+  copyPackage("playwright-core");
+
   const canvas = readPackage("@napi-rs/canvas");
   for (const target of [
     "@napi-rs/canvas-linux-x64-musl",

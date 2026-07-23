@@ -9,7 +9,7 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: false,
     target: "node22",
-    rollupOptions: {
+    rolldownOptions: {
       output: { format: "cjs", entryFileNames: "launcher.js" },
     },
   },
