@@ -6,7 +6,7 @@ import os from "node:os";
 import process from "node:process";
 import WebSocket from "ws";
 
-const DEB = path.join(__dirname, "google-chrome-stable_current_amd64.deb");
+const DEB = path.join(import.meta.dirname, "google-chrome-stable_current_amd64.deb");
 const EXPECTED_SHA256 =
   "d7f8866b202deb82cbeffa2d66b26ad8f59dafed24aa0422e166541e5a724c20";
 const EXPECTED_VERSION = "Google Chrome 70.0.3538.77";
