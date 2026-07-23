@@ -74,7 +74,10 @@ export async function startApplicationManager(
   try {
     await check();
   } catch (error) {
-    console.warn("[ApplicationManager] 启动版本检查失败，使用已安装版本", error);
+    console.warn(
+      "[ApplicationManager] 启动版本检查失败，使用已安装版本",
+      error,
+    );
   }
 
   const scheduleCheck = () => {

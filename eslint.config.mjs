@@ -11,5 +11,7 @@ export default defineConfig([
     "deploy_test/**",
     "vendor/**",
     "lib/**/rust/target/**",
+    "client/components/learning/**",
+    "server/services/wordsService.ts",
   ]),
 ]);

@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import type BetterSqlite3 from "better-sqlite3";
-import { DATA_ROOT } from "@/server/infra/env";
 import { createDbBackup } from "@/server/infra/dbBackup";
 import { ServiceError } from "@/server/services/errors";
 import {

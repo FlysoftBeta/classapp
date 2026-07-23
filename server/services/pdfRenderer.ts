@@ -7,7 +7,7 @@ import {
 } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readArticleBlob } from "@/server/infra/articleBlobs";
 import { ServiceError } from "./errors";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 
 const DEFAULT_POOL_SIZE = 8;
 const MAX_POOL_SIZE = 12;
