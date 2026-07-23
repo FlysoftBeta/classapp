@@ -11,28 +11,36 @@ import { ensureEndpointsReady } from "@/client/lib/loadBalancer";
 
 declare const __BUILD_ID__: string;
 
-const style = document.createElement("style");
-style.textContent = globalCss;
-document.head.append(style);
+async function bootstrap(): Promise<void> {
+  const buildId = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
+  configureClientRuntime({ buildId });
 
-let root = document.getElementById("root");
-if (!root) {
-  root = document.createElement("div");
-  root.id = "root";
-  while (document.body.firstChild)
-    document.body.removeChild(document.body.firstChild);
-  document.body.appendChild(root);
+  // Do not connect or render the stale application until its production
+  // bundle has either been confirmed current or replaced and activated.
+  await startApplicationManager(buildId);
+
+  const style = document.createElement("style");
+  style.textContent = globalCss;
+  document.head.append(style);
+
+  let root = document.getElementById("root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "root";
+    while (document.body.firstChild)
+      document.body.removeChild(document.body.firstChild);
+    document.body.appendChild(root);
+  }
+
+  client.connect();
+  void ensureEndpointsReady();
+
+  createRoot(root).render(
+    <React.Fragment>
+      <AppInteractionGuard />
+      <App />
+    </React.Fragment>,
+  );
 }
 
-const buildId = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
-configureClientRuntime({ buildId });
-client.connect();
-void ensureEndpointsReady();
-startApplicationManager(buildId);
-
-createRoot(root).render(
-  <React.Fragment>
-    <AppInteractionGuard />
-    <App />
-  </React.Fragment>,
-);
+void bootstrap();
