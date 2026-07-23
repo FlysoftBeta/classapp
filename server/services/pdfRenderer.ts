@@ -44,12 +44,11 @@ function getPdfjsPaths(): PdfjsPaths {
   if (pdfjsPaths) return pdfjsPaths;
   const pdfjsDir = resolvePdfjsDir();
   pdfjsPaths = {
-    cMapUrl: pathToFileURL(path.join(pdfjsDir, "cmaps/")).href,
-    standardFontDataUrl: pathToFileURL(path.join(pdfjsDir, "standard_fonts/"))
-      .href,
-    workerSrc: pathToFileURL(path.join(pdfjsDir, "legacy/build/pdf.worker.mjs"))
-      .href,
-    wasmUrl: pathToFileURL(path.join(pdfjsDir, "wasm/")).href,
+    // Important notice! *Url-s don't accept file:// URIs; plus they need to include '/' to pass the directory check (even on Windows)
+    cMapUrl: path.join(pdfjsDir, "cmaps") + "/",
+    standardFontDataUrl: path.join(pdfjsDir, "standard_fonts") + "/",
+    workerSrc: path.join(pdfjsDir, "legacy/build/pdf.worker.mjs"),
+    wasmUrl: path.join(pdfjsDir, "wasm") + "/",
   };
   GlobalWorkerOptions.workerSrc = pdfjsPaths.workerSrc;
   return pdfjsPaths;
