@@ -19,6 +19,8 @@ import Infini2View from "@/client/components/shared/Infini2View";
 import { useInfini2, type Infini2Provider } from "@/lib/infini2";
 import { listArticles } from "@/client/api/articles";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
+import { InfiniId } from "@/client/components/debug/InfiniId";
+import { useDebugStore } from "@/client/store/debugStore";
 
 const RECENT_ARTICLES_ID = "article-list:recent";
 
@@ -94,6 +96,7 @@ const ArticleVirtualRow = React.memo(function ArticleVirtualRow({
 }) {
   return (
     <Box data-infini-id={article.id} sx={{ width: "100%" }}>
+      <InfiniId id={article.id} />
       <ListItemButton
         selected={selected}
         onClick={() => onOpenArticle(article.id)}
@@ -297,6 +300,7 @@ function ArticleListSession({
   token,
   downloadEnabled,
 }: ArticleListProps) {
+  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const [total, setTotal] = useState(0);
   const totalRef = useRef(0);
   const sidebarArticlesRef = useRef(sidebarArticles);
@@ -434,7 +438,7 @@ function ArticleListSession({
     ArticleCursor,
     string
   >({
-    debug: import.meta.env.DEV ? "ArticleList" : undefined,
+    debug: showInfiniLogs ? "ArticleList" : undefined,
     provider,
     ops: ARTICLE_OPS,
     estimateSize: estimateArticleRowSize,

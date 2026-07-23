@@ -24,6 +24,8 @@ import {
 } from "@/client/api/stickers";
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
 import Tooltip from "@mui/material/Tooltip";
+import { InfiniId } from "@/client/components/debug/InfiniId";
+import { useDebugStore } from "@/client/store/debugStore";
 
 const PICKER_WIDTH = 320;
 const STICKER_CELL = 72;
@@ -93,6 +95,7 @@ const StickerRow = React.memo(function StickerRow({
             "&:hover": { bgcolor: "action.hover" },
           }}
         >
+          <InfiniId id={item.id} />
           <Box
             component="img"
             src={lbAssetUrl(item.path)}
@@ -119,6 +122,7 @@ function StickerVirtualGrid({
   items: StickerRecentItem[];
   onPick: (item: StickerRecentItem) => void;
 }) {
+  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const rows = useMemo(() => chunkStickerRows(items), [items]);
   const [scrollHost, setScrollHost] = useState<HTMLDivElement | null>(null);
   const provider = useMemo<Infini2Provider<StickerGridRow, number, string>>(
@@ -141,7 +145,7 @@ function StickerVirtualGrid({
     [rows],
   );
   const { controller } = useInfini2<StickerGridRow, number, string>({
-    debug: import.meta.env.DEV ? "StickerPicker" : undefined,
+    debug: import.meta.env.DEV && showInfiniLogs ? "StickerPicker" : undefined,
     provider,
     ops: {
       getId: (row) => row.id,

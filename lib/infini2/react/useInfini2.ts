@@ -42,5 +42,8 @@ export function useInfini2<
       });
     };
   }, [controller]);
+  useEffect(() => {
+    controller.setDebug(config.debug);
+  }, [config.debug, controller]);
   return { controller, snapshot } as const;
 }

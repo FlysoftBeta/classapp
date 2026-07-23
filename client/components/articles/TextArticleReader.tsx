@@ -18,6 +18,8 @@ import {
   createChunkStore,
 } from "@/client/lib/reader/textChunks";
 import { useInfini2, type Infini2Provider } from "@/lib/infini2";
+import { InfiniId } from "@/client/components/debug/InfiniId";
+import { useDebugStore } from "@/client/store/debugStore";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -80,12 +82,7 @@ const ChunkRow = React.memo(function ChunkRow({
           py: "10px",
         }}
       >
-        <Box
-          component="span"
-          sx={{ color: "text.disabled", fontSize: "0.7rem", mr: 1 }}
-        >
-          [{chunk.offset}]
-        </Box>
+        <InfiniId id={chunk.offset} />
         {chunk.content}
       </Typography>
     </Box>
@@ -113,6 +110,7 @@ export default function TextArticleReader({
   online,
   onProgressChange,
 }: TextArticleReaderProps) {
+  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   // `initialOffset` is restoration input, not a controlled reading position.
   // Progress persistence updates the parent and can feed a newer value back
   // while this keyed reader is mounted; consuming that value again would reset
@@ -280,7 +278,7 @@ export default function TextArticleReader({
     number,
     number
   >({
-    debug: import.meta.env.DEV ? "TextArticleReader" : undefined,
+    debug: showInfiniLogs ? "TextArticleReader" : undefined,
     provider,
     ops: TEXT_OPS,
     estimateSize: estimateChunkHeight,

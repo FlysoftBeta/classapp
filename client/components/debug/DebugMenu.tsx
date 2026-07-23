@@ -7,12 +7,22 @@ import Popover from "@mui/material/Popover";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import { client } from "@/client/remote/Client";
+import { useDebugStore } from "@/client/store/debugStore";
 
 export default function DebugMenu() {
+  if (!import.meta.env.DEV) return null;
+  return <DebugMenuContents />;
+}
+
+function DebugMenuContents() {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [forcedOffline, setForcedOffline] = useState(() =>
     client.isForcedOffline(),
   );
+  const showInfiniIds = useDebugStore((state) => state.showInfiniIds);
+  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
+  const setShowInfiniIds = useDebugStore((state) => state.setShowInfiniIds);
+  const setShowInfiniLogs = useDebugStore((state) => state.setShowInfiniLogs);
 
   const handleForcedOffline = (enabled: boolean) => {
     client.setForcedOffline(enabled);
@@ -66,6 +76,30 @@ export default function DebugMenu() {
               checked={forcedOffline}
               onChange={(event) => handleForcedOffline(event.target.checked)}
               inputProps={{ "aria-label": "强制离线" }}
+            />
+          }
+        />
+        <FormControlLabel
+          sx={{ mt: 1, ml: 0, width: "100%", justifyContent: "space-between" }}
+          labelPlacement="start"
+          label={<Typography variant="body2">显示 Infini ID</Typography>}
+          control={
+            <Switch
+              checked={showInfiniIds}
+              onChange={(event) => setShowInfiniIds(event.target.checked)}
+              inputProps={{ "aria-label": "显示 Infini ID" }}
+            />
+          }
+        />
+        <FormControlLabel
+          sx={{ ml: 0, width: "100%", justifyContent: "space-between" }}
+          labelPlacement="start"
+          label={<Typography variant="body2">显示 Infini 日志</Typography>}
+          control={
+            <Switch
+              checked={showInfiniLogs}
+              onChange={(event) => setShowInfiniLogs(event.target.checked)}
+              inputProps={{ "aria-label": "显示 Infini 日志" }}
             />
           }
         />

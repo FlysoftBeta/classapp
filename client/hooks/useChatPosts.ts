@@ -29,6 +29,7 @@ import {
   postBelongsToConversation,
 } from "@/client/lib/chat/posts";
 import { offlineRepository } from "@/client/resource/offlineRepository";
+import { useDebugStore } from "@/client/store/debugStore";
 
 export interface UseChatPostsParams {
   currentUser: User;
@@ -91,6 +92,7 @@ export function useChatPosts({
   paddingEnd,
   online,
 }: UseChatPostsParams) {
+  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const [replyTo, setReplyTo] = useState<Post | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [offlineBoundaryBefore, setOfflineBoundaryBefore] = useState(false);
@@ -278,7 +280,7 @@ export function useChatPosts({
 
   const { controller, snapshot } = useInfini2<Post, ChatCursor, string, string>(
     {
-      debug: import.meta.env.DEV
+      debug: showInfiniLogs
         ? `ChatMessageList:${conversationType}:${conversationId}`
         : undefined,
       provider,

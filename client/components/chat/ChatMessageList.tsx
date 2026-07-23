@@ -6,6 +6,7 @@ import ChatPostCard from "./ChatPostCard";
 import Infini2View from "@/client/components/shared/Infini2View";
 import type { User, Conversation, Post } from "@/shared/types/api";
 import type { ChatMessageTimeline } from "@/client/hooks/useChatPosts";
+import { InfiniId } from "@/client/components/debug/InfiniId";
 
 interface ChatMessageListProps {
   conversation: Conversation;
@@ -46,6 +47,7 @@ const ChatMessageListItem = React.memo(function ChatMessageListItem({
           width: "100%",
         }}
       >
+        <InfiniId id={id} />
         <ChatPostCard
           post={post}
           currentUser={currentUser}

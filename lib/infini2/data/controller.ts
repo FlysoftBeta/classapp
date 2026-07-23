@@ -85,8 +85,8 @@ export class Infini2Controller<
   TId extends Infini2Id,
   TTarget = never,
 > {
-  /** Optional immutable label used to correlate adapter diagnostics. */
-  readonly debug: string | undefined;
+  /** Optional label used to correlate adapter diagnostics. */
+  debug: string | undefined;
   private readonly engine: RawInfini2Engine;
   private readonly listeners = new Set<() => void>();
   private readonly idToHandle = new Map<TId, number>();
@@ -142,6 +142,11 @@ export class Infini2Controller<
       layoutBefore: config.layoutBefore ?? 0,
       layoutAfter: config.layoutAfter ?? 0,
     };
+  }
+
+  /** Updates the optional adapter diagnostic label without affecting data state. */
+  setDebug(debug: string | undefined): void {
+    this.debug = debug;
   }
 
   /**
