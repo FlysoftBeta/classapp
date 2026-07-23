@@ -1,0 +1,262 @@
+{
+  "id": "akendfield2",
+  "name": "终末地2",
+  "stickers": {
+    "b_14": {
+      "name": "b_14",
+      "path": "/stickers/akendfield2/b_14.png"
+    },
+    "b_13": {
+      "name": "b_13",
+      "path": "/stickers/akendfield2/b_13.png"
+    },
+    "b_07": {
+      "name": "b_07",
+      "path": "/stickers/akendfield2/b_07.png"
+    },
+    "b_03": {
+      "name": "b_03",
+      "path": "/stickers/akendfield2/b_03.png"
+    },
+    "b_16": {
+      "name": "b_16",
+      "path": "/stickers/akendfield2/b_16.png"
+    },
+    "b_04": {
+      "name": "b_04",
+      "path": "/stickers/akendfield2/b_04.png"
+    },
+    "b_11": {
+      "name": "b_11",
+      "path": "/stickers/akendfield2/b_11.png"
+    },
+    "b_01": {
+      "name": "b_01",
+      "path": "/stickers/akendfield2/b_01.png"
+    },
+    "b_15": {
+      "name": "b_15",
+      "path": "/stickers/akendfield2/b_15.png"
+    },
+    "b_06": {
+      "name": "b_06",
+      "path": "/stickers/akendfield2/b_06.png"
+    },
+    "b_10": {
+      "name": "b_10",
+      "path": "/stickers/akendfield2/b_10.png"
+    },
+    "b_08": {
+      "name": "b_08",
+      "path": "/stickers/akendfield2/b_08.png"
+    },
+    "b_09": {
+      "name": "b_09",
+      "path": "/stickers/akendfield2/b_09.png"
+    },
+    "b_05": {
+      "name": "b_05",
+      "path": "/stickers/akendfield2/b_05.png"
+    },
+    "b_02": {
+      "name": "b_02",
+      "path": "/stickers/akendfield2/b_02.png"
+    },
+    "b_12": {
+      "name": "b_12",
+      "path": "/stickers/akendfield2/b_12.png"
+    },
+    "d_13": {
+      "name": "d_13",
+      "path": "/stickers/akendfield2/d_13.png"
+    },
+    "d_6": {
+      "name": "d_6",
+      "path": "/stickers/akendfield2/d_6.png"
+    },
+    "d_1": {
+      "name": "d_1",
+      "path": "/stickers/akendfield2/d_1.png"
+    },
+    "d_9": {
+      "name": "d_9",
+      "path": "/stickers/akendfield2/d_9.png"
+    },
+    "d_16": {
+      "name": "d_16",
+      "path": "/stickers/akendfield2/d_16.png"
+    },
+    "d_15": {
+      "name": "d_15",
+      "path": "/stickers/akendfield2/d_15.png"
+    },
+    "d_4": {
+      "name": "d_4",
+      "path": "/stickers/akendfield2/d_4.png"
+    },
+    "d_10": {
+      "name": "d_10",
+      "path": "/stickers/akendfield2/d_10.png"
+    },
+    "d_3": {
+      "name": "d_3",
+      "path": "/stickers/akendfield2/d_3.png"
+    },
+    "d_7": {
+      "name": "d_7",
+      "path": "/stickers/akendfield2/d_7.png"
+    },
+    "d_5": {
+      "name": "d_5",
+      "path": "/stickers/akendfield2/d_5.png"
+    },
+    "d_8": {
+      "name": "d_8",
+      "path": "/stickers/akendfield2/d_8.png"
+    },
+    "d_11": {
+      "name": "d_11",
+      "path": "/stickers/akendfield2/d_11.png"
+    },
+    "d_2": {
+      "name": "d_2",
+      "path": "/stickers/akendfield2/d_2.png"
+    },
+    "d_12": {
+      "name": "d_12",
+      "path": "/stickers/akendfield2/d_12.png"
+    },
+    "d_14": {
+      "name": "d_14",
+      "path": "/stickers/akendfield2/d_14.png"
+    },
+    "c_2": {
+      "name": "c_2",
+      "path": "/stickers/akendfield2/c_2.png"
+    },
+    "c_6": {
+      "name": "c_6",
+      "path": "/stickers/akendfield2/c_6.png"
+    },
+    "c_7": {
+      "name": "c_7",
+      "path": "/stickers/akendfield2/c_7.png"
+    },
+    "c_13": {
+      "name": "c_13",
+      "path": "/stickers/akendfield2/c_13.png"
+    },
+    "c_15": {
+      "name": "c_15",
+      "path": "/stickers/akendfield2/c_15.png"
+    },
+    "c_3": {
+      "name": "c_3",
+      "path": "/stickers/akendfield2/c_3.png"
+    },
+    "c_5": {
+      "name": "c_5",
+      "path": "/stickers/akendfield2/c_5.png"
+    },
+    "c_12": {
+      "name": "c_12",
+      "path": "/stickers/akendfield2/c_12.png"
+    },
+    "c_4": {
+      "name": "c_4",
+      "path": "/stickers/akendfield2/c_4.png"
+    },
+    "c_16": {
+      "name": "c_16",
+      "path": "/stickers/akendfield2/c_16.png"
+    },
+    "c_8": {
+      "name": "c_8",
+      "path": "/stickers/akendfield2/c_8.png"
+    },
+    "c_11": {
+      "name": "c_11",
+      "path": "/stickers/akendfield2/c_11.png"
+    },
+    "c_14": {
+      "name": "c_14",
+      "path": "/stickers/akendfield2/c_14.png"
+    },
+    "c_9": {
+      "name": "c_9",
+      "path": "/stickers/akendfield2/c_9.png"
+    },
+    "c_10": {
+      "name": "c_10",
+      "path": "/stickers/akendfield2/c_10.png"
+    },
+    "c_1": {
+      "name": "c_1",
+      "path": "/stickers/akendfield2/c_1.png"
+    },
+    "a_15": {
+      "name": "a_15",
+      "path": "/stickers/akendfield2/a_15.png"
+    },
+    "a_09": {
+      "name": "a_09",
+      "path": "/stickers/akendfield2/a_09.png"
+    },
+    "a_13": {
+      "name": "a_13",
+      "path": "/stickers/akendfield2/a_13.png"
+    },
+    "a_10": {
+      "name": "a_10",
+      "path": "/stickers/akendfield2/a_10.png"
+    },
+    "a_12": {
+      "name": "a_12",
+      "path": "/stickers/akendfield2/a_12.png"
+    },
+    "a_16": {
+      "name": "a_16",
+      "path": "/stickers/akendfield2/a_16.png"
+    },
+    "a_02": {
+      "name": "a_02",
+      "path": "/stickers/akendfield2/a_02.png"
+    },
+    "a_11": {
+      "name": "a_11",
+      "path": "/stickers/akendfield2/a_11.png"
+    },
+    "a_01": {
+      "name": "a_01",
+      "path": "/stickers/akendfield2/a_01.png"
+    },
+    "a_08": {
+      "name": "a_08",
+      "path": "/stickers/akendfield2/a_08.png"
+    },
+    "a_03": {
+      "name": "a_03",
+      "path": "/stickers/akendfield2/a_03.png"
+    },
+    "a_06": {
+      "name": "a_06",
+      "path": "/stickers/akendfield2/a_06.png"
+    },
+    "a_14": {
+      "name": "a_14",
+      "path": "/stickers/akendfield2/a_14.png"
+    },
+    "a_05": {
+      "name": "a_05",
+      "path": "/stickers/akendfield2/a_05.png"
+    },
+    "a_07": {
+      "name": "a_07",
+      "path": "/stickers/akendfield2/a_07.png"
+    },
+    "a_04": {
+      "name": "a_04",
+      "path": "/stickers/akendfield2/a_04.png"
+    }
+  }
+}
