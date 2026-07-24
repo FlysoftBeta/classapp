@@ -29,11 +29,11 @@ let pdfjsPaths: PdfjsPaths | null = null;
 function resolvePdfjsDir(): string {
   const appDir = getRuntimeConfig().appDir;
   const candidates = [
-    path.join(appDir, "pdfjs-dist"), // Prod assets
+    path.join(appDir, "server", "pdfjs-dist"), // Prod assets
     path.join(appDir, "node_modules", "pdfjs-dist"), // Dev
   ];
   for (const dir of candidates) {
-    if (existsSync(path.join(dir))) {
+    if (existsSync(dir)) {
       return dir;
     }
   }
