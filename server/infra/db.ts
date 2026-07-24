@@ -501,7 +501,7 @@ function ensureAdminUser(db: Database) {
   const pin =
     runtimeInitialPin !== undefined
       ? runtimeInitialPin
-      : String(Math.floor(Math.random() * 1000000));
+      : String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
   const id = crypto.randomUUID();
   const pinHash = crypto
     .createHmac("sha256", getPinSecret(db))
