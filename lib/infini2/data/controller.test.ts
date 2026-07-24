@@ -431,6 +431,65 @@ test("Blank Predict Zone runs locateOffset then activates a measured island", as
   instance.dispose();
 });
 
+test("measurement during a before Blank Predict seek does not pull view to the first row", async () => {
+  const locateRun = deferred<{ cursor: number; targetId: number }>();
+  let locateCalls = 0;
+  let fetchCalls = 0;
+  const instance = new Infini2Controller<Row, number, number, number>({
+    provider: {
+      bootstrap: async () => ({
+        items: page(0, 40).items,
+        exhaustedBefore: false,
+        exhaustedAfter: false,
+      }),
+      fetch: async () => {
+        fetchCalls += 1;
+        return {
+          items: [],
+          exhaustedBefore: true,
+          exhaustedAfter: true,
+        };
+      },
+      locateOffset: async () => {
+        locateCalls += 1;
+        return locateRun.promise;
+      },
+    },
+    ops: {
+      getId: (item) => item.id,
+      getCursor: (item) => item.id,
+    },
+    estimateSize: () => 10,
+    defaultItemEstimate: 10,
+    initial: { cursor: 20, target: 20, alignment: "center" },
+    targetToCursor: (target) => target,
+    locateTarget: (_items, target) => target,
+    residentBefore: 2,
+    residentAfter: 2,
+    layoutBefore: 20,
+    layoutAfter: 20,
+  });
+  instance.setView({ scroll: 0, viewport: 100 });
+  instance.start();
+  await waitFor(() => instance.getSnapshot().phase.status === "ready");
+  instance.setView({
+    scroll: instance.takeScrollCorrection()!,
+    viewport: 100,
+  });
+  assert.equal(fetchCalls, 0);
+
+  instance.setView({ scroll: 0, viewport: 100 });
+  await waitFor(() => locateCalls === 1);
+  const first = instance.getSnapshot().mainItems[0]!;
+  instance.captureAnchor(0);
+  instance.measure([{ handle: first.handle, extent: 20 }]);
+
+  assert.equal(instance.takeScrollCorrection(), null);
+  assert.equal(locateCalls, 1);
+  assert.equal(fetchCalls, 0);
+  instance.dispose();
+});
+
 test("rapid Blank Predict jumps keep only the latest landing in the foreground", async () => {
   const locateRuns = [
     deferred<{ cursor: number; targetId: number }>(),

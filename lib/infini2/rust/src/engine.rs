@@ -907,11 +907,13 @@ impl Engine {
         let Some(main) = self.islands.get(&main_id) else {
             return INVALID_HANDLE;
         };
-        let rows = main.sequence.layout_range(
-            point.max(0.0),
-            (point + 0.01).max(0.01),
-            &mut self.diagnostics,
-        );
+        if point < 0.0 || point >= main.extent() {
+            self.anchor = None;
+            return INVALID_HANDLE;
+        }
+        let rows = main
+            .sequence
+            .layout_range(point, point + 0.01, &mut self.diagnostics);
         let row = rows.into_iter().next().or_else(|| {
             let index = main
                 .sequence
@@ -2068,6 +2070,24 @@ mod tests {
             ..engine.view()
         });
         assert_eq!(engine.blank_zone(), BlankZone::After);
+    }
+
+    #[test]
+    fn measurement_in_before_predict_zone_does_not_anchor_to_first_row() {
+        let mut engine = ready_engine();
+        engine.set_view(ViewMetrics {
+            scroll: 0.0,
+            ..engine.view()
+        });
+        assert_eq!(engine.blank_zone(), BlankZone::Before);
+        assert_eq!(engine.capture_anchor(0.0), INVALID_HANDLE);
+
+        assert_eq!(engine.measure_batch(&[(1, 20.0)]), 1);
+        assert_eq!(engine.take_scroll_correction(), None);
+        assert_eq!(engine.view().scroll, 0.0);
+        assert!(engine.effects.values().any(|effect| {
+            effect.kind == EffectKind::Seek && effect.direction == Direction::Before
+        }));
     }
 
     #[test]

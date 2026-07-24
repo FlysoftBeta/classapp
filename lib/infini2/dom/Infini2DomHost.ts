@@ -65,6 +65,7 @@ interface PendingItemScroll<TId extends Infini2Id> {
 
 const POSITION_EPSILON = 0.01;
 let nextItemScrollTrace = 1;
+let nextFrameTrace = 1;
 
 function debugNumber(value: number): number | null {
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
@@ -373,8 +374,8 @@ export class Infini2DomHost<
       ...this.physicalHostState(),
     });
     scrollInfini2Host(this.scrollHost, metrics.surfaceOffset, localScroll);
-    this.setControllerView(metrics, localScroll);
     const appliedMetrics = measureInfini2Host(this.scrollHost, this.container);
+    this.setControllerView(appliedMetrics, appliedMetrics.localScroll);
     const appliedRect = slot.node.getBoundingClientRect();
     this.logItemScroll(trace, "align-applied", {
       id: String(slot.id),
@@ -483,10 +484,12 @@ export class Infini2DomHost<
   };
 
   private performLayout(): Infini2Snapshot<TItem, TId> {
+    const trace = nextFrameTrace++;
     this.syncFocusPin();
     const metrics = this.syncView();
     this.flushObservedMeasurements();
     const snapshot = this.controller.getSnapshot();
+    this.logFrame(trace, "begin", snapshot, metrics);
     this.setSurfaceExtent(snapshot.surfaceExtent);
     this.reconcile(snapshot.layoutItems);
     if (snapshot.candidate == null) this.pruneStaged();
@@ -496,9 +499,16 @@ export class Infini2DomHost<
         .map((item) => item.handle)
         .filter((handle) => this.slots.get(handle)?.measured === true),
     );
-    this.applyScrollCorrection(metrics);
+    this.applyScrollCorrection(trace);
     this.applyPendingItemScroll();
-    return this.controller.getSnapshot();
+    const settled = this.controller.getSnapshot();
+    this.logFrame(
+      trace,
+      "end",
+      settled,
+      measureInfini2Host(this.scrollHost, this.container),
+    );
+    return settled;
   }
 
   private reconcile(
@@ -776,26 +786,87 @@ export class Infini2DomHost<
     this.pendingMeasurements.clear();
   }
 
-  private applyScrollCorrection(
-    metrics: ReturnType<typeof measureInfini2Host>,
-  ): void {
+  private applyScrollCorrection(trace: number): void {
     const correction = this.controller.takeScrollCorrection();
     if (correction == null) return;
+    // Surface and live-track writes can synchronously clamp the physical
+    // scroll position, making the transaction's initial metrics stale.
+    const metrics = measureInfini2Host(this.scrollHost, this.container);
     const pending = this.pendingItemScroll;
-    if (pending) {
-      this.logItemScroll(pending.trace, "core-correction", {
-        id: String(pending.id),
-        localBefore: debugNumber(metrics.localScroll),
-        localRequested: debugNumber(correction),
-        surfaceOffset: debugNumber(metrics.surfaceOffset),
-        physicalRequested: debugNumber(metrics.surfaceOffset + correction),
-        ...this.physicalHostState(),
-      });
-    }
+    this.logFrameEvent(trace, "correction-request", {
+      pendingItemId: pending ? String(pending.id) : null,
+      localBefore: debugNumber(metrics.localScroll),
+      localRequested: debugNumber(correction),
+      surfaceOffset: debugNumber(metrics.surfaceOffset),
+      physicalRequested: debugNumber(metrics.surfaceOffset + correction),
+      ...this.physicalHostState(),
+    });
     if (Math.abs(metrics.localScroll - correction) >= POSITION_EPSILON) {
       scrollInfini2Host(this.scrollHost, metrics.surfaceOffset, correction);
     }
-    this.setControllerView(metrics, correction);
+    // A browser may clamp even this write to its current scroll range. The
+    // core must ACK the observed landing, not a position the host never reached.
+    const appliedMetrics = measureInfini2Host(this.scrollHost, this.container);
+    this.logFrameEvent(trace, "correction-applied", {
+      localRequested: debugNumber(correction),
+      localActual: debugNumber(appliedMetrics.localScroll),
+      physicalError: debugNumber(appliedMetrics.localScroll - correction),
+      surfaceOffset: debugNumber(appliedMetrics.surfaceOffset),
+      ...this.physicalHostState(),
+    });
+    this.setControllerView(appliedMetrics, appliedMetrics.localScroll);
+  }
+
+  private logFrame(
+    trace: number,
+    event: string,
+    snapshot: Infini2Snapshot<TItem, TId>,
+    metrics: ReturnType<typeof measureInfini2Host>,
+  ): void {
+    if (!this.controller.debug) return;
+    this.logFrameEvent(trace, event, {
+      phase: snapshot.phase.status,
+      revision: snapshot.revision,
+      layoutRevision: snapshot.layoutRevision,
+      blankZone: snapshot.blankZone,
+      mainIsland: snapshot.mainIsland,
+      mainLength: snapshot.mainLength,
+      mainExtent: debugNumber(snapshot.mainExtent),
+      islandOrigin: debugNumber(snapshot.islandOrigin),
+      surfaceExtent: debugNumber(snapshot.surfaceExtent),
+      visibleStart: debugNumber(snapshot.visible.start),
+      visibleEnd: debugNumber(snapshot.visible.end),
+      layoutStart: debugNumber(snapshot.layoutTarget.start),
+      layoutEnd: debugNumber(snapshot.layoutTarget.end),
+      layoutCount: snapshot.layoutItems.length,
+      layoutFirst: snapshot.layoutItems[0]
+        ? String(snapshot.layoutItems[0].id)
+        : null,
+      layoutLast: snapshot.layoutItems[snapshot.layoutItems.length - 1]
+        ? String(snapshot.layoutItems[snapshot.layoutItems.length - 1]!.id)
+        : null,
+      candidateEffect: snapshot.candidate?.effectId ?? null,
+      effectIds: snapshot.effects.map((effect) => effect.id),
+      localScroll: debugNumber(metrics.localScroll),
+      surfaceOffset: debugNumber(metrics.surfaceOffset),
+      liveCount: this.slots.size,
+      stagedCount: this.staged.size,
+      pendingLiveCount: this.pendingLive.size,
+      ...this.physicalHostState(),
+    });
+  }
+
+  private logFrameEvent(
+    trace: number,
+    event: string,
+    detail: Record<string, unknown>,
+  ): void {
+    const debug = this.controller.debug;
+    if (!debug) return;
+    console.info(
+      "[Infini2 frame]",
+      JSON.stringify({ debug, trace, event, ...detail }),
+    );
   }
 
   private applyPendingItemScroll(): void {
@@ -861,7 +932,7 @@ export class Infini2DomHost<
   }
 
   private attach(): void {
-    this.scrollHost.addEventListener("scroll", this.schedule, {
+    this.scrollHost.addEventListener("scroll", this.handleScroll, {
       passive: true,
     });
     this.ownerWindow.addEventListener("resize", this.schedule, {
@@ -877,7 +948,7 @@ export class Infini2DomHost<
   }
 
   private detach(): void {
-    this.scrollHost.removeEventListener("scroll", this.schedule);
+    this.scrollHost.removeEventListener("scroll", this.handleScroll);
     this.ownerWindow.removeEventListener("resize", this.schedule);
     this.container.removeEventListener("focusin", this.schedule);
     this.container.removeEventListener("focusout", this.schedule);
@@ -887,6 +958,21 @@ export class Infini2DomHost<
       this.pinnedHandle = null;
     }
   }
+
+  private handleScroll = (): void => {
+    const metrics = measureInfini2Host(this.scrollHost, this.container);
+    const snapshot = this.controller.getSnapshot();
+    this.logFrameEvent(0, "native-scroll", {
+      phase: snapshot.phase.status,
+      blankZone: snapshot.blankZone,
+      mainIsland: snapshot.mainIsland,
+      layoutCount: snapshot.layoutItems.length,
+      localScroll: debugNumber(metrics.localScroll),
+      surfaceOffset: debugNumber(metrics.surfaceOffset),
+      ...this.physicalHostState(),
+    });
+    this.schedule();
+  };
 
   private syncFocusPin(): void {
     const active = this.container.ownerDocument.activeElement;

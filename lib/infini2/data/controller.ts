@@ -64,6 +64,17 @@ function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
+function effectKindName(kind: RawEffectKind): string {
+  switch (kind) {
+    case RawEffectKind.Bootstrap:
+      return "bootstrap";
+    case RawEffectKind.EdgeFetch:
+      return "fetch";
+    case RawEffectKind.Seek:
+      return "seek";
+  }
+}
+
 /**
  * Effect runner and domain-object registry around the Rust engine. Async work
  * is owned by effect tickets; a newer scroll intent never globally invalidates
@@ -506,6 +517,10 @@ export class Infini2Controller<
   ): Promise<boolean> {
     this.assertLive();
     this.ensureEngine();
+    this.log("candidate-commit-start", {
+      effectId,
+      measurementCount: measurements.length,
+    });
     if (measurements.length) this.engine.measure(measurements);
     const committed = this.engine.commitCandidate(effectId);
     if (this.candidate?.effectId === effectId) this.candidate = null;
@@ -519,6 +534,17 @@ export class Infini2Controller<
     this.drainReleased();
     this.publish();
     this.pumpEffects();
+    const snapshot = this.engine.snapshot();
+    this.log("candidate-commit-end", {
+      effectId,
+      committed,
+      mainIsland: snapshot.main,
+      mainLength: snapshot.mainLength,
+      mainExtent: snapshot.mainExtent,
+      islandOrigin: snapshot.islandOrigin,
+      surfaceExtent: snapshot.surfaceExtent,
+      layoutRevision: snapshot.layoutRevision,
+    });
     return committed;
   }
 
@@ -549,6 +575,20 @@ export class Infini2Controller<
         abort: new AbortController(),
       };
       this.effects.set(effect.id, active);
+      this.log("effect-start", {
+        effectId: effect.id,
+        kind: effectKindName(effect.kind),
+        direction: toDirection(effect.direction),
+        owner: effect.owner,
+        anchor: effect.anchor,
+        anchorId:
+          this.handleToId.get(effect.anchor) == null
+            ? null
+            : String(this.handleToId.get(effect.anchor)),
+        signedOffset: effect.signedOffset,
+        targetExtent: effect.targetExtent,
+        targetToken: effect.targetToken,
+      });
       changed = true;
       void this.runEffect(active);
     }
@@ -560,6 +600,26 @@ export class Infini2Controller<
     try {
       const result = await this.resolveEffect(active);
       if (this.disposed) return;
+      this.log("effect-resolved", {
+        effectId: effect.id,
+        kind: effectKindName(effect.kind),
+        direction: toDirection(effect.direction),
+        itemCount: result.page.items.length,
+        exhaustedBefore: result.page.exhaustedBefore,
+        exhaustedAfter: result.page.exhaustedAfter,
+        targetId: result.targetId == null ? null : String(result.targetId),
+        pageFirstId: result.page.items[0]
+          ? String(this.config.ops.getId(result.page.items[0]))
+          : null,
+        pageLastId: result.page.items[result.page.items.length - 1]
+          ? String(
+              this.config.ops.getId(
+                result.page.items[result.page.items.length - 1]!,
+              ),
+            )
+          : null,
+        alignment: result.alignment,
+      });
       this.validatePage(effect, result.page);
       const registered = this.registerItems(
         result.page.items.filter(
@@ -580,6 +640,13 @@ export class Infini2Controller<
         exhaustedAfter: result.page.exhaustedAfter,
         targetHandle,
         alignment: toRawAlignment(result.alignment),
+      });
+      this.log("effect-committed", {
+        effectId: effect.id,
+        kind: effectKindName(effect.kind),
+        disposition,
+        registeredCount: registered.length,
+        targetHandle,
       });
       if (disposition === RawCommitDisposition.Rejected) {
         throw new Error("Infini2 rejected an out-of-order provider slice");
@@ -602,6 +669,12 @@ export class Infini2Controller<
     } catch (error) {
       if (this.disposed || active.abort.signal.aborted) return;
       const failure = asError(error);
+      this.log("effect-failed", {
+        effectId: effect.id,
+        kind: effectKindName(effect.kind),
+        direction: toDirection(effect.direction),
+        error: failure.message,
+      });
       const live = this.engine.effect(effect.id);
       const foreground =
         effect.kind === RawEffectKind.EdgeFetch
@@ -772,6 +845,14 @@ export class Infini2Controller<
       effectId,
       items,
     };
+    this.log("candidate-prepare", {
+      effectId,
+      layoutCount: items.length,
+      layoutFirst: items[0] ? String(items[0].id) : null,
+      layoutLast: items[items.length - 1]
+        ? String(items[items.length - 1]!.id)
+        : null,
+    });
     this.candidate = candidate;
     this.publish();
     const measurements = this.candidatePreparer
@@ -793,6 +874,14 @@ export class Infini2Controller<
       0,
       this.view.viewport - this.view.insetStart - this.view.insetEnd,
     );
+    this.log("candidate-measured", {
+      effectId,
+      measurementCount: measurements.length,
+      candidateExtent,
+      visibleExtent,
+      exhaustedBefore: page.exhaustedBefore,
+      exhaustedAfter: page.exhaustedAfter,
+    });
     if (
       candidateExtent + 0.5 < visibleExtent &&
       (!page.exhaustedBefore || !page.exhaustedAfter)
@@ -1037,6 +1126,14 @@ export class Infini2Controller<
     });
     this.engine.setView(this.view);
     this.engineReady = true;
+  }
+
+  private log(event: string, detail: Record<string, unknown>): void {
+    if (!this.debug) return;
+    console.info(
+      "[Infini2 controller]",
+      JSON.stringify({ debug: this.debug, event, ...detail }),
+    );
   }
 
   private assertLive(): void {

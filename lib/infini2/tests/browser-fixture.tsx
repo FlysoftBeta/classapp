@@ -564,6 +564,62 @@ async function run() {
   seekController.dispose();
   seekHost.remove();
 
+  // A surface shrink may clamp scrollTop between the transaction's initial
+  // view read and its correction write. The controller must receive the real
+  // browser landing rather than the now-unreachable requested value.
+  const clampHost = document.createElement("div");
+  const clampSurface = document.createElement("div");
+  clampHost.appendChild(clampSurface);
+  document.body.appendChild(clampHost);
+  Object.assign(clampHost.style, {
+    height: "100px",
+    overflow: "auto",
+  });
+  clampSurface.style.height = "1000px";
+  clampHost.scrollTop = 800;
+  const clampViews: number[] = [];
+  let clampCorrectionPending = true;
+  const clampSnapshot = {
+    surfaceExtent: 200,
+    candidate: null,
+    layoutRevision: 1,
+    layoutItems: [],
+  };
+  const clampController = {
+    debug: undefined,
+    subscribe: () => () => {},
+    setCandidatePreparer: () => () => {},
+    setView: ({ scroll }: { scroll: number }) => clampViews.push(scroll),
+    getSnapshot: () => clampSnapshot,
+    commitLayout: () => true,
+    takeScrollCorrection: () => {
+      if (!clampCorrectionPending) return null;
+      clampCorrectionPending = false;
+      return 800;
+    },
+    captureAnchor: () => 0,
+    measure: () => 0,
+    pin: () => false,
+  } as unknown as Infini2Controller<Row, number, number>;
+  const clampDom = new Infini2DomHost({
+    controller: clampController,
+    container: clampSurface,
+    scrollHost: clampHost,
+    createRow() {
+      return document.createElement("div");
+    },
+  });
+  clampDom.flushNow();
+  const clampedLanding = clampHost.scrollTop;
+  const clampedAck = clampViews[clampViews.length - 1];
+  if (Math.abs(clampedLanding - 100) > 1 || clampedAck !== clampedLanding) {
+    throw new Error(
+      `clamped correction ACK mismatch: host=${clampedLanding}, ack=${clampedAck}`,
+    );
+  }
+  clampDom.dispose();
+  clampHost.remove();
+
   dom.dispose();
   controller.dispose();
   return {
@@ -574,6 +630,7 @@ async function run() {
     windowHostOffset: windowSurfaceOffset,
     runwayOrigin,
     runwayBottom,
+    clampedLanding,
   };
 }
 
