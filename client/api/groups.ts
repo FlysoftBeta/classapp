@@ -1,6 +1,6 @@
 import { observeActionResult } from "./runtime";
 import type { ActionArgs } from "@/shared/protocol/actions";
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 
 const {
   createGroupAction,

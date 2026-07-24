@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConvEntry, PostStreamEvent } from "./useAppLogic";
-import type { AppRoute } from "./appReducer";
+import type { AppRoute } from "../app/appReducer";
 import { conversationKeyFromPost } from "@/client/lib/chat/posts";
 import { postPreview } from "@/shared/types/api/post";
 

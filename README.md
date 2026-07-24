@@ -131,18 +131,18 @@ npm run test:https
 
 ## 技术一览
 
-| 部分           | 实现                       |
-| -------------- | -------------------------- |
-| 前端界面       | React 19、Material UI      |
-| 客户端状态     | Zustand                    |
-| 构建与开发     | Vite、TypeScript           |
-| 服务端         | Node.js                    |
-| 实时通信       | WebSocket                  |
-| 数据存储       | SQLite、better-sqlite3     |
-| 数据校验       | Zod                        |
-| 离线能力       | Service Worker、IndexedDB  |
-| PDF 阅读与渲染 | PDF.js、Canvas             |
-| 虚拟滚动       | Infini2 |
+| 部分           | 实现                      |
+| -------------- | ------------------------- |
+| 前端界面       | React 19、Material UI     |
+| 客户端状态     | Zustand                   |
+| 构建与开发     | Vite、TypeScript          |
+| 服务端         | Node.js                   |
+| 实时通信       | WebSocket                 |
+| 数据存储       | SQLite、better-sqlite3    |
+| 数据校验       | Zod                       |
+| 离线能力       | Service Worker、IndexedDB |
+| PDF 阅读与渲染 | PDF.js、Canvas            |
+| 虚拟滚动       | Infini2                   |
 
 ClassApp 是一个 React 单页应用，不依赖全栈式 React 框架。浏览器中的业务请求通过统一的类型化接口发送，实时消息和状态通知共用 WebSocket；只有上传、下载和 PDF 渲染等需要原始文件语义的操作使用 HTTP。
 

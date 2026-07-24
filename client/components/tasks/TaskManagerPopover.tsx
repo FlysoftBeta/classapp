@@ -8,7 +8,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import { listNetworkArticleDownloads } from "@/client/api/articles";
-import { taskStore, useTaskStore } from "@/client/store/taskStore";
+import { taskStore, useTaskStore } from "@/client/hooks/useTaskStore";
 import { cssMin, flexGap } from "@/client/lib/css";
 
 const KIND_LABEL = {

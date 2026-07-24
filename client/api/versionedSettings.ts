@@ -1,7 +1,7 @@
 import { observeActionResult } from "./runtime";
 const { fetchVersionedUserConfigAction, patchVersionedUserConfigAction } =
   client.actions;
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 import { offlineRepository } from "@/client/resource/offlineRepository";
 
 const USER_NAMESPACE = "user-config";

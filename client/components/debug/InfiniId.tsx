@@ -1,6 +1,6 @@
 import Box from "@mui/material/Box";
 import type { Infini2Id } from "@/lib/infini2";
-import { useDebugStore } from "@/client/store/debugStore";
+import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 /** Development-only label for an Infini2 item's stable identity. */
 export function InfiniId({ id }: { id: Infini2Id }) {

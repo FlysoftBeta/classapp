@@ -8,7 +8,7 @@ import { ConversationSection } from "./ConversationSection";
 import { ArticleSection } from "./ArticleSection";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarSection } from "./SidebarSection";
-import type { ConvEntry } from "@/client/hooks/appReducer";
+import type { ConvEntry } from "@/client/app/appReducer";
 import { TaskManagerPopover } from "@/client/components/tasks/TaskManagerPopover";
 import { hasFeature } from "@/shared/features";
 

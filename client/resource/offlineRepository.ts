@@ -1,5 +1,5 @@
 import type { ArticleWithMeta, Conversation, Post } from "@/shared/types/api";
-import { resourceManager } from "./ResourceManager";
+import { resourceManager } from "./resourceManager";
 import {
   chooseFurthestRead,
   chooseLatestTimestamped,

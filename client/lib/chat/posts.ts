@@ -37,19 +37,3 @@ export function postBelongsToConversation(
       (post.user_id === conv.id && post.dm_to === currentUserId))
   );
 }
-
-/** Append-only merge — dedupe by post id to avoid poll vs onPosted races. */
-export function mergePostsAppend(prev: Post[], incoming: Post[]): Post[] {
-  const ids = new Set(prev.map((p) => p.id));
-  const fresh = incoming.filter((p) => !ids.has(p.id));
-  if (fresh.length === 0) return prev;
-  return [...prev, ...fresh];
-}
-
-/** Prepend older messages — dedupe by post id. */
-export function mergePostsPrepend(prev: Post[], incoming: Post[]): Post[] {
-  const ids = new Set(prev.map((p) => p.id));
-  const fresh = incoming.filter((p) => !ids.has(p.id));
-  if (fresh.length === 0) return prev;
-  return [...fresh, ...prev];
-}

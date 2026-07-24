@@ -1,36 +1,17 @@
 import { lbFetchUrl } from "@/client/lib/loadBalancer";
-import { client } from "@/client/remote/Client";
+import { session } from "@/client/lib/remote/session";
+import { transport } from "@/client/lib/remote/transport";
 import type { ActionResult } from "@/shared/protocol/result";
 
 type RuntimeConfig = {
   buildId: string;
 };
 
-type ClientInvalidHandler = () => void;
-let _onClientInvalid: ClientInvalidHandler | null = null;
 let _buildReloadPending = false;
 let _runtime: RuntimeConfig = { buildId: "dev" };
-let _token = "";
-
-export function setClientInvalidHandler(fn: ClientInvalidHandler): void {
-  _onClientInvalid = fn;
-}
 
 export function configureClientRuntime(runtime: RuntimeConfig): void {
   _runtime = runtime;
-}
-
-export function setClientToken(token: string): void {
-  _token = token;
-  client.setToken(token);
-}
-
-export function getClientToken(): string {
-  return _token;
-}
-
-export function notifyClientInvalid(): void {
-  _onClientInvalid?.();
 }
 
 function reloadOnBuildMismatch(res: Response): void {
@@ -50,7 +31,7 @@ export async function apiFetch(
   url: string,
   init?: RequestInit,
 ): Promise<Response> {
-  if (client.isForcedOffline()) {
+  if (transport.isForcedOffline()) {
     throw new TypeError("已强制切换到离线模式");
   }
   const res = await fetch(lbFetchUrl(url), init);
@@ -61,7 +42,7 @@ export async function apiFetch(
       const clone = res.clone();
       const data = await clone.json();
       if (data?.client_invalid) {
-        _onClientInvalid?.();
+        session.invalidate();
       }
     } catch {
       // ignore JSON parse errors
@@ -88,14 +69,6 @@ export function applyActionResultMeta<T>(result: ActionResult<T>): void {
     _buildReloadPending = true;
     window.location.reload();
     return;
-  }
-
-  if (
-    !result.ok &&
-    result.error.kind === "checked" &&
-    result.error.tokenExpired
-  ) {
-    notifyClientInvalid();
   }
 }
 

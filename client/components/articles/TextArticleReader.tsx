@@ -19,7 +19,7 @@ import {
 } from "@/client/lib/reader/textChunks";
 import { useInfini2, type Infini2Provider } from "@/lib/infini2";
 import { InfiniId } from "@/client/components/debug/InfiniId";
-import { useDebugStore } from "@/client/store/debugStore";
+import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -4,7 +4,7 @@ import {
   initialAppStore,
   type AppAction,
   type AppStore,
-} from "@/client/hooks/appReducer";
+} from "@/client/app/appReducer";
 
 type AppStoreState = AppStore & {
   dispatch: (action: AppAction) => void;

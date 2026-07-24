@@ -1,8 +1,8 @@
 import type { User } from "@/shared/types/api";
 import type { ActionArgs, ActionData } from "@/shared/protocol/actions";
 import { observeActionResult } from "./runtime";
-import type { AppStatePayload } from "@/client/hooks/appReducer";
-import { client } from "@/client/remote/Client";
+import type { AppStatePayload } from "@/client/app/appReducer";
+import { client } from "@/client/lib/remote/client";
 
 const {
   autoLoginAction,

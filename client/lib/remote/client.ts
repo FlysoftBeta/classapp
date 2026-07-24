@@ -16,6 +16,12 @@ import {
 } from "@/shared/protocol/result";
 import { UncheckedError } from "@/shared/protocol/errors";
 import { PROTOCOL_VERSION, serverFrameSchema } from "@/shared/protocol/wire";
+import { session } from "./session";
+import {
+  transport,
+  TransportUnavailableError,
+  type TransportState,
+} from "./transport";
 
 type EventListener = (data: unknown) => void;
 type ConnectionListener = (connected: boolean) => void;
@@ -35,9 +41,10 @@ type PendingAction = {
   action: ActionName;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
 };
 
-/** Aggregates typed Actions and Events over the stateful WebSocket protocol. */
+/** Typed Action/Event protocol. It never starts or reconnects the transport. */
 export class Client {
   readonly actions = new Proxy(
     {},
@@ -49,94 +56,40 @@ export class Client {
     },
   ) as ActionFunctions;
 
-  private socket: WebSocket | null = null;
-  private token = "";
   private sequence = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = 500;
   private pending = new Map<string, PendingAction>();
   private eventListeners = new Map<EventName | "*", Set<EventListener>>();
   private connectionListeners = new Set<ConnectionListener>();
-  buildId = "dev";
   private connected = false;
-  private forcedOffline = false;
+  buildId = "dev";
+
+  constructor() {
+    transport.onMessage((raw) => this.receive(raw));
+    transport.onStateChange((state) => this.handleTransportState(state));
+  }
 
   isConnected(): boolean {
-    return this.connected && !this.forcedOffline;
-  }
-
-  isForcedOffline(): boolean {
-    return this.forcedOffline;
-  }
-
-  setForcedOffline(forcedOffline: boolean): void {
-    if (this.forcedOffline === forcedOffline) return;
-    const wasConnected = this.isConnected();
-    this.forcedOffline = forcedOffline;
-
-    if (forcedOffline) {
-      for (const pending of this.pending.values()) {
-        pending.reject(
-          new RemoteProtocolError("OFFLINE", "已强制切换到离线模式"),
-        );
-      }
-      this.pending.clear();
-    }
-
-    if (!forcedOffline && this.connected) this.authenticate();
-    const isConnected = this.isConnected();
-    if (wasConnected !== isConnected) this.notifyConnection(isConnected);
-    if (!forcedOffline && !this.connected) this.connect();
-  }
-
-  connect(): void {
-    if (this.forcedOffline) return;
-    if (
-      this.socket?.readyState === WebSocket.OPEN ||
-      this.socket?.readyState === WebSocket.CONNECTING
-    )
-      return;
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${location.host}/ws`);
-    this.socket = socket;
-    socket.addEventListener("open", () => {
-      this.reconnectDelay = 500;
-      this.authenticate();
-      this.setTransportConnected(true);
-    });
-    socket.addEventListener("message", (event) =>
-      this.receive(String(event.data)),
-    );
-    socket.addEventListener("close", () => this.disconnected());
-    socket.addEventListener("error", () => socket.close());
-  }
-
-  /** Authentication is connection state; Action frames never repeat the token. */
-  setToken(token: string): void {
-    this.token = token;
-    this.authenticate();
+    return transport.isConnected();
   }
 
   async call<K extends ActionName>(
     action: K,
     ...args: ActionArgs<K>
   ): Promise<CheckedActionResult<ActionData<K>>> {
-    await this.ready();
-    const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      throw new RemoteProtocolError("OFFLINE", "服务连接不可用");
+    if (!transport.isConnected()) {
+      throw new TransportUnavailableError();
     }
     const id = `${Date.now().toString(36)}-${++this.sequence}`;
     const result = new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { action, resolve, reject });
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         const item = this.pending.get(id);
         if (!item) return;
         this.pending.delete(id);
         item.reject(new RemoteProtocolError("TIMEOUT", "请求超时"));
       }, 30_000);
+      this.pending.set(id, { action, resolve, reject, timeout });
     });
-    socket.send(
+    transport.send(
       JSON.stringify({
         v: PROTOCOL_VERSION,
         kind: "request",
@@ -170,40 +123,7 @@ export class Client {
     return () => this.connectionListeners.delete(listener);
   }
 
-  private async ready(): Promise<void> {
-    if (this.forcedOffline) {
-      throw new RemoteProtocolError("OFFLINE", "已强制切换到离线模式");
-    }
-    this.connect();
-    if (this.socket?.readyState === WebSocket.OPEN) return;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        off();
-        reject(new RemoteProtocolError("OFFLINE", "无法连接服务"));
-      }, 10_000);
-      const off = this.onConnectionChange((connected) => {
-        if (!connected) return;
-        clearTimeout(timeout);
-        off();
-        resolve();
-      });
-    });
-  }
-
-  private authenticate(): void {
-    if (this.forcedOffline) return;
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
-    this.socket.send(
-      JSON.stringify({
-        v: PROTOCOL_VERSION,
-        kind: "authenticate",
-        token: this.token,
-      }),
-    );
-  }
-
   private receive(raw: string): void {
-    if (this.forcedOffline) return;
     let json: unknown;
     try {
       json = JSON.parse(raw);
@@ -227,6 +147,7 @@ export class Client {
     const pending = this.pending.get(frame.id);
     if (!pending) return;
     this.pending.delete(frame.id);
+    clearTimeout(pending.timeout);
     const contract = actionContracts[pending.action];
     const result = actionResultSchema(contract.output).safeParse(frame.result);
     if (!result.success) {
@@ -239,6 +160,7 @@ export class Client {
       );
       return;
     }
+    session.observeResult(result.data);
     if (!result.data.ok && result.data.error.kind === "unchecked") {
       pending.reject(UncheckedError.fromData(result.data.error));
       return;
@@ -258,31 +180,17 @@ export class Client {
     }
   }
 
-  private disconnected(): void {
-    this.socket = null;
+  private handleTransportState(state: TransportState): void {
+    const connected = state.kind === "connected";
+    if (this.connected === connected) return;
+    this.connected = connected;
+    for (const listener of this.connectionListeners) listener(connected);
+    if (connected || this.pending.size === 0) return;
     for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
       pending.reject(new RemoteProtocolError("DISCONNECTED", "服务连接已断开"));
     }
     this.pending.clear();
-    this.setTransportConnected(false);
-    if (this.forcedOffline || this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, this.reconnectDelay);
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10_000);
-  }
-
-  private setTransportConnected(connected: boolean): void {
-    const wasConnected = this.isConnected();
-    this.connected = connected;
-    const isConnected = this.isConnected();
-    if (wasConnected === isConnected) return;
-    this.notifyConnection(isConnected);
-  }
-
-  private notifyConnection(connected: boolean): void {
-    for (const listener of this.connectionListeners) listener(connected);
   }
 }
 

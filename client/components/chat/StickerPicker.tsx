@@ -25,7 +25,7 @@ import {
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
 import Tooltip from "@mui/material/Tooltip";
 import { InfiniId } from "@/client/components/debug/InfiniId";
-import { useDebugStore } from "@/client/store/debugStore";
+import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 const PICKER_WIDTH = 320;
 const STICKER_CELL = 72;

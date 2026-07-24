@@ -1,4 +1,4 @@
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 
 interface AppManifest {
   buildId: string;
@@ -11,7 +11,7 @@ interface AppManifest {
  * When an update exists, the old application never starts: the new bundle is
  * committed to IndexedDB and activated before reloading into Shell.
  */
-export async function startApplicationManager(
+export async function updateBundle(
   currentBuildId: string,
 ): Promise<() => void> {
   let checking = false;

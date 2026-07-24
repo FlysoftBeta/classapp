@@ -19,7 +19,7 @@ const {
   startNetworkArticleDownloadAction,
   listNetworkArticleDownloadsAction,
 } = client.actions;
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { offlineRepository } from "@/client/resource/offlineRepository";
 

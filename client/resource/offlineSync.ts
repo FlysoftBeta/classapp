@@ -18,7 +18,7 @@ import {
   type ConversationDownloadPolicy,
 } from "./offlineRepository";
 import { syncPendingUserSettings } from "@/client/api/versionedSettings";
-import { taskStore } from "@/client/store/taskStore";
+import { taskStore } from "@/client/hooks/useTaskStore";
 
 export async function downloadConversationForOffline(
   ref: Pick<Conversation, "type" | "id">,

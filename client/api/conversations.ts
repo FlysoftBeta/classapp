@@ -1,5 +1,5 @@
 import { observeActionResult } from "./runtime";
-import type { ConvEntry } from "@/client/hooks/appReducer";
+import type { ConvEntry } from "@/client/app/appReducer";
 const {
   fetchConversationDraftAction,
   fetchConversationsAction,
@@ -8,7 +8,7 @@ const {
   setConversationMutedAction,
   setConversationPinnedAction,
 } = client.actions;
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { offlineRepository } from "@/client/resource/offlineRepository";
 

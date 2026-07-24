@@ -1,5 +1,5 @@
 import { observeActionResult } from "./runtime";
-import { client } from "@/client/remote/Client";
+import { client } from "@/client/lib/remote/client";
 
 const {
   adminFetchSelfDisciplineModeAction,

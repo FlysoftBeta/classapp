@@ -6,8 +6,8 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Popover from "@mui/material/Popover";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
-import { client } from "@/client/remote/Client";
-import { useDebugStore } from "@/client/store/debugStore";
+import { transport } from "@/client/lib/remote/transport";
+import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export default function DebugMenu() {
   if (!import.meta.env.DEV) return null;
@@ -17,7 +17,7 @@ export default function DebugMenu() {
 function DebugMenuContents() {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [forcedOffline, setForcedOffline] = useState(() =>
-    client.isForcedOffline(),
+    transport.isForcedOffline(),
   );
   const showInfiniIds = useDebugStore((state) => state.showInfiniIds);
   const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
@@ -25,7 +25,7 @@ function DebugMenuContents() {
   const setShowInfiniLogs = useDebugStore((state) => state.setShowInfiniLogs);
 
   const handleForcedOffline = (enabled: boolean) => {
-    client.setForcedOffline(enabled);
+    transport.setForcedOffline(enabled);
     setForcedOffline(enabled);
   };
 

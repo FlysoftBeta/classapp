@@ -15,7 +15,7 @@ import {
   searchNetworkArticles,
   startNetworkArticleDownload,
 } from "@/client/api/articles";
-import { taskStore } from "@/client/store/taskStore";
+import { taskStore } from "@/client/hooks/useTaskStore";
 
 type Result =
   Awaited<ReturnType<typeof searchNetworkArticles>> extends infer R

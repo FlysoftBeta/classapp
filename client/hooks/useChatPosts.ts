@@ -29,7 +29,7 @@ import {
   postBelongsToConversation,
 } from "@/client/lib/chat/posts";
 import { offlineRepository } from "@/client/resource/offlineRepository";
-import { useDebugStore } from "@/client/store/debugStore";
+import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export interface UseChatPostsParams {
   currentUser: User;

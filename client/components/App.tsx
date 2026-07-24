@@ -7,37 +7,37 @@ import IconButton from "@mui/material/IconButton";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 
-import LockScreen from "./components/auth/LockScreen";
-import LoginScreen from "./components/auth/LoginScreen";
-import OnboardingFlow from "./components/auth/OnboardingFlow";
-import AppLockedScreen from "./components/auth/AppLockedScreen";
-import ConversationList from "./components/sidebar/Sidebar";
-import ChatView from "./components/chat/ChatView";
-import Settings from "./components/settings/Settings";
-import AdminPanel from "./components/admin/AdminPanel";
-import ArticleList from "./components/articles/ArticleList";
-import ArticleReader from "./components/articles/ArticleReader";
-import Learning from "./components/learning/Learning";
-import WordLearningPage from "./components/learning/WordLearningPage";
-import WrongWordsPage from "./components/learning/WrongWordsPage";
-import MasteredWordsPage from "./components/learning/MasteredWordsPage";
-import ClearWrongWordsPage from "./components/learning/ClearWrongWordsPage";
+import LockScreen from "./auth/LockScreen";
+import LoginScreen from "./auth/LoginScreen";
+import OnboardingFlow from "./auth/OnboardingFlow";
+import AppLockedScreen from "./auth/AppLockedScreen";
+import ConversationList from "./sidebar/Sidebar";
+import ChatView from "./chat/ChatView";
+import Settings from "./settings/Settings";
+import AdminPanel from "./admin/AdminPanel";
+import ArticleList from "./articles/ArticleList";
+import ArticleReader from "./articles/ArticleReader";
+import Learning from "./learning/Learning";
+import WordLearningPage from "./learning/WordLearningPage";
+import WrongWordsPage from "./learning/WrongWordsPage";
+import MasteredWordsPage from "./learning/MasteredWordsPage";
+import ClearWrongWordsPage from "./learning/ClearWrongWordsPage";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import WifiOffIcon from "@mui/icons-material/WifiOff";
-import DebugMenu from "./components/debug/DebugMenu";
+import DebugMenu from "./debug/DebugMenu";
 
-import { useAppLogic, type ConvEntry } from "./hooks/useAppLogic";
-import { useMessageBanner } from "./hooks/useMessageBanner";
-import MessageBanner from "./components/notifications/MessageBanner";
-import { readUserSetting, writeUserSetting } from "./api/versionedSettings";
-import { fetchNotificationConfig } from "./api/notificationConfig";
+import { useAppLogic, type ConvEntry } from "../hooks/useAppLogic";
+import { useMessageBanner } from "../hooks/useMessageBanner";
+import MessageBanner from "./notifications/MessageBanner";
+import { readUserSetting, writeUserSetting } from "../api/versionedSettings";
+import { fetchNotificationConfig } from "../api/notificationConfig";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
-import { offlineRepository } from "./resource/offlineRepository";
-import type { AppRoute, ViewType } from "./hooks/appReducer";
+import { offlineRepository } from "../resource/offlineRepository";
+import type { AppRoute, ViewType } from "../app/appReducer";
 import { vh, inset } from "@/client/lib/css";
 import { hasFeature } from "@/shared/features";
 
@@ -623,7 +623,9 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline enableColorScheme />
 
-      {appState === "loading" &&  <Box style={{ position: "fixed", background: "#fff", ...inset(0) }} />}
+      {appState === "loading" && (
+        <Box style={{ position: "fixed", background: "#fff", ...inset(0) }} />
+      )}
 
       {appState === "konami" && <LockScreen onUnlock={unlockKonami} />}
 

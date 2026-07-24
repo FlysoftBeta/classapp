@@ -13,7 +13,7 @@ import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import ContentPasteIcon from "@mui/icons-material/ContentPaste";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import { createArticle, createBlobArticle } from "@/client/api/articles";
-import { newTaskId, taskStore } from "@/client/store/taskStore";
+import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
 import { NetworkArticleDialog } from "./NetworkArticleDialog";
 
 export function ArticleImportFab({

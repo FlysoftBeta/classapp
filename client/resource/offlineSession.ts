@@ -1,5 +1,5 @@
 import { userSchema, type User } from "@/shared/types/api";
-import { resourceManager } from "./ResourceManager";
+import { resourceManager } from "./resourceManager";
 
 const SESSION_KEY = "offline:v1:session";
 let pendingWrite = Promise.resolve();
@@ -21,7 +21,11 @@ export const offlineSession = {
     if (!value || typeof value !== "object") return null;
     const candidate = value as { token?: unknown; user?: unknown };
     const user = userSchema.safeParse(candidate.user);
-    if (typeof candidate.token !== "string" || !candidate.token || !user.success)
+    if (
+      typeof candidate.token !== "string" ||
+      !candidate.token ||
+      !user.success
+    )
       return null;
     return { token: candidate.token, user: user.data };
   },
