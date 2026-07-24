@@ -7,7 +7,8 @@ import {
 } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readArticleBlob } from "@/server/infra/articleBlobs";
 import { ServiceError } from "./errors";
-import { fileURLToPath } from "url";
+import { pathToFileURL } from "url";
+import { getRuntimeConfig } from "../infra/runtimeConfig";
 
 const DEFAULT_POOL_SIZE = 8;
 const MAX_POOL_SIZE = 12;
@@ -26,14 +27,13 @@ interface PdfjsPaths {
 let pdfjsPaths: PdfjsPaths | null = null;
 
 function resolvePdfjsDir(): string {
+  const appDir = getRuntimeConfig().appDir;
   const candidates = [
-    // Production bundles the PDF.js data files beside main.mjs.
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "pdfjs-dist"),
-    path.join(process.cwd(), "node_modules", "pdfjs-dist"),
-    path.join(process.cwd(), "current", "node_modules", "pdfjs-dist"),
+    path.join(appDir, "pdfjs-dist"), // Prod assets
+    path.join(appDir, "node_modules", "pdfjs-dist"), // Dev
   ];
   for (const dir of candidates) {
-    if (existsSync(path.join(dir, "legacy", "build", "pdf.mjs"))) {
+    if (existsSync(path.join(dir))) {
       return dir;
     }
   }
@@ -44,12 +44,22 @@ function getPdfjsPaths(): PdfjsPaths {
   if (pdfjsPaths) return pdfjsPaths;
   const pdfjsDir = resolvePdfjsDir();
   pdfjsPaths = {
-    // Important notice! *Url-s don't accept file:// URIs; plus they need to include '/' to pass the directory check (even on Windows)
+    // Important notice! file:// URIs unsupported on Unix-like; plus they need to include '/' to pass the directory check
     cMapUrl: path.join(pdfjsDir, "cmaps") + "/",
     standardFontDataUrl: path.join(pdfjsDir, "standard_fonts") + "/",
-    workerSrc: path.join(pdfjsDir, "legacy/build/pdf.worker.mjs"),
+    workerSrc: path.join(pdfjsDir, "legacy/build/pdf.worker.mjs"), // file
     wasmUrl: path.join(pdfjsDir, "wasm") + "/",
   };
+  if (process.platform === "win32") {
+    pdfjsPaths = {
+      // Important notice! only file:// is supported on Windows; plus they need to include '/' to pass the directory check
+      cMapUrl: pathToFileURL(pdfjsPaths.cMapUrl).href + "/",
+      standardFontDataUrl:
+        pathToFileURL(pdfjsPaths.standardFontDataUrl).href + "/",
+      workerSrc: pathToFileURL(pdfjsPaths.wasmUrl).href, // file
+      wasmUrl: pathToFileURL(pdfjsPaths.wasmUrl).href + "/",
+    };
+  }
   GlobalWorkerOptions.workerSrc = pdfjsPaths.workerSrc;
   return pdfjsPaths;
 }
