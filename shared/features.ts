@@ -20,11 +20,17 @@ export const FEATURE_GATE_LABELS: Record<FeatureGate, string> = {
   article_download: "文章下载",
 };
 
-export const DEFAULT_FEATURE_MASK = 126;
-export const ADMIN_FEATURE_MASK = 127;
+export const MAX_FEATURE_MASK = 2 ** FEATURE_GATES.length - 1;
 
 export function featureBit(gate: FeatureGate): number {
   return 1 << FEATURE_GATES.indexOf(gate);
+}
+
+export const DEFAULT_FEATURE_MASK = MAX_FEATURE_MASK & ~featureBit("admin");
+export const ADMIN_FEATURE_MASK = MAX_FEATURE_MASK;
+
+export function isValidFeatureMask(mask: number): boolean {
+  return Number.isInteger(mask) && mask >= 0 && mask <= MAX_FEATURE_MASK;
 }
 
 export function hasFeature(

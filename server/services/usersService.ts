@@ -28,7 +28,7 @@ import { ServiceError } from "./errors";
 import { toDbTimestamp } from "@/shared/time";
 import { publishUser } from "./eventBus";
 import type { User } from "@/shared/types/api";
-import { DEFAULT_FEATURE_MASK } from "@/shared/features";
+import { DEFAULT_FEATURE_MASK, isValidFeatureMask } from "@/shared/features";
 
 export interface UserServiceDeps {
   createId: () => string;
@@ -108,6 +108,12 @@ export class UserService {
     if (!params.pin || !/^\d{6}$/.test(params.pin)) {
       throw new ServiceError("PIN 必须为 6 位数字");
     }
+    if (
+      params.feature_mask !== undefined &&
+      !isValidFeatureMask(params.feature_mask)
+    ) {
+      throw new ServiceError("feature_mask 无效");
+    }
 
     if (findUserIdByHandle(this.db, params.handle)) {
       throw new ServiceError("该 ID 已存在", 409);
@@ -154,11 +160,7 @@ export class UserService {
     }
 
     if (params.feature_mask !== undefined) {
-      if (
-        !Number.isInteger(params.feature_mask) ||
-        params.feature_mask < 0 ||
-        params.feature_mask > 63
-      ) {
+      if (!isValidFeatureMask(params.feature_mask)) {
         throw new ServiceError("feature_mask 无效");
       }
       updateUserFeatureMask(this.db, id, params.feature_mask);

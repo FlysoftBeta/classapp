@@ -6,6 +6,7 @@ import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
 import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { ADMIN_FEATURE_MASK } from "@/shared/features";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
 
@@ -510,8 +511,8 @@ function ensureAdminUser(db: Database) {
 
   db.transaction(() => {
     db.prepare(
-      "INSERT INTO users (id, handle, username, role, feature_mask) VALUES (?, 'admin', '管理员', 'admin', 63)",
-    ).run(id);
+      "INSERT INTO users (id, handle, username, role, feature_mask) VALUES (?, 'admin', '管理员', 'admin', ?)",
+    ).run(id, ADMIN_FEATURE_MASK);
     db.prepare(
       "INSERT INTO user_pins (id, user_id, pin_hash) VALUES (?, ?, ?)",
     ).run(crypto.randomUUID(), id, pinHash);
