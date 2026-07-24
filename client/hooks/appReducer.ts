@@ -196,8 +196,14 @@ export function appReducer(state: AppStore, action: AppAction): AppStore {
       const nextAppState = appStateFromPayload(p);
       const sessionDead = !p.session_valid || !p.user;
       // Ignore stale anonymous probes (e.g. event refresh fired before tokenRef
-      // caught up right after login). Real expiry probes include reason.
-      if (sessionDead && state.token && p.reason !== "session_expired") {
+      // caught up right after login). Real expiry and invalid-client probes must
+      // still revoke the locally restored session.
+      if (
+        sessionDead &&
+        state.token &&
+        p.reason !== "session_expired" &&
+        !p.client_invalid
+      ) {
         return state;
       }
       return {

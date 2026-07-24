@@ -619,15 +619,11 @@ export default function App() {
     });
   }, []);
 
-  if (appState === "loading") {
-    return (
-      <div style={{ position: "fixed", background: "#fff", ...inset(0) }} />
-    );
-  }
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline enableColorScheme />
+
+      {appState === "loading" &&  <Box style={{ position: "fixed", background: "#fff", ...inset(0) }} />}
 
       {appState === "konami" && <LockScreen onUnlock={unlockKonami} />}
 

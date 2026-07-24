@@ -365,7 +365,7 @@ function startServer(): void {
 
 // ── Shutdown ─────────────────────────────────────────────────────────────────
 function shutdown(sig: NodeJS.Signals): void {
-  console.log(`[Launcher] 收到 ${sig}，正在关闭…`);
+  console.log(`[Launcher] ${sig}`);
   restarting = true;
   disarmUpdateWatchdog();
   try {

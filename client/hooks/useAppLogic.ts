@@ -30,6 +30,10 @@ import {
 import { useAppStore } from "@/client/store/appStore";
 import { offlineRepository } from "@/client/resource/offlineRepository";
 import {
+  offlineSession,
+  type OfflineSession,
+} from "@/client/resource/offlineSession";
+import {
   syncOfflineContent,
   syncPendingMutations,
 } from "@/client/resource/offlineSync";
@@ -86,12 +90,18 @@ export function useAppLogic() {
   }, [store.user?.id]);
 
   useEffect(() => {
+    if (!store.token || !store.user) return;
+    void offlineSession.save({ token: store.token, user: store.user });
+  }, [store.token, store.user]);
+
+  useEffect(() => {
     appStateRef.current = store.appState;
   }, [store.appState]);
 
   // ── Client-invalid global handler ─────────────────────────────────────────
   useEffect(() => {
     setClientInvalidHandler(() => {
+      void offlineSession.clear();
       dispatch({ type: "LOGOUT" });
       dispatch({ type: "SET_APP_STATE", appState: "login" });
     });
@@ -237,6 +247,9 @@ export function useAppLogic() {
 
   const applyState = useCallback(
     (p: AppStatePayload) => {
+      if (p.reason === "session_expired" || p.client_invalid) {
+        void offlineSession.clear();
+      }
       dispatch({ type: "APPLY_STATE", payload: p });
     },
     [dispatch],
@@ -305,6 +318,7 @@ export function useAppLogic() {
       client.subscribe("client.lock_changed", refresh),
       client.subscribe("client.idle_locked", refreshIdleLocked),
       client.subscribe("client.deleted", () => {
+        void offlineSession.clear();
         dispatch({ type: "LOGOUT" });
         dispatch({ type: "SET_APP_STATE", appState: "login" });
       }),
@@ -382,7 +396,29 @@ export function useAppLogic() {
   // ── Auto-login on mount ──────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      let cachedSession: OfflineSession | null = null;
       try {
+        cachedSession = await offlineSession.get();
+        if (cachedSession) {
+          offlineRepository.setUserScope(cachedSession.user.id);
+          tokenRef.current = cachedSession.token;
+          setClientToken(cachedSession.token);
+          dispatch({
+            type: "SET_TOKEN",
+            token: cachedSession.token,
+            user: cachedSession.user,
+          });
+          dispatch({ type: "SET_APP_STATE", appState: "app" });
+          await Promise.all([loadConversations(), loadArticleSidebar()]);
+        }
+
+        if (!navigator.onLine) {
+          if (!cachedSession) {
+            dispatch({ type: "SET_APP_STATE", appState: "login" });
+          }
+          return;
+        }
+
         const me = await getClientMe();
         if (me.res.ok && "client_id" in me.data) {
           setClientId(me.data.client_id ?? "");
@@ -390,6 +426,8 @@ export function useAppLogic() {
         const auto = await autoLogin();
 
         if (auto.banned) {
+          await offlineSession.clear();
+          dispatch({ type: "LOGOUT" });
           dispatch({
             type: "SET_APP_DISABLE",
             appDisable: {
@@ -404,6 +442,7 @@ export function useAppLogic() {
         }
 
         if (auto.user && auto.token) {
+          cachedSession = { user: auto.user, token: auto.token };
           offlineRepository.setUserScope(auto.user.id);
           tokenRef.current = auto.token;
           setClientToken(auto.token);
@@ -418,13 +457,15 @@ export function useAppLogic() {
 
         const p = await probeState();
         if (p) applyState(p);
-        else
+        else if (!cachedSession)
           dispatch({
             type: "SET_APP_STATE",
             appState: auto.konami_locked ? "konami" : "login",
           });
       } catch {
-        dispatch({ type: "SET_APP_STATE", appState: "login" });
+        if (!cachedSession) {
+          dispatch({ type: "SET_APP_STATE", appState: "login" });
+        }
       }
     })();
   }, [dispatch, loadConversations, loadArticleSidebar, probeState, applyState]);
@@ -611,6 +652,7 @@ export function useAppLogic() {
     } catch {
       /* ignore */
     }
+    await offlineSession.clear();
     dispatch({ type: "LOGOUT" });
     tokenRef.current = "";
     const p = await probeState();
