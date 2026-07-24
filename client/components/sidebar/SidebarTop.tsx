@@ -32,14 +32,18 @@ export function SidebarTopProps({
         Baker
       </Typography>
       <Tooltip title="发现群组">
-        <IconButton size="small" onClick={onFindGroup} disabled={!online}>
-          <SearchIcon fontSize="small" />
-        </IconButton>
+        <span>
+          <IconButton size="small" onClick={onFindGroup} disabled={!online}>
+            <SearchIcon fontSize="small" />
+          </IconButton>
+        </span>
       </Tooltip>
       <Tooltip title="创建群组">
-        <IconButton size="small" onClick={onCreateGroup} disabled={!online}>
-          <AddIcon fontSize="small" />
-        </IconButton>
+        <span>
+          <IconButton size="small" onClick={onCreateGroup} disabled={!online}>
+            <AddIcon fontSize="small" />
+          </IconButton>
+        </span>
       </Tooltip>
     </Box>
   );

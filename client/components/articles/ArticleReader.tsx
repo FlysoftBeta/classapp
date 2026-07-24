@@ -314,13 +314,15 @@ export default function ArticleReader({
           </Tooltip>
           {offlineEnabled && (
             <Tooltip title="离线下载">
-              <IconButton
-                size="small"
-                onClick={() => setDownloadOpen(true)}
-                disabled={!meta || meta.content_kind !== "text"}
-              >
-                <DownloadIcon fontSize="small" />
-              </IconButton>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => setDownloadOpen(true)}
+                  disabled={!meta || meta.content_kind !== "text"}
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+              </span>
             </Tooltip>
           )}
           {canDelete && (

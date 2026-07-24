@@ -9,7 +9,10 @@ import { offlineSession } from "@/client/resource/offlineSession";
 import { useAppStore } from "@/client/app/appStore";
 import type { EventData } from "@/shared/protocol/events";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
-import type { AppStatePayload, UserConfigChangedEvent } from "@/client/app/appReducer";
+import type {
+  AppStatePayload,
+  UserConfigChangedEvent,
+} from "@/client/app/appReducer";
 import {
   refreshArticleSidebar,
   refreshConversations,

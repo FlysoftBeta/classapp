@@ -50,16 +50,20 @@ export function SidebarBottom({
       </Typography>
       {adminEnabled && (
         <Tooltip title="管理后台">
-          <IconButton size="small" onClick={onAdmin} disabled={!online}>
-            <AdminPanelSettingsIcon fontSize="small" />
-          </IconButton>
+          <span>
+            <IconButton size="small" onClick={onAdmin} disabled={!online}>
+              <AdminPanelSettingsIcon fontSize="small" />
+            </IconButton>
+          </span>
         </Tooltip>
       )}
       {learningEnabled && (
         <Tooltip title="学习">
-          <IconButton size="small" onClick={onLearning} disabled={!online}>
-            <span style={{ fontSize: 20, color: "#999999" }}>💪</span>
-          </IconButton>
+          <span>
+            <IconButton size="small" onClick={onLearning} disabled={!online}>
+              💪
+            </IconButton>
+          </span>
         </Tooltip>
       )}
       <Tooltip title="任务管理">

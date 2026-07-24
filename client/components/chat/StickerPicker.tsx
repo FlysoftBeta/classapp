@@ -333,14 +333,16 @@ export function StickerPicker({
   return (
     <>
       <Tooltip title="表情">
-        <IconButton
-          size="small"
-          disabled={disabled}
-          onClick={(e) => setAnchorEl(e.currentTarget)}
-          sx={{ mb: 0.5, mr: 0.5 }}
-        >
-          <EmojiEmotionsIcon fontSize="small" />
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            disabled={disabled}
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            sx={{ mb: 0.5, mr: 0.5 }}
+          >
+            <EmojiEmotionsIcon fontSize="small" />
+          </IconButton>
+        </span>
       </Tooltip>
       <Popover
         action={popoverActionRef}
