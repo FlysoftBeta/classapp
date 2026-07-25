@@ -10,7 +10,7 @@ const GROUP_SELECT = `
 
 const GROUP_LIST_SELECT = `
   id, handle, name, (password_hash IS NOT NULL) as has_password,
-  type, members_hidden, admin_only, no_leave, parent_group_id
+  type, members_hidden, admin_only, no_leave, parent_group_id, created_at
 `;
 
 export interface DiscoveryParentRow {
