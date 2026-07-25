@@ -30,17 +30,26 @@ async function main(): Promise<void> {
     },
   });
 
-  const [{ createHttpHandler }, { WebSocketProtocol }] = await Promise.all([
+  const [
+    { createHttpHandler },
+    { getDb },
+    { WebSocketProtocol },
+    { startMaintenance: startPeriodicMaintenance },
+  ] = await Promise.all([
     import("@/server/http/handler"),
+    import("@/server/infra/db"),
     import("@/server/protocol/WebSocketProtocol"),
+    import("@/server/services/maintenance"),
   ]);
   const backend = createServer(createHttpHandler(config));
   new WebSocketProtocol("dev").attach(backend);
+  const stopMaintenance = startPeriodicMaintenance(getDb());
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );
 
   const shutdown = async () => {
+    stopMaintenance();
     backend.close(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);

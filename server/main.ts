@@ -7,7 +7,9 @@ import {
   type ClassAppRuntimeConfig,
 } from "@/server/infra/runtimeConfig";
 import { createHttpHandler } from "@/server/http/handler";
+import { getDb } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
+import { startMaintenance } from "@/server/services/maintenance";
 
 export async function bootstrap(
   config: ClassAppRuntimeConfig,
@@ -24,6 +26,7 @@ export async function bootstrap(
     },
   });
   const protocol = new WebSocketProtocol(config.buildId);
+  const stopMaintenance = startMaintenance(getDb());
   const servers: Server[] = [];
   const listen = async (
     server: Server,
@@ -65,6 +68,7 @@ export async function bootstrap(
     }
   }
   return async () => {
+    stopMaintenance();
     protocol.close();
     await Promise.all(
       servers.map(
