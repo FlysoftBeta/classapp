@@ -1,4 +1,5 @@
 Sequence 需要高效地:
+
 - 获得片段和/前缀和
 - 获得顺序排列
 - 任意位置插入
@@ -17,7 +18,7 @@ seq(x) = seq(x.left) + [x] + seq(x.right)
 
 Treap 的重平衡：
 
-根据 seq 的定义： seq = 中序遍历，树的旋转不影响 seq。 
+根据 seq 的定义： seq = 中序遍历，树的旋转不影响 seq。
 
 ```
 seq(x) = seq(A) + [x] + (seq(B) + [y] + seq(C)) = seq(A) + [x] + seq(y)
