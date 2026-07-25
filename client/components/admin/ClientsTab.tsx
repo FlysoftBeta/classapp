@@ -227,7 +227,7 @@ export function ClientsTab() {
         >
           新身份会先成为临时客户端，并在一天未活跃且没有会话后自动清理。保留后可添加备注、加入白名单或绑定用户。
         </Typography>
-        
+
         <Typography
           variant="caption"
           color="text.secondary"
@@ -268,15 +268,14 @@ export function ClientsTab() {
           label="白名单模式（谨慎使用）"
         />
         <Box>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => void handleKeepCurrent()}
-        >
-          保留并授权当前客户端
-        </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void handleKeepCurrent()}
+          >
+            保留并授权当前客户端
+          </Button>
         </Box>
-        
       </Box>
 
       {feedback && (
