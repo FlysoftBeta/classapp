@@ -117,7 +117,7 @@ export function useChatPosts({
 
   // Refs
   const atBottomRef = useRef(true);
-  const isAtEndLocalRef = useRef(true);
+  const isAtEndLocalRef = useRef<boolean | null>(null);
   const markedReadRef = useRef(false);
   const lastReadSequenceRef = useRef(conversation.last_read_post_sequence);
   const lastPostIdRef = useRef("");
@@ -333,6 +333,7 @@ export function useChatPosts({
       initial: unreadBoundary
         ? {
             cursor: { kind: "post", id: unreadBoundary.postId },
+            target: unreadBoundary.postId,
             alignment: "start",
           }
         : { cursor: { kind: "latest" }, alignment: "end" },
@@ -567,7 +568,11 @@ export function useChatPosts({
 
   useLayoutEffect(() => {
     didSetLastIdRef.current = false;
-    isAtEndLocalRef.current = false;
+    // The first layout measurement must always synchronize the affordance.
+    // In particular, an unread window can open away from Content End; seeding
+    // this as `false` would make updateAtBottom skip that initial result and
+    // leave the scroll-to-bottom button hidden.
+    isAtEndLocalRef.current = null;
     lastReadSequenceRef.current = conversation.last_read_post_sequence;
   }, [contentKey]);
 
