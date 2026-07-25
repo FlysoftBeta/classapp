@@ -13,6 +13,7 @@ import type {
   AppStatePayload,
   UserConfigChangedEvent,
 } from "@/client/app/appReducer";
+import type { ConvUpdatedPayload } from "@/shared/types/events";
 import {
   refreshArticleSidebar,
   refreshConversations,
@@ -78,6 +79,15 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     }
     configEvents.emit(data);
   };
+  const onConversationUpdated = (data: ConvUpdatedPayload) => {
+    // The server already sends the authoritative sidebar row. Apply it before
+    // any follow-up fetch so a post banner and its unread indicator advance in
+    // the same event turn.
+    dispatch({ type: "CONV_PAYLOAD", payload: data });
+    // Keep the existing reconciled fetch path for pending offline read/config
+    // mutations and persistence; it no longer blocks the visible update.
+    scheduleConversationRefresh();
+  };
 
   const unsubscribers = [
     client.subscribe("client.lock_changed", () => void refreshState()),
@@ -98,7 +108,7 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     client.subscribe("remote.resubscribe", () =>
       dispatch({ type: "REMOTE_RESUBSCRIBE" }),
     ),
-    client.subscribe("conv.updated", scheduleConversationRefresh),
+    client.subscribe("conv.updated", onConversationUpdated),
     client.subscribe("post.created", (data) =>
       postEvents.emit({ kind: "post.created", data }),
     ),
