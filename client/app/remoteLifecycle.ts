@@ -20,7 +20,7 @@ import {
   scheduleArticleRefresh,
   scheduleConversationRefresh,
 } from "./resources";
-import { configEvents, postEvents } from "./events";
+import { announcementEvents, configEvents, postEvents } from "./events";
 
 type RemoteCallbacks = {
   onArticleListUpdated: () => void;
@@ -105,6 +105,7 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
       dispatch({ type: "PATCH_USER", user: data.user }),
     ),
     client.subscribe("system.lock_changed", () => void refreshState()),
+    client.subscribe("system.announcement_changed", announcementEvents.emit),
     client.subscribe("remote.resubscribe", () =>
       dispatch({ type: "REMOTE_RESUBSCRIBE" }),
     ),

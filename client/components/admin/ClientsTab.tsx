@@ -116,8 +116,8 @@ export function ClientsTab() {
       setFeedback({
         severity: "success",
         text: enabled
-          ? "白名单模式已开启；当前客户端已保留并授权"
-          : "白名单模式已关闭；临时客户端也可以登录",
+          ? "白名单模式已开启，当前客户端已保留并授权"
+          : "白名单模式已关闭",
       });
     }
   };
@@ -218,7 +218,7 @@ export function ClientsTab() {
         }}
       >
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-          客户端访问策略
+          客户端访问控制
         </Typography>
         <Typography
           variant="body2"
@@ -227,38 +227,20 @@ export function ClientsTab() {
         >
           新身份会先成为临时客户端，并在一天未活跃且没有会话后自动清理。保留后可添加备注、加入白名单或绑定用户。
         </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={whitelistEnabled}
-              onChange={(event) =>
-                void handleWhitelistModeChange(event.target.checked)
-              }
-            />
-          }
-          label="启用白名单模式"
-        />
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", ml: 6, mt: -0.75 }}
-        >
-          开启后，仅允许已保留且已加入白名单的客户端登录。
-        </Typography>
-
+        
         <Typography
           variant="caption"
           color="text.secondary"
           sx={{ display: "block", mt: 2 }}
         >
-          客户端标识字段（同时匹配；默认 MAC + User Agent）
+          客户端标识方式
         </Typography>
         <Box>
           {(
             [
               ["mac", "MAC"],
               ["user_agent", "User Agent"],
-              ["ip", "IP 地址"],
+              ["ip", "IP"],
             ] as const
           ).map(([value, label]) => (
             <FormControlLabel
@@ -274,14 +256,18 @@ export function ClientsTab() {
             />
           ))}
         </Box>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mb: 1.5 }}
-        >
-          MAC 由服务器在局域网中尽力解析；标识字段变化后遇到的新 tuple
-          会生成新的临时客户端。
-        </Typography>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={whitelistEnabled}
+              onChange={(event) =>
+                void handleWhitelistModeChange(event.target.checked)
+              }
+            />
+          }
+          label="白名单模式（谨慎使用）"
+        />
+        <Box>
         <Button
           size="small"
           variant="outlined"
@@ -289,6 +275,8 @@ export function ClientsTab() {
         >
           保留并授权当前客户端
         </Button>
+        </Box>
+        
       </Box>
 
       {feedback && (

@@ -421,6 +421,8 @@ function ensureConfigDefaults(db: Database) {
     INSERT OR IGNORE INTO config (key, value) VALUES ('idle_lock_enabled', '0');
     INSERT OR IGNORE INTO config (key, value) VALUES ('whitelist_enabled', '0');
     INSERT OR IGNORE INTO config (key, value) VALUES ('client_identity_methods', 'mac,user_agent');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_content', '');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_revision', '0');
   `);
 }
 

@@ -34,6 +34,9 @@ export const eventContracts = {
       system_locked: z.boolean().optional(),
     })
     .strict(),
+  "system.announcement_changed": z
+    .object({ revision: z.number().int().nonnegative() })
+    .strict(),
   "article.created": z
     .object({
       article_id: z.string(),

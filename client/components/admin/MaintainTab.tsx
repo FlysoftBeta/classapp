@@ -36,9 +36,7 @@ type BackupFile = ActionData<"adminFetchBackupsAction">["backups"][number];
 type UpdateStatus = ActionData<"adminFetchUpdateStatusAction">;
 type HttpsStatus = ActionData<"adminFetchHttpsStatusAction">;
 
-export function SystemTab({ token }: { token: string }) {
-  const [idleLock, setIdleLock] = useState(false);
-  const [systemLocked, setSystemLocked] = useState(false);
+export function MaintainTab({ token }: { token: string }) {
   const [httpsRedirect, setHttpsRedirect] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
   const [cfgSaving, setCfgSaving] = useState(false);
@@ -61,8 +59,6 @@ export function SystemTab({ token }: { token: string }) {
     setCfgLoading(true);
     const d = await adminFetchConfig();
     if (d) {
-      setIdleLock(!!d.idle_lock_enabled);
-      setSystemLocked(!!d.system_locked);
       setHttpsRedirect(!!d.https_redirect_enabled);
     }
     setCfgLoading(false);
@@ -101,15 +97,12 @@ export function SystemTab({ token }: { token: string }) {
     idle_lock_enabled?: boolean;
     system_locked?: boolean;
     https_redirect_enabled?: boolean;
+    announcement_content?: string;
   }) => {
     setCfgSaving(true);
     setCfgMsg("");
     const { res } = await adminUpdateConfig(updates);
     if (res.ok) {
-      if (updates.idle_lock_enabled !== undefined)
-        setIdleLock(updates.idle_lock_enabled);
-      if (updates.system_locked !== undefined)
-        setSystemLocked(updates.system_locked);
       if (updates.https_redirect_enabled !== undefined) {
         setHttpsRedirect(updates.https_redirect_enabled);
         void fetchHttpsStatus();
@@ -217,47 +210,18 @@ export function SystemTab({ token }: { token: string }) {
 
   return (
     <Box>
-      {/* ── Lock Settings ── */}
-      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-        锁定设置
-      </Typography>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={idleLock}
-            onChange={(e) =>
-              handleConfigSave({ idle_lock_enabled: e.target.checked })
-            }
-            disabled={cfgSaving}
-          />
-        }
-        label="空闲防偷窥锁定（5 分钟无操作自动锁屏）"
-      />
-      <Box />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={systemLocked}
-            onChange={(e) =>
-              handleConfigSave({ system_locked: e.target.checked })
-            }
-            disabled={cfgSaving}
-          />
-        }
-        label="锁定系统（非管理员无法通过解锁序列进入 App）"
-      />
       {cfgMsg && (
-        <Typography
-          variant="caption"
-          color={cfgMsg.includes("失败") ? "error" : "success.main"}
-          sx={{ display: "block", mt: 0.5 }}
+        <Alert
+          severity={cfgMsg.includes("失败") ? "error" : "success"}
+          onClose={() => setCfgMsg("")}
+          sx={{ mb: 2 }}
         >
+          {" "}
           {cfgMsg}
-        </Typography>
+        </Alert>
       )}
-
       {/* ── HTTPS Upgrade ── */}
-      <Box sx={{ mt: 3 }}>
+      <Box>
         <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
           HTTPS 升级
         </Typography>

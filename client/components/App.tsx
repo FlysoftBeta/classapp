@@ -35,7 +35,12 @@ import { useMessageBanner } from "../hooks/useMessageBanner";
 import MessageBanner from "./notifications/MessageBanner";
 import { readUserSetting, writeUserSetting } from "../api/versionedSettings";
 import { fetchNotificationConfig } from "../api/notificationConfig";
+import {
+  acknowledgeAnnouncement,
+  fetchAnnouncement,
+} from "../api/announcement";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
+import { announcementEvents } from "@/client/app/events";
 import { offlineRepository } from "../resource/offlineRepository";
 import type { AppRoute, ViewType } from "../app/appReducer";
 import { vh, inset } from "@/client/lib/css";
@@ -96,6 +101,10 @@ function AppShell({
   const [pendingRoute, setPendingRoute] = useState<AppRoute | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [doNotDisturb, setDoNotDisturb] = useState(false);
+  const [announcement, setAnnouncement] = useState<{
+    content: string;
+    revision: number;
+  } | null>(null);
 
   const {
     user,
@@ -208,6 +217,42 @@ function AppShell({
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAnnouncement().then((value) => {
+      if (!cancelled && value && !value.acknowledged && value.content) {
+        setAnnouncement({ content: value.content, revision: value.revision });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const handleAcknowledgeAnnouncement = useCallback(async () => {
+    if (announcement === null) return;
+    const result = await acknowledgeAnnouncement(announcement.revision);
+    if (result.ok && result.data.acknowledged) {
+      setAnnouncement(null);
+    } else if (result.ok) {
+      const latest = await fetchAnnouncement();
+      if (latest && !latest.acknowledged && latest.content)
+        setAnnouncement({ content: latest.content, revision: latest.revision });
+    }
+  }, [announcement]);
+
+  useEffect(() => {
+    return announcementEvents.subscribe(() => {
+      void fetchAnnouncement().then((value) => {
+        if (value && !value.acknowledged && value.content) {
+          setAnnouncement({ content: value.content, revision: value.revision });
+        } else {
+          setAnnouncement(null);
+        }
+      });
+    });
+  }, []);
 
   useEffect(() => {
     return subscribeConfigEvents((evt) => {
@@ -500,6 +545,23 @@ function AppShell({
             <Button onClick={cancelExitLearning}>继续学习</Button>
             <Button variant="contained" onClick={confirmExitLearning}>
               确认退出
+            </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!announcement} disableEscapeKeyDown>
+        <DialogTitle>公告</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ whiteSpace: "pre-wrap", mb: 3 }}>
+            {announcement?.content}
+          </Typography>
+          <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button
+              variant="contained"
+              onClick={() => void handleAcknowledgeAnnouncement()}
+            >
+              我已阅读并确认
             </Button>
           </Box>
         </DialogContent>

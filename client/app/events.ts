@@ -26,3 +26,4 @@ function createEventStream<T>() {
 
 export const postEvents = createEventStream<PostStreamEvent>();
 export const configEvents = createEventStream<UserConfigChangedEvent>();
+export const announcementEvents = createEventStream<{ revision: number }>();

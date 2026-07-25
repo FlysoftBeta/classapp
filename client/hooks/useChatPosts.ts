@@ -574,7 +574,7 @@ export function useChatPosts({
     // leave the scroll-to-bottom button hidden.
     isAtEndLocalRef.current = null;
     lastReadSequenceRef.current = conversation.last_read_post_sequence;
-  }, [contentKey]);
+  }, [contentKey, conversation]);
 
   // ---- Conversation switch: reset state ----
   useEffect(() => {

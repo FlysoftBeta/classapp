@@ -49,6 +49,13 @@ const configSchema = object({
   https_redirect_enabled: z.boolean(),
   whitelist_enabled: z.boolean(),
   identity_methods: z.array(z.enum(["mac", "ip", "user_agent"])).min(1),
+  announcement_content: z.string(),
+  announcement_revision: z.number().int().nonnegative(),
+});
+const announcementSchema = object({
+  content: z.string(),
+  revision: z.number().int().nonnegative(),
+  acknowledged: z.boolean(),
 });
 
 const discoverySectionSchema = object({
@@ -311,9 +318,15 @@ export const actionContracts = {
           .array(z.enum(["mac", "ip", "user_agent"]))
           .min(1)
           .optional(),
+        announcement_content: z.string().max(10000).optional(),
       }),
     ),
     object({ ok: z.literal(true), ...configSchema.shape }),
+  ),
+  fetchAnnouncementAction: contract(noArgs, announcementSchema),
+  acknowledgeAnnouncementAction: contract(
+    one(z.number().int().nonnegative()),
+    object({ ok: z.literal(true), acknowledged: z.boolean() }),
   ),
   adminFetchBackupsAction: contract(
     noArgs,

@@ -11,8 +11,9 @@ import { GhostUsersTab } from "./GhostUsersTab";
 import { GroupsTab } from "./GroupsTab";
 import { PostsTab } from "./PostsTab";
 import { ClientsTab } from "./ClientsTab";
-import { SystemTab } from "./SystemTab";
+import { MaintainTab } from "./MaintainTab";
 import { ToolsTab } from "./ToolsTab";
+import { GlobalTab } from "./GlobalTab";
 
 interface AdminPanelProps {
   token: string;
@@ -99,7 +100,8 @@ export default function AdminPanel({
           <Tab label="群组" />
           <Tab label="帖子" />
           <Tab label="客户端" />
-          <Tab label="系统" />
+          <Tab label="全局设置" />
+          <Tab label="运维" />
           <Tab label="便捷工具" />
         </Tabs>
       </Box>
@@ -121,8 +123,9 @@ export default function AdminPanel({
         {tab === 2 && <GroupsTab />}
         {tab === 3 && <PostsTab />}
         {tab === 4 && <ClientsTab />}
-        {tab === 5 && <SystemTab token={token} />}
-        {tab === 6 && <ToolsTab />}
+        {tab === 5 && <GlobalTab />}
+        {tab === 6 && <MaintainTab token={token} />}
+        {tab === 7 && <ToolsTab />}
       </Box>
     </Box>
   );

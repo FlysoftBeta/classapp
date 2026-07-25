@@ -4,6 +4,7 @@ import { createClientService } from "@/server/services/clientsService";
 import { ServiceError } from "@/server/services/errors";
 import { createAppStateService } from "@/server/services/appStateService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
+import { createAnnouncementService } from "@/server/services/announcementService";
 import { expectBoolean, expectString, withActionSession } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
@@ -326,10 +327,13 @@ export async function adminFetchConfigAction() {
     const actor = await session.asActor();
     await actor.requireAdmin();
     const db = getDb();
+    const announcement = createAnnouncementService(db).get();
     return {
       ...createAppStateService(db).getConfig(),
       https_redirect_enabled: createHttpsUpgradeService(db).isRedirectEnabled(),
       ...createClientService(db).config(),
+      announcement_content: announcement.content,
+      announcement_revision: announcement.revision,
     };
   });
 }
@@ -367,11 +371,18 @@ export async function adminUpdateConfigAction(
       whitelist_enabled: input.whitelist_enabled,
       identity_methods: input.identity_methods,
     });
+    const announcements = createAnnouncementService(db);
+    const announcement =
+      input.announcement_content !== undefined
+        ? announcements.update(input.announcement_content)
+        : announcements.get();
     return {
       ok: true as const,
       ...appConfig,
       https_redirect_enabled: https.isRedirectEnabled(),
       ...clientConfig,
+      announcement_content: announcement.content,
+      announcement_revision: announcement.revision,
     };
   });
 }

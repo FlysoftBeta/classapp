@@ -165,6 +165,18 @@ export class Actor {
     );
   }
 
+  async announcement() {
+    const [{ AnnouncementActorFacade }, { createAnnouncementService }] =
+      await Promise.all([
+        import("@/server/domain/facade/announcement"),
+        import("@/server/services/announcementService"),
+      ]);
+    return new AnnouncementActorFacade(
+      this,
+      createAnnouncementService(getDb()),
+    );
+  }
+
   async stickers() {
     const [{ StickerActorFacade }, { createStickerService }] =
       await Promise.all([

@@ -15,7 +15,6 @@ import {
   insertSession,
   replaceClientUserSession,
 } from "@/server/data/auth";
-import { cleanupExpiredSessions } from "@/server/services/maintenance";
 import { createClientService } from "@/server/services/clientsService";
 import {
   deleteGhostUserById,
@@ -208,7 +207,6 @@ export class AuthService {
   }
 
   autoLogin(): AutoLoginResult {
-    cleanupExpiredSessions(this.db);
     dedupeClientSessions(this.db);
     const clients = createClientService(this.db);
 

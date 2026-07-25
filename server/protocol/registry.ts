@@ -1,4 +1,5 @@
 import * as admin from "@/server/actions/admin";
+import * as announcement from "@/server/actions/announcement";
 import * as app from "@/server/actions/app";
 import * as articles from "@/server/actions/articles";
 import * as auth from "@/server/actions/auth";
@@ -24,6 +25,7 @@ import {
 
 const handlers = {
   ...admin,
+  ...announcement,
   ...app,
   ...articles,
   ...auth,
