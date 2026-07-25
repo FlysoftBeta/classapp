@@ -15,6 +15,7 @@ export default defineConfig(({ command }) => ({
   server: {
     host: "0.0.0.0",
     port: 3000,
+    strictPort: true,
     proxy: {
       // The backend is intentionally loopback-only in development. Preserve
       // the browser's peer address for client identity across this proxy hop.
