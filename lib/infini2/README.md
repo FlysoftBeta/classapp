@@ -1,8 +1,7 @@
 # Infini2
 
 Infini2 是平台无关的双向无限滚动核心，以及其 DOM/React 适配层。完整设计、状态机、
-Provider 契约、API 指南与验收清单见 [`docs/`](./docs/README.md)；仓库根目录的
-[`INFINI.md`](../../INFINI.md) 是架构入口和摘要。
+Provider 契约、API 指南与验收清单见 [`docs/`](./docs/README.md)。
 
 ## 最小用法
 
