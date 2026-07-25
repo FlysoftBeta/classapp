@@ -26,6 +26,7 @@ interface ChatMessageListItemProps {
   scrollToItem: (postId: string) => void;
   onOpenArticle?: (articleId: string) => void;
   online: boolean;
+  unreadCount?: number;
 }
 
 const ChatMessageListItem = React.memo(function ChatMessageListItem({
@@ -38,6 +39,7 @@ const ChatMessageListItem = React.memo(function ChatMessageListItem({
   scrollToItem,
   onOpenArticle,
   online,
+  unreadCount,
 }: ChatMessageListItemProps) {
   return (
     <Fade in timeout={100}>
@@ -48,6 +50,24 @@ const ChatMessageListItem = React.memo(function ChatMessageListItem({
         }}
       >
         <InfiniId id={id} />
+        {unreadCount != null && (
+          <Box
+            aria-label={`${unreadCount} 条新消息`}
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              py: 1.25,
+              color: "primary.main",
+            }}
+          >
+            <Box sx={{ height: 1, flex: 1, bgcolor: "primary.main" }} />
+            <Typography variant="caption" fontWeight={700}>
+              {unreadCount} 条新消息
+            </Typography>
+            <Box sx={{ height: 1, flex: 1, bgcolor: "primary.main" }} />
+          </Box>
+        )}
         <ChatPostCard
           post={post}
           currentUser={currentUser}
@@ -97,6 +117,11 @@ export function ChatMessageList({
           scrollToItem={timeline.scrollToPost}
           onOpenArticle={onOpenArticle}
           online={online}
+          unreadCount={
+            timeline.unreadBoundary?.postId === id
+              ? timeline.unreadBoundary.count
+              : undefined
+          }
         />
       )}
       beforeLabel="加载更早的消息"

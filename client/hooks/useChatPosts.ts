@@ -57,6 +57,7 @@ export interface ChatMessageTimeline {
   retryLoad: () => void;
   offlineBoundaryBefore: boolean;
   offlineBoundaryAfter: boolean;
+  unreadBoundary: { postId: string; count: number } | null;
 }
 
 export type ChatCursor =
@@ -98,11 +99,27 @@ export function useChatPosts({
   const [offlineBoundaryBefore, setOfflineBoundaryBefore] = useState(false);
   const [offlineBoundaryAfter, setOfflineBoundaryAfter] = useState(false);
   const [revalidateGeneration, setRevalidateGeneration] = useState(0);
+  const [fallbackToBottom, setFallbackToBottom] = useState(false);
+  // Keep the entry state for this mounted conversation. Marking the
+  // conversation as read updates its sidebar row while the user is still
+  // looking at this list; the divider remains until they reach its end.
+  const [unreadBoundary, setUnreadBoundary] = useState<{
+    postId: string;
+    count: number;
+  } | null>(() =>
+    conversation.first_unread_post_id && conversation.unread_count > 0
+      ? {
+          postId: conversation.first_unread_post_id,
+          count: conversation.unread_count,
+        }
+      : null,
+  );
 
   // Refs
   const atBottomRef = useRef(true);
   const isAtEndLocalRef = useRef(true);
   const markedReadRef = useRef(false);
+  const lastReadSequenceRef = useRef(conversation.last_read_post_sequence);
   const lastPostIdRef = useRef("");
   const convKeyRef = useRef("");
   const didSetLastIdRef = useRef(false);
@@ -197,14 +214,15 @@ export function useChatPosts({
 
   // ---- resolveItem: fetch a single post by ID for re-bootstrap ----
   const resolveItem = useCallback(
-    async (id: string): Promise<Post | null> => {
+    async (id: string, authoritative = false): Promise<Post | null> => {
       const cached = (
         await offlineRepository.getPosts({
           type: conversationType,
           id: conversationId,
         })
       ).find((post) => post.id === id);
-      if (cached || !onlineRef.current) return cached ?? null;
+      if (!authoritative && cached) return cached;
+      if (!onlineRef.current) return cached ?? null;
       const { data } = await fetchPost(id);
       if ("post" in data && data.post) {
         return data.post;
@@ -219,18 +237,44 @@ export function useChatPosts({
       if (cursor == null || cursor.kind === "latest") {
         return fetchDirectional({ kind: "latest" }, "before", signal, true);
       }
+
+      // An administrator can delete the post used as the read anchor. In that
+      // case there is no reliable unread boundary to restore, so enter at the
+      // current end instead of attempting to locate around a stale anchor.
+      if (conversation.last_read_post_id) {
+        const readAnchor = await resolveItem(
+          conversation.last_read_post_id,
+          true,
+        );
+        if (signal.aborted) throw new Error("post bootstrap superseded");
+        if (!readAnchor || readAnchor.is_deleted) {
+          setUnreadBoundary(null);
+          setFallbackToBottom(true);
+          return fetchDirectional({ kind: "latest" }, "before", signal, true);
+        }
+      }
       const target = await resolveItem(cursor.id);
       if (signal.aborted) throw new Error("post bootstrap superseded");
-      if (!target) throw new Error("target post is unavailable");
+      if (!target || target.is_deleted) {
+        setUnreadBoundary(null);
+        setFallbackToBottom(true);
+        return fetchDirectional({ kind: "latest" }, "before", signal, true);
+      }
       const targetCursor: ChatCursor = {
         kind: "post",
         id: target.id,
         sequence: target.sequence,
       };
-      const [before, after] = await Promise.all([
+      // The initial unread window is deliberately bounded.  Its after edge is
+      // therefore not necessarily the conversation end, so obtain the latest
+      // item separately for the scroll-to-bottom affordance.
+      const [before, after, latest] = await Promise.all([
         fetchDirectional(targetCursor, "before", signal),
         fetchDirectional(targetCursor, "after", signal),
+        fetchDirectional({ kind: "latest" }, "before", signal),
       ]);
+      const latestItem = latest.items[latest.items.length - 1];
+      if (latestItem) lastPostIdRef.current = latestItem.id;
       return {
         items: uniquePosts([...before.items, target, ...after.items]),
         exhaustedBefore: before.exhaustedBefore,
@@ -286,7 +330,12 @@ export function useChatPosts({
       provider,
       ops: POST_OPS,
       estimateSize: estimatePostSize,
-      initial: { cursor: { kind: "latest" }, alignment: "end" },
+      initial: unreadBoundary
+        ? {
+            cursor: { kind: "post", id: unreadBoundary.postId },
+            alignment: "start",
+          }
+        : { cursor: { kind: "latest" }, alignment: "end" },
       targetToCursor: (id) => ({ kind: "post", id }),
       locateTarget: (posts, id) =>
         posts.some((post) => post.id === id) ? id : null,
@@ -352,6 +401,16 @@ export function useChatPosts({
     },
     [controller],
   );
+
+  useEffect(() => {
+    if (!fallbackToBottom || !items.length) return;
+    const lastId = items[items.length - 1]!.id;
+    const frame = requestAnimationFrame(() => {
+      scrollToTarget(lastId, { alignment: "end" });
+      setFallbackToBottom(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fallbackToBottom, items, scrollToTarget]);
 
   const isAtEnd = useCallback(
     (threshold: number) => {
@@ -508,7 +567,8 @@ export function useChatPosts({
 
   useLayoutEffect(() => {
     didSetLastIdRef.current = false;
-    isAtEndLocalRef.current = true;
+    isAtEndLocalRef.current = false;
+    lastReadSequenceRef.current = conversation.last_read_post_sequence;
   }, [contentKey]);
 
   // ---- Conversation switch: reset state ----
@@ -531,14 +591,34 @@ export function useChatPosts({
     }
   }, [conversation, markRead]);
 
+  const updateReadProgress = useCallback(() => {
+    // Keep the entry divider as an opening-session landmark, but advance the
+    // persisted read cursor as messages become fully visible while scrolling.
+    // It is removed only after the user reaches the actual conversation end.
+    if (!unreadBoundary) return;
+    const current = controller.getSnapshot();
+    const lastVisible = [...current.mainItems]
+      .reverse()
+      .find((row) => row.start + row.extent <= current.visible.end);
+    if (!lastVisible) return;
+    const post = lastVisible.item;
+    if ((post.sequence ?? 0) <= lastReadSequenceRef.current) return;
+    lastReadSequenceRef.current = post.sequence ?? lastReadSequenceRef.current;
+    markRead(conversation, post.id);
+  }, [controller, conversation, markRead, unreadBoundary]);
+
   const updateAtBottom = useCallback(() => {
     const atEnd = loadState.exhaustedAfter && isAtEnd(SCROLL_END_THRESHOLD);
+    updateReadProgress();
     if (atEnd === isAtEndLocalRef.current) return;
     isAtEndLocalRef.current = atEnd;
     atBottomRef.current = atEnd;
     setShowScrollDown(!atEnd);
-    if (atEnd) markReadAtBottom();
-  }, [isAtEnd, loadState.exhaustedAfter, markReadAtBottom]);
+    if (atEnd) {
+      markReadAtBottom();
+      setUnreadBoundary(null);
+    }
+  }, [isAtEnd, loadState.exhaustedAfter, markReadAtBottom, updateReadProgress]);
 
   // Learn the absolute last ID once the initial latest-page bootstrap reaches
   // Content End. Live events and successful posts update it afterwards.
@@ -710,6 +790,7 @@ export function useChatPosts({
       retryLoad: () => controller.retry(),
       offlineBoundaryBefore,
       offlineBoundaryAfter,
+      unreadBoundary,
     }),
     [
       controller,
@@ -723,6 +804,7 @@ export function useChatPosts({
       snapshot,
       offlineBoundaryBefore,
       offlineBoundaryAfter,
+      unreadBoundary,
     ],
   );
 
