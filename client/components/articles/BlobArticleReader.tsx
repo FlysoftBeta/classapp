@@ -1348,20 +1348,20 @@ export default function BlobArticleReader({
       </Box>
 
       <IconButton
-        size="small"
+        size="medium"
         aria-label="上一页"
         disabled={page <= 0}
         onClick={() => goToPage(page - 1)}
-        sx={{ ...floatingNavSx, left: panelInsets.left + 8 }}
+        sx={{ ...floatingNavSx, left: panelInsets.left + 50 }}
       >
         <ChevronLeftIcon fontSize="small" />
       </IconButton>
       <IconButton
-        size="small"
+        size="medium"
         aria-label="下一页"
         disabled={atLastPage}
         onClick={() => goToPage(page + 1)}
-        sx={{ ...floatingNavSx, right: panelInsets.right + 8 }}
+        sx={{ ...floatingNavSx, right: panelInsets.right + 16 }}
       >
         <ChevronRightIcon fontSize="small" />
       </IconButton>
