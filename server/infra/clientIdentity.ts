@@ -2,19 +2,12 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage } from "node:http";
 import { networkInterfaces } from "node:os";
+import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
 
 export interface ClientIdentity {
   ip: string;
   userAgent: string;
   mac: string | null;
-}
-
-function requestIp(req: IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
-  const real = req.headers["x-real-ip"];
-  if (typeof real === "string") return real.trim();
-  return req.socket.remoteAddress?.replace(/^::ffff:/, "") ?? "127.0.0.1";
 }
 
 function normalizeMac(value: string): string | null {
@@ -29,6 +22,25 @@ function normalizeIp(value: string): string {
     .replace(/^::ffff:/i, "")
     .replace(/%.+$/, "")
     .toLowerCase();
+}
+
+function requestIp(req: IncomingMessage): string {
+  const peer = normalizeIp(req.socket.remoteAddress ?? "127.0.0.1");
+  const trustedProxies = new Set(
+    getRuntimeConfig().trustedProxyIps.map(normalizeIp),
+  );
+  if (!trustedProxies.has(peer)) return peer;
+
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    // Each proxy appends its direct peer, so the rightmost untrusted address
+    // is the original client rather than an address it may have prepended.
+    for (const value of forwarded.split(",").reverse()) {
+      const ip = normalizeIp(value.trim());
+      if (ip && !trustedProxies.has(ip)) return ip;
+    }
+  }
+  return peer;
 }
 
 function resolveLocalMac(ip: string): { local: boolean; mac: string | null } {

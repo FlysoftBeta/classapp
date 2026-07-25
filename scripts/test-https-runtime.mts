@@ -23,6 +23,7 @@ const config = setRuntimeConfig({
   ports: [8080],
   securePorts: [4443, 4444],
   bindHost: "127.0.0.1",
+  trustedProxyIps: [],
   nodeEnv: "test",
   initialAdminPin: "123456",
   https: {

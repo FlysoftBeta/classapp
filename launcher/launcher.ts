@@ -121,6 +121,7 @@ function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
     ports: PORTS,
     securePorts,
     bindHost: "0.0.0.0",
+    trustedProxyIps: [],
     nodeEnv: "production",
     https,
     update: {

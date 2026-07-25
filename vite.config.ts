@@ -16,8 +16,10 @@ export default defineConfig(({ command }) => ({
     host: "0.0.0.0",
     port: 3000,
     proxy: {
-      "/ws": { target: "ws://127.0.0.1:3001", ws: true },
-      "/api": { target: "http://127.0.0.1:3001" },
+      // The backend is intentionally loopback-only in development. Preserve
+      // the browser's peer address for client identity across this proxy hop.
+      "/ws": { target: "ws://127.0.0.1:3001", ws: true, xfwd: true },
+      "/api": { target: "http://127.0.0.1:3001", xfwd: true },
     },
   },
   build: {

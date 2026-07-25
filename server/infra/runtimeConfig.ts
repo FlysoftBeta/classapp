@@ -8,6 +8,8 @@ export interface ClassAppRuntimeConfig {
   ports: number[];
   securePorts: number[];
   bindHost: string;
+  /** Peer addresses allowed to supply forwarding headers. */
+  trustedProxyIps: string[];
   nodeEnv: string;
   initialAdminPin?: string;
   https: {
@@ -55,6 +57,7 @@ function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
         : [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007],
     securePorts: [],
     bindHost: "0.0.0.0",
+    trustedProxyIps: [],
     nodeEnv,
     initialAdminPin: nodeEnv === "production" ? undefined : "123456",
     https: {

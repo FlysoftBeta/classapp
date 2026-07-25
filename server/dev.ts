@@ -14,6 +14,7 @@ async function main(): Promise<void> {
     ports: [port],
     securePorts: [],
     bindHost: "127.0.0.1",
+    trustedProxyIps: ["127.0.0.1", "::1"],
     nodeEnv: "development",
     initialAdminPin: "123456",
     https: {

@@ -26,6 +26,7 @@ function standaloneConfig(): ClassAppRuntimeConfig {
         : [3000],
     securePorts: [],
     bindHost: "0.0.0.0",
+    trustedProxyIps: [],
     nodeEnv: process.env.NODE_ENV ?? "production",
     initialAdminPin:
       process.env.NODE_ENV === "production" ? undefined : "123456",
@@ -58,6 +59,8 @@ function isRuntimeConfig(value: unknown): value is ClassAppRuntimeConfig {
     config.securePorts.every(
       (port) => Number.isInteger(port) && port > 0 && port <= 65535,
     ) &&
+    Array.isArray(config.trustedProxyIps) &&
+    config.trustedProxyIps.every((ip) => typeof ip === "string") &&
     !!config.https &&
     typeof config.https === "object"
   );
