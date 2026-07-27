@@ -26,6 +26,7 @@ import {
   type ConversationDownloadPolicy,
 } from "@/client/resource/offlineRepository";
 import { downloadConversationForOffline } from "@/client/resource/offlineSync";
+import Tooltip from "@mui/material/Tooltip";
 
 const DOWNLOAD_POLICIES = ["auto", "week", "half-year"] as const;
 
@@ -98,13 +99,11 @@ export function ConversationSettingsMenu({
 
   return (
     <>
-      <IconButton
-        size="small"
-        aria-label="对话设置"
-        onClick={(e) => setAnchor(e.currentTarget)}
-      >
-        <SettingsIcon fontSize="small" />
-      </IconButton>
+      <Tooltip title="对话设置">
+        <IconButton size="small" onClick={(e) => setAnchor(e.currentTarget)}>
+          <SettingsIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
       <Menu
         anchorEl={anchor}
         open={!!anchor}

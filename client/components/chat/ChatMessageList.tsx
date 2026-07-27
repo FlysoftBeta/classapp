@@ -42,7 +42,7 @@ const ChatMessageListItem = React.memo(function ChatMessageListItem({
   unreadCount,
 }: ChatMessageListItemProps) {
   return (
-    <Fade in timeout={100}>
+    <Fade in timeout={500}>
       <Box
         data-infini-id={id}
         sx={{

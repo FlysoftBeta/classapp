@@ -220,13 +220,7 @@ export default function ChatView({
               : `@ ${conversation.name}`}
           </Typography>
           {conversation.type === "group" && (
-            <Box
-              sx={{
-                display: "flex",
-                opacity: online ? 1 : 0.38,
-                pointerEvents: online ? "auto" : "none",
-              }}
-            >
+            <>
               <DiscoverGroupsDialog
                 groupId={conversation.id}
                 groupName={conversation.name}
@@ -241,7 +235,7 @@ export default function ChatView({
                   onConversationUpdate();
                 }}
               />
-            </Box>
+            </>
           )}
           <ConversationSettingsMenu
             conversation={conversation}
