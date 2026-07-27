@@ -9,6 +9,7 @@ import {
 } from "@/client/api/auth";
 import type { AppStatePayload } from "@/client/app/appReducer";
 import { session } from "@/client/lib/remote/session";
+import { transport } from "@/client/lib/remote/transport";
 import { offlineRepository } from "@/client/resource/offlineRepository";
 import {
   offlineSession,
@@ -37,6 +38,7 @@ export async function bootstrapSession(
   setClientId: (clientId: string) => void,
 ): Promise<void> {
   let cachedSession: OfflineSession | null = null;
+  let knownKonamiLocked: boolean | null = null;
   try {
     cachedSession = await offlineSession.get();
     if (cachedSession) {
@@ -45,11 +47,17 @@ export async function bootstrapSession(
       await refreshInitialData();
     }
 
+    // The app renders immediately after starting the WebSocket. Keep a fresh
+    // client on the neutral loading screen until the server can authoritatively
+    // choose between the Konami gate and the login screen.
+    await transport.waitUntilConnected();
+
     const me = await getClientMe();
     if (me.res.ok && "client_id" in me.data) {
       setClientId(me.data.client_id ?? "");
     }
     const auto = await autoLogin();
+    knownKonamiLocked = auto.konami_locked;
     if (auto.banned) {
       await offlineSession.clear();
       session.setToken("");
@@ -83,7 +91,12 @@ export async function bootstrapSession(
     }
   } catch {
     if (!cachedSession) {
-      dispatch({ type: "SET_APP_STATE", appState: "login" });
+      if (knownKonamiLocked !== null) {
+        dispatch({
+          type: "SET_APP_STATE",
+          appState: knownKonamiLocked ? "konami" : "login",
+        });
+      }
     }
   }
 }

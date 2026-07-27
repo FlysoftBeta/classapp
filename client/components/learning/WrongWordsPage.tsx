@@ -6,7 +6,7 @@ import IconButton from "@mui/material/IconButton";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { fetchWrongWords } from "@/client/api/words";
 import type { WordWithWrongCount } from "@/shared/types/api/words";
 
@@ -95,7 +95,13 @@ export default function WrongWordsPage({
         {words.length === 0 ? (
           <Typography sx={{ textAlign: "center", mt: 8 }}>暂无错题</Typography>
         ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              ...flexGap(2, "column"),
+            }}
+          >
             {words.map((word) => {
               const definitions = word.definition.split("；");
               return (
@@ -139,7 +145,7 @@ export default function WrongWordsPage({
             borderColor: "divider",
             display: "flex",
             justifyContent: "center",
-            gap: 2,
+            ...flexGap(2),
           }}
         >
           <Button

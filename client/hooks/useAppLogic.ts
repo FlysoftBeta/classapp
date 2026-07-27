@@ -18,6 +18,7 @@ import { offlineSession } from "@/client/resource/offlineSession";
 import { scheduleConversationRefresh } from "@/client/app/resources";
 import {
   bindRemoteLifecycle,
+  recoverInvalidSession,
   startHeartbeat,
 } from "@/client/app/remoteLifecycle";
 import {
@@ -70,13 +71,9 @@ export function useAppLogic() {
 
   // ── Client-invalid global handler ─────────────────────────────────────────
   useEffect(() => {
-    session.setInvalidHandler(() => {
-      void offlineSession.clear();
-      dispatch({ type: "LOGOUT" });
-      dispatch({ type: "SET_APP_STATE", appState: "login" });
-    });
+    session.setInvalidHandler(recoverInvalidSession);
     return () => session.setInvalidHandler(null);
-  }, [dispatch]);
+  }, []);
 
   // ── Anti-exit history stuffing ───────────────────────────────────────────
   useEffect(() => {

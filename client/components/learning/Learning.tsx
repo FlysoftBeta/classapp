@@ -6,7 +6,7 @@ import CardContent from "@mui/material/CardContent";
 import Switch from "@mui/material/Switch";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import IconButton from "@mui/material/IconButton";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import SelfDisciplineModal from "./SelfDisciplineModal";
 import {
   fetchSelfDisciplineMode,
@@ -210,7 +210,7 @@ export default function Learning({ onBack, onNavigate }: LearningProps) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 2,
+            ...flexGap(2),
             mt: "auto",
           }}
         >

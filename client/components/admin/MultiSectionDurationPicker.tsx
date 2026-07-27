@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import { flexGap } from "@/client/lib/css";
 
 const ITEM_HEIGHT = 40;
 const VISIBLE_ITEMS = 5;
@@ -132,7 +133,7 @@ export function MultiSectionDurationPicker({
   onHoursChange: (hours: number) => void;
 }) {
   return (
-    <Box sx={{ display: "flex", gap: 1.5, maxWidth: 260, mx: "auto" }}>
+    <Box sx={{ display: "flex", ...flexGap(1.5), maxWidth: 260, mx: "auto" }}>
       <PickerSection label="天" value={days} max={30} onChange={onDaysChange} />
       <PickerSection
         label="小时"

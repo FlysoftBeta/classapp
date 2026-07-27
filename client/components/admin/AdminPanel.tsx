@@ -14,6 +14,7 @@ import { ClientsTab } from "./ClientsTab";
 import { MaintainTab } from "./MaintainTab";
 import { ToolsTab } from "./ToolsTab";
 import { GlobalTab } from "./GlobalTab";
+import { flexGap } from "@/client/lib/css";
 
 interface AdminPanelProps {
   token: string;
@@ -51,7 +52,7 @@ export default function AdminPanel({
             pt: 0.5,
             display: "flex",
             alignItems: "center",
-            gap: 1,
+            ...flexGap(1),
           },
         }}
       >

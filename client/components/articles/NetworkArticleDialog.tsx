@@ -11,6 +11,7 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import CircularProgress from "@mui/material/CircularProgress";
+import { flexGap } from "@/client/lib/css";
 import {
   searchNetworkArticles,
   startNetworkArticleDownload,
@@ -100,7 +101,7 @@ export function NetworkArticleDialog({
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>从网络下载文章</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
+        <Box sx={{ display: "flex", ...flexGap(1), mt: 0.5 }}>
           <TextField
             autoFocus
             fullWidth

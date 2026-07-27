@@ -38,6 +38,17 @@ export class WebSocketTransport {
     return this.state.kind === "offline";
   }
 
+  waitUntilConnected(): Promise<void> {
+    if (this.isConnected()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const off = this.onStateChange((state) => {
+        if (state.kind !== "connected") return;
+        off();
+        resolve();
+      });
+    });
+  }
+
   start(): void {
     if (this.state.kind !== "stopped") return;
     this.open();

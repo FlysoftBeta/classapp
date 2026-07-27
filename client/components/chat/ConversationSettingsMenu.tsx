@@ -26,6 +26,7 @@ import {
   type ConversationDownloadPolicy,
 } from "@/client/resource/offlineRepository";
 import { downloadConversationForOffline } from "@/client/resource/offlineSync";
+import { flexGap } from "@/client/lib/css";
 import Tooltip from "@mui/material/Tooltip";
 
 const DOWNLOAD_POLICIES = ["auto", "week", "half-year"] as const;
@@ -188,7 +189,12 @@ export function ConversationSettingsMenu({
             </Typography>
           )}
           <Box
-            sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mt: 2 }}
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              ...flexGap(1),
+              mt: 2,
+            }}
           >
             <Button onClick={() => setDownloadOpen(false)} disabled={loading}>
               取消

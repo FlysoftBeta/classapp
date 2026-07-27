@@ -28,7 +28,7 @@ import BlobArticleReader from "./BlobArticleReader";
 import TextArticleReader from "./TextArticleReader";
 import { useArticleReading } from "@/client/hooks/useArticleReading";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import {
   ARTICLE_RETENTION_DAYS,
@@ -235,7 +235,7 @@ export default function ArticleReader({
             display: "flex",
             alignItems: "center",
             flexShrink: 0,
-            gap: 0.5,
+            ...flexGap(0.5),
           }}
         >
           <IconButton size="small" onClick={onBack} aria-label="返回文章列表">
@@ -247,7 +247,7 @@ export default function ArticleReader({
               minWidth: 0,
               display: "flex",
               alignItems: "baseline",
-              gap: 1,
+              ...flexGap(1),
             }}
           >
             {meta ? (
@@ -447,7 +447,12 @@ export default function ArticleReader({
             </Typography>
           )}
           <Box
-            sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mt: 2 }}
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              ...flexGap(1),
+              mt: 2,
+            }}
           >
             <Button onClick={() => setDownloadOpen(false)}>取消</Button>
             <Button variant="contained" onClick={handleDownload}>

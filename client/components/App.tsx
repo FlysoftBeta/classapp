@@ -43,7 +43,7 @@ import { USER_CONFIG } from "@/shared/userConfig/keys";
 import { announcementEvents } from "@/client/app/events";
 import { offlineRepository } from "../resource/offlineRepository";
 import type { AppRoute, ViewType } from "../app/appReducer";
-import { vh, inset } from "@/client/lib/css";
+import { flexGap, vh, inset } from "@/client/lib/css";
 import { hasFeature } from "@/shared/features";
 
 function buildTheme(mode: "light" | "dark") {
@@ -541,7 +541,9 @@ function AppShell({
               ? "本次学习你还没有开始学习单词哦~"
               : `你个肺雾😡才学了${learningProgress.total}个单词，居然连全对都做不到，仅仅只有${Math.round((learningProgress.correct / learningProgress.total) * 100)}%的正确率，你不配和神使用同一个暗网`}
           </Typography>
-          <Box sx={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+          <Box
+            sx={{ display: "flex", ...flexGap(2), justifyContent: "flex-end" }}
+          >
             <Button onClick={cancelExitLearning}>继续学习</Button>
             <Button variant="contained" onClick={confirmExitLearning}>
               确认退出
@@ -583,7 +585,7 @@ function AppShell({
             zIndex: 2000,
             display: "flex",
             alignItems: "center",
-            gap: 0.75,
+            ...flexGap(0.75),
             px: 1.5,
             py: 0.5,
             borderRadius: 4,

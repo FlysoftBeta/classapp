@@ -5,6 +5,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Fade from "@mui/material/Fade";
 import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
+import { flexGap } from "@/client/lib/css";
 
 import {
   Infini2List,
@@ -61,7 +62,7 @@ function DirectionalStatus({
         zIndex: 50,
         display: "flex",
         alignItems: "center",
-        gap: 1,
+        ...flexGap(1),
         bgcolor: "background.paper",
         border: "1px solid",
         borderColor: "divider",

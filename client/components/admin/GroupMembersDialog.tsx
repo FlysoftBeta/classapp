@@ -19,6 +19,7 @@ import Chip from "@mui/material/Chip";
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { Group } from "@/shared/types/api";
 import { fetchGroupMembers } from "@/client/api/groups";
+import { flexGap } from "@/client/lib/css";
 import {
   adminSearchUsers,
   adminAddGroupMember,
@@ -86,7 +87,7 @@ export function GroupMembersDialog({
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>成员管理 — {group.name}</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: "flex", gap: 1, mb: 1.5, mt: 0.5 }}>
+        <Box sx={{ display: "flex", ...flexGap(1), mb: 1.5, mt: 0.5 }}>
           <TextField
             size="small"
             placeholder="输入 @handle 强制加入"

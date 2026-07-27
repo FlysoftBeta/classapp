@@ -16,6 +16,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import DeleteIcon from "@mui/icons-material/Delete";
 import BackupIcon from "@mui/icons-material/Backup";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import { flexGap } from "@/client/lib/css";
 import {
   adminBackupDownloadUrl,
   adminFetchConfig,
@@ -456,7 +457,7 @@ export function MaintainTab({ token }: { token: string }) {
                   sx={{ mb: 1.5 }}
                 />
               )}
-              <Box sx={{ display: "flex", gap: 1 }}>
+              <Box sx={{ display: "flex", ...flexGap(1) }}>
                 <Button
                   variant="contained"
                   color="success"
@@ -498,7 +499,7 @@ export function MaintainTab({ token }: { token: string }) {
             <Box
               sx={{
                 display: "flex",
-                gap: 1,
+                ...flexGap(1),
                 alignItems: "center",
                 flexWrap: "wrap",
               }}

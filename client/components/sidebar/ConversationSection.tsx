@@ -35,7 +35,11 @@ export function ConversationSection({
   }
 
   return (
-    <List disablePadding dense sx={{ pb: 0.5 }}>
+    <List
+      disablePadding
+      dense
+      sx={{ width: "100%", maxWidth: "100%", minWidth: 0, pb: 0.5 }}
+    >
       {conversations.map((c) => {
         const unread = !isSelected(c.type, c.id) && (c.unread_count ?? 0) > 0;
         const Icon = c.type === "group" ? GroupsIcon : PersonIcon;
@@ -55,6 +59,7 @@ export function ConversationSection({
               }}
             />
             <ListItemText
+              sx={{ minWidth: 0 }}
               primary={c.name}
               secondary={
                 c.last_message

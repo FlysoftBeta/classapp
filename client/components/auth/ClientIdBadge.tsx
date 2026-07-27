@@ -4,6 +4,7 @@ import ButtonBase from "@mui/material/ButtonBase";
 import Typography from "@mui/material/Typography";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
+import { flexGap } from "@/client/lib/css";
 
 export default function ClientIdBadge({ clientId }: { clientId: string }) {
   const [copied, setCopied] = useState(false);
@@ -34,7 +35,7 @@ export default function ClientIdBadge({ clientId }: { clientId: string }) {
         title="复制客户端 ID"
         sx={{
           display: "flex",
-          gap: 0.75,
+          ...flexGap(0.75),
           alignItems: "center",
           px: 1.25,
           py: 0.75,

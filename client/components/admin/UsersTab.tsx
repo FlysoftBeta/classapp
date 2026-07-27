@@ -23,6 +23,7 @@ import Checkbox from "@mui/material/Checkbox";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import AddIcon from "@mui/icons-material/Add";
+import { flexGap } from "@/client/lib/css";
 import type { User } from "@/shared/types/api";
 import {
   adminFetchUsers,
@@ -272,7 +273,7 @@ export function UsersTab() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 1,
+            ...flexGap(1),
             px: 1.5,
             py: 0.75,
             mb: 2,

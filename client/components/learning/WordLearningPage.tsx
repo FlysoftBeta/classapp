@@ -10,7 +10,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Switch from "@mui/material/Switch";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { fetchNextWord, recordWordPractice } from "@/client/api/words";
 import type { Word } from "@/shared/types/api/words";
 
@@ -263,7 +263,9 @@ export default function WordLearningPage({
         <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
           {wordIndex} / ?
         </Typography>
-        <Box sx={{ ml: 3, display: "flex", alignItems: "center", gap: 1 }}>
+        <Box
+          sx={{ ml: 3, display: "flex", alignItems: "center", ...flexGap(1) }}
+        >
           <Typography variant="body2" color="text.secondary" fontSize={12}>
             跟得上我的速度吗
           </Typography>
@@ -325,7 +327,9 @@ export default function WordLearningPage({
         <DialogTitle>退出学习</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 4 }}>{getExitMessage()}</Typography>
-          <Box sx={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+          <Box
+            sx={{ display: "flex", ...flexGap(2), justifyContent: "flex-end" }}
+          >
             <Button onClick={() => setShowExitDialog(false)}>继续学习</Button>
             <Button variant="contained" onClick={confirmExit}>
               确认退出

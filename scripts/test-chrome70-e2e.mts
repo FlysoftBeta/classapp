@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import https from "node:https";
 import type { IncomingHttpHeaders } from "node:http";
-import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import Database from "better-sqlite3";
 import WebSocket from "ws";
-
-const DEB = path.join(
-  import.meta.dirname,
-  "google-chrome-stable_current_amd64.deb",
-);
-const EXPECTED_SHA256 =
-  "d7f8866b202deb82cbeffa2d66b26ad8f59dafed24aa0422e166541e5a724c20";
-const EXPECTED_VERSION = "Google Chrome 70.0.3538.77";
+import { launchChrome70, prepareChrome70, type Chrome70 } from "./chrome70.mjs";
+import {
+  createProductionTestRuntime,
+  freePort,
+  removeProductionTestRuntime,
+  startProductionLauncher,
+  stopProcess,
+  stopProcesses,
+  waitForExit,
+  waitForLauncher,
+} from "./production-test-runtime.mjs";
 const TLS_HOST = "classapp.duckdns.org";
 const LEGACY_HOST = "www.opensubtitles.org";
 
@@ -85,29 +85,6 @@ class CdpClient {
   }
 }
 
-function stopProcess(child: ChildProcess | undefined): void {
-  if (!child?.pid || child.exitCode !== null) return;
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-}
-
-async function waitForExit(child: ChildProcess, timeoutMs = 10_000) {
-  if (child.exitCode !== null) return;
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("Timed out waiting for process exit")),
-      timeoutMs,
-    );
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
-}
-
 function waitForDevtools(browser: ChildProcess): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = "";
@@ -172,20 +149,6 @@ async function waitForText(
   );
 }
 
-async function freePort(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  const port = address.port;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  assert(port >= 1024, `Expected an unprivileged port, received ${port}`);
-  return port;
-}
-
 function trustedHttpsRequest(
   port: number,
   requestPath = "/",
@@ -218,20 +181,14 @@ async function waitForServer(
   child: ChildProcess,
   securePort: number,
 ): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`Launcher exited with code ${child.exitCode}`);
-    }
-    try {
+  await waitForLauncher(
+    child,
+    async () => {
       const response = await trustedHttpsRequest(securePort);
-      if (response.status === 200) return;
-    } catch {
-      // The production launcher is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error("Timed out waiting for the HTTPS production server");
+      return response.status === 200;
+    },
+    "the HTTPS production server",
+  );
 }
 
 function startLauncher(
@@ -239,15 +196,11 @@ function startLauncher(
   httpPort: number,
   securePort: number,
 ): { child: ChildProcess; adminPin: Promise<string> } {
-  const child = spawn(process.execPath, ["launcher.js"], {
-    cwd: deployment,
-    detached: true,
+  const child = startProductionLauncher({
+    deployment,
+    httpPort,
+    securePort,
     stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      CLASSAPP_PORTS: String(httpPort),
-      CLASSAPP_SECURE_PORTS: String(securePort),
-    },
   });
   let output = "";
   let resolvePin: ((pin: string) => void) | null = null;
@@ -275,88 +228,21 @@ function startLauncher(
   return { child, adminPin };
 }
 
-async function extractChrome(
-  temporaryRoot: string,
-): Promise<{ executable: string; version: string }> {
-  const digest = createHash("sha256")
-    .update(await readFile(DEB))
-    .digest("hex");
-  if (digest !== EXPECTED_SHA256) {
-    throw new Error(`Chrome 70 package hash mismatch: ${digest}`);
-  }
-  const debParts = path.join(temporaryRoot, "deb");
-  const extracted = path.join(temporaryRoot, "chrome");
-  await mkdir(debParts);
-  await mkdir(extracted);
-  const unpackDeb = spawnSync("/usr/bin/ar", ["x", DEB, "data.tar.xz"], {
-    encoding: "utf8",
-    cwd: debParts,
-  });
-  if (unpackDeb.error) throw unpackDeb.error;
-  if (unpackDeb.status !== 0) {
-    throw new Error(unpackDeb.stderr || "Could not unpack Chrome package");
-  }
-  const extraction = spawnSync(
-    "/usr/bin/tar",
-    ["-xJf", path.join(debParts, "data.tar.xz"), "-C", extracted],
-    { encoding: "utf8" },
-  );
-  if (extraction.error) throw extraction.error;
-  if (extraction.status !== 0) {
-    throw new Error(extraction.stderr || "Could not extract Chrome payload");
-  }
-  const executable = path.join(extracted, "opt/google/chrome/google-chrome");
-  const version = spawnSync(executable, ["--version"], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      HOME: temporaryRoot,
-      XDG_CONFIG_HOME: path.join(temporaryRoot, "config"),
-      XDG_CACHE_HOME: path.join(temporaryRoot, "cache"),
-    },
-  });
-  if (version.error) throw version.error;
-  if (version.stdout.trim() !== EXPECTED_VERSION) {
-    throw new Error(`Unexpected Chrome version: ${version.stdout.trim()}`);
-  }
-  return { executable, version: version.stdout.trim() };
-}
-
 async function launchChrome(
-  executable: string,
-  temporaryRoot: string,
+  chrome: Chrome70,
   profile: string,
 ): Promise<{ browser: ChildProcess; cdp: CdpClient }> {
   const hostRules = [
     `MAP ${TLS_HOST} 127.0.0.1`,
     `MAP ${LEGACY_HOST} 127.0.0.1`,
-    "EXCLUDE localhost",
-  ].join(",");
-  const browser = spawn(
-    executable,
-    [
-      "--headless",
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-first-run",
-      "--disable-background-networking",
-      `--host-resolver-rules=${hostRules}`,
-      `--user-data-dir=${profile}`,
-      "--remote-debugging-port=0",
-      "about:blank",
-    ],
-    {
-      stdio: ["ignore", "ignore", "pipe"],
-      detached: true,
-      env: {
-        ...process.env,
-        HOME: temporaryRoot,
-        XDG_CONFIG_HOME: path.join(temporaryRoot, "config"),
-        XDG_CACHE_HOME: path.join(temporaryRoot, "cache"),
-      },
-    },
-  );
+  ];
+  const browser = launchChrome70(chrome, {
+    userDataDir: profile,
+    url: "about:blank",
+    headless: true,
+    hostResolverRules: hostRules,
+    remoteDebugging: true,
+  });
   const browserWs = await waitForDevtools(browser);
   const debugPort = new URL(browserWs).port;
   const targets = (await fetch(`http://127.0.0.1:${debugPort}/json/list`).then(
@@ -517,11 +403,9 @@ async function main(): Promise<void> {
     );
   });
 
-  const temporaryRoot = await mkdtemp(
-    path.join(os.tmpdir(), "classapp-chrome70-"),
-  );
-  const deployment = path.join(temporaryRoot, "deployment");
-  const profile = path.join(temporaryRoot, "profile");
+  const runtime = await createProductionTestRuntime({
+    prefix: "classapp-chrome70-",
+  });
   const launchers: ChildProcess[] = [];
   let browser: ChildProcess | undefined;
   let cdp: CdpClient | undefined;
@@ -529,14 +413,8 @@ async function main(): Promise<void> {
   try {
     const [httpPort, securePort] = await Promise.all([freePort(), freePort()]);
     assert.notEqual(httpPort, securePort);
-    await cp(sourceDeployment, deployment, { recursive: true });
-    await Promise.all(
-      ["data.db", "data.db-shm", "data.db-wal", ".launcher-pid"].map((name) =>
-        rm(path.join(deployment, name), { force: true }),
-      ),
-    );
 
-    const first = startLauncher(deployment, httpPort, securePort);
+    const first = startLauncher(runtime.deployment, httpPort, securePort);
     launchers.push(first.child);
     await waitForServer(first.child, securePort);
     const initialHttp = await fetch(`http://127.0.0.1:${httpPort}/`);
@@ -551,7 +429,7 @@ async function main(): Promise<void> {
       ),
     ]);
 
-    const database = new Database(path.join(deployment, "data.db"));
+    const database = new Database(path.join(runtime.deployment, "data.db"));
     database
       .prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)")
       .run("https_redirect_enabled", "1");
@@ -573,12 +451,8 @@ async function main(): Promise<void> {
       "public, max-age=315360000, immutable",
     );
 
-    const chrome = await extractChrome(temporaryRoot);
-    const launched = await launchChrome(
-      chrome.executable,
-      temporaryRoot,
-      profile,
-    );
+    const chrome = await prepareChrome70();
+    const launched = await launchChrome(chrome, runtime.profile);
     browser = launched.browser;
     cdp = launched.cdp;
     const onlineFailures: string[] = [];
@@ -692,7 +566,7 @@ async function main(): Promise<void> {
     assert.equal(offlineState.bundleCount, 1);
     assert.doesNotMatch(offlineState.body, /应用无法加载/);
 
-    const second = startLauncher(deployment, httpPort, securePort);
+    const second = startLauncher(runtime.deployment, httpPort, securePort);
     second.adminPin.catch(() => undefined);
     launchers.push(second.child);
     await waitForServer(second.child, securePort);
@@ -704,14 +578,8 @@ async function main(): Promise<void> {
     );
   } finally {
     if (cdp) await cdp.send("Browser.close").catch(() => undefined);
-    stopProcess(browser);
-    for (const launcher of launchers) stopProcess(launcher);
-    await Promise.all(
-      launchers.map((launcher) =>
-        waitForExit(launcher, 5_000).catch(() => undefined),
-      ),
-    );
-    await rm(temporaryRoot, { recursive: true, force: true });
+    await stopProcesses([browser, ...launchers]);
+    await removeProductionTestRuntime(runtime);
   }
 }
 

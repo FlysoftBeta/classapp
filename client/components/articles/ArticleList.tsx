@@ -13,7 +13,7 @@ import ArticleIcon from "@mui/icons-material/Article";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import type { ArticleWithMeta } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
 import Infini2View from "@/client/components/shared/Infini2View";
 import { useInfini2, type Infini2Provider } from "@/lib/infini2";
@@ -170,7 +170,7 @@ const RecentArticlesVirtualRow = React.memo(function RecentArticlesVirtualRow({
               pb: 0.5,
               display: "flex",
               alignItems: "center",
-              gap: 0.5,
+              ...flexGap(0.5),
               color: "text.disabled",
               fontWeight: 600,
               textTransform: "uppercase",

@@ -13,6 +13,7 @@ import {
   setFeature,
   type FeatureGate,
 } from "@/shared/features";
+import { flexGap } from "@/client/lib/css";
 
 export type FeatureGateChange = "unchanged" | "enabled" | "disabled";
 export type FeatureGateChanges = Record<FeatureGate, FeatureGateChange>;
@@ -187,7 +188,7 @@ export function FeatureGatesPanel({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 1,
+            ...flexGap(1),
             px: 1.5,
             py: 1,
             borderTop: "1px solid",

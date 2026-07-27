@@ -4,6 +4,7 @@ import IconButton from "@mui/material/IconButton";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import { flexGap } from "@/client/lib/css";
 
 /**
  * HelpTip — small "?" icon with a tooltip.
@@ -72,7 +73,7 @@ export function DialogTitleWithHelp({
         pb: 1,
         display: "flex",
         alignItems: "center",
-        gap: 1,
+        ...flexGap(1),
       }}
     >
       <Typography variant="h6" sx={{ flex: 1, fontSize: 18, fontWeight: 600 }}>
@@ -95,7 +96,9 @@ export function LabelWithHelp({
   help: React.ReactNode;
 }) {
   return (
-    <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}>
+    <Box
+      sx={{ display: "inline-flex", alignItems: "center", ...flexGap(0.25) }}
+    >
       <Box component="span">{label}</Box>
       <HelpTip title={help} />
     </Box>

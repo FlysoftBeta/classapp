@@ -54,7 +54,11 @@ export function ArticleSection({
       }
     >
       {articles.length > 0 ? (
-        <List disablePadding dense sx={{ pb: 0.5 }}>
+        <List
+          disablePadding
+          dense
+          sx={{ width: "100%", maxWidth: "100%", minWidth: 0, pb: 0.5 }}
+        >
           {articles.map((a) => {
             const selected = currentArticleId === a.id;
             return (
@@ -84,6 +88,7 @@ export function ArticleSection({
                   />
                 )}
                 <ListItemText
+                  sx={{ minWidth: 0 }}
                   primary={a.title}
                   primaryTypographyProps={{
                     variant: "caption",

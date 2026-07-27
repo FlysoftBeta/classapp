@@ -6,7 +6,7 @@ import IconButton from "@mui/material/IconButton";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { fetchMasteredWords } from "@/client/api/words";
 import type { WordWithLearnedCount } from "@/shared/types/api/words";
 
@@ -86,7 +86,13 @@ export default function MasteredWordsPage({ onBack }: MasteredWordsPageProps) {
             还没有已学会的单词
           </Typography>
         ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              ...flexGap(2, "column"),
+            }}
+          >
             {words.map((word) => {
               const definitions = word.definition.split("；");
               return (
@@ -130,7 +136,7 @@ export default function MasteredWordsPage({ onBack }: MasteredWordsPageProps) {
             borderColor: "divider",
             display: "flex",
             justifyContent: "center",
-            gap: 2,
+            ...flexGap(2),
           }}
         >
           <Button

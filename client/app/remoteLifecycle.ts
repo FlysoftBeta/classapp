@@ -28,6 +28,7 @@ type RemoteCallbacks = {
 
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let recoveryRun: Promise<void> | null = null;
+let invalidSessionRecovery: Promise<void> | null = null;
 
 async function refreshState(touch = true): Promise<void> {
   const payload = await probeAppState(touch ? undefined : { touch: false });
@@ -51,6 +52,27 @@ function recover(): void {
     });
     recoveryRun = run;
   }, 150);
+}
+
+export function recoverInvalidSession(): void {
+  const dispatch = useAppStore.getState().dispatch;
+  session.setToken("");
+  void offlineSession.clear();
+  dispatch({ type: "LOGOUT" });
+  dispatch({ type: "SET_APP_STATE", appState: "loading" });
+
+  if (invalidSessionRecovery) return;
+  const run = (async () => {
+    const payload = await probeAppState();
+    if (payload) {
+      applyAppState(payload);
+    }
+  })()
+    .catch(() => {})
+    .finally(() => {
+      if (invalidSessionRecovery === run) invalidSessionRecovery = null;
+    });
+  invalidSessionRecovery = run;
 }
 
 export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
@@ -92,12 +114,7 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
   const unsubscribers = [
     client.subscribe("client.lock_changed", () => void refreshState()),
     client.subscribe("client.idle_locked", () => void refreshState(false)),
-    client.subscribe("client.deleted", () => {
-      void offlineSession.clear();
-      session.setToken("");
-      dispatch({ type: "LOGOUT" });
-      dispatch({ type: "SET_APP_STATE", appState: "login" });
-    }),
+    client.subscribe("client.deleted", recoverInvalidSession),
     client.subscribe("user.banned", () => void refreshState()),
     client.subscribe("user.unbanned", () => void refreshState()),
     client.subscribe("user.muted_changed", onMuted),

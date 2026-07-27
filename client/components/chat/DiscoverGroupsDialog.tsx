@@ -16,6 +16,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import TextField from "@mui/material/TextField";
 import ExploreIcon from "@mui/icons-material/Explore";
 import { discoverSubgroups, joinGroup } from "@/client/api/groups";
+import { flexGap } from "@/client/lib/css";
 
 export interface DiscoverGroup {
   id: string;
@@ -115,7 +116,12 @@ export function DiscoverGroupsDialog({
               {groups.map((g) => (
                 <ListItem
                   key={g.id}
-                  sx={{ px: 0, display: "flex", alignItems: "center", gap: 1 }}
+                  sx={{
+                    px: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    ...flexGap(1),
+                  }}
                   secondaryAction={
                     <Button
                       size="small"

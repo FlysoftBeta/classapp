@@ -19,6 +19,7 @@ import { isTextPost } from "@/shared/types/api";
 import { LONG_TEXT_THRESHOLD } from "@/shared/validation/posts";
 import { fetchPost, updatePost, deletePost } from "@/client/api/posts";
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
+import { flexGap } from "@/client/lib/css";
 
 interface ChatPostCardProps {
   post: Post;
@@ -314,7 +315,14 @@ export default function ChatPostCard({
           )}
 
           {post.type === "text" && editLoading ? (
-            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1 }}>
+            <Box
+              sx={{
+                mt: 1,
+                display: "flex",
+                alignItems: "center",
+                ...flexGap(1),
+              }}
+            >
               <CircularProgress size={16} />
               <Typography variant="caption" color="text.secondary">
                 加载中…

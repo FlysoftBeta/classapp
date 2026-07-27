@@ -96,6 +96,8 @@ export default function ConversationList({
     <Box
       sx={{
         width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
         minHeight: 0,
         borderRight: "1px solid",
         borderColor: "divider",
@@ -103,7 +105,7 @@ export default function ConversationList({
         flexDirection: "column",
         height: "100%",
         bgcolor: "background.paper",
-        overflowY: "hidden",
+        overflow: "hidden",
       }}
     >
       <SidebarTopProps
@@ -115,6 +117,7 @@ export default function ConversationList({
       <Box
         sx={{
           flex: 1,
+          minWidth: 0,
           minHeight: 0,
           overflow: "hidden",
           display: "flex",
@@ -124,6 +127,7 @@ export default function ConversationList({
         <Box
           sx={{
             flex: 1,
+            minWidth: 0,
             minHeight: 0,
             overflow: "hidden",
             display: "flex",

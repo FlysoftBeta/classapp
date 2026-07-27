@@ -8,6 +8,7 @@ import ButtonBase from "@mui/material/ButtonBase";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import BackspaceOutlinedIcon from "@mui/icons-material/BackspaceOutlined";
+import { flexGap } from "@/client/lib/css";
 
 // 3×4 grid layout
 const KEYS: (number | null | "del")[] = [
@@ -100,7 +101,7 @@ export default function NumPad({
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 1.25,
+            ...flexGap(1.25, "column"),
             borderRadius: 3,
             bgcolor: "background.default",
             opacity: 0.96,

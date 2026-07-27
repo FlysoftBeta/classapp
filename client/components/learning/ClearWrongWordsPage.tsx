@@ -9,7 +9,7 @@ import CardContent from "@mui/material/CardContent";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import { vh } from "@/client/lib/css";
+import { flexGap, vh } from "@/client/lib/css";
 import { fetchNextWrongWord, recordWordPractice } from "@/client/api/words";
 import type { Word } from "@/shared/types/api/words";
 
@@ -309,7 +309,9 @@ export default function ClearWrongWordsPage({
         <DialogTitle>退出清错</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 4 }}>{getExitMessage()}</Typography>
-          <Box sx={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+          <Box
+            sx={{ display: "flex", ...flexGap(2), justifyContent: "flex-end" }}
+          >
             <Button onClick={() => setShowExitDialog(false)}>继续清错</Button>
             <Button variant="contained" onClick={confirmExit}>
               确认退出

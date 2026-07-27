@@ -93,7 +93,7 @@ ClassApp 的浏览器目标是 **Chrome 70 及以上版本**（为了适应老�
 仓库中保留了一套固定版本的 Chrome 70 端到端测试。它会启动完整的生产环境，通过真实 HTTPS 证书登录应用，验证 Service Worker 和 IndexedDB 安装；随后关闭服务器，再确认浏览器仍能从离线入口启动，最后重启服务器并检查自动恢复。
 
 ```bash
-npm run test:e2e:chrome70
+npm run test:e2e
 ```
 
 这项测试需要本地准备对应的浏览器测试包和 HTTPS 证书，因此不是日常开发的必跑项。较新的 Chromium 浏览器通常可以直接使用；其他浏览器目前没有承诺同等程度的测试覆盖。

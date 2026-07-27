@@ -26,6 +26,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import EditIcon from "@mui/icons-material/Edit";
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd";
+import { flexGap } from "@/client/lib/css";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import {
   type AdminClientRecord as ClientRecord,
@@ -321,7 +322,11 @@ export function ClientsTab() {
               <TableRow key={client.id} hover>
                 <TableCell sx={{ minWidth: 170 }}>
                   <Box
-                    sx={{ display: "flex", alignItems: "center", gap: 0.75 }}
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      ...flexGap(0.75),
+                    }}
                   >
                     <Typography
                       sx={{

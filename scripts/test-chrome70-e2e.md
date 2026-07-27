@@ -1,6 +1,6 @@
 # Chrome 70 production HTTPS E2E
 
-`npm run test:e2e:chrome70` exercises the production boot chain without
+`npm run test:e2e` exercises the production boot chain without
 binding privileged ports or modifying the system hosts file:
 
 1. Builds a deployment that must contain the real HTTPS credentials.
@@ -23,3 +23,13 @@ binding privileged ports or modifying the system hosts file:
 The test only binds random high TCP ports. It does not use
 `--ignore-certificate-errors`, `Security.setOverrideCertificateErrors`, a test
 CA, mDNS, or changes to `/etc/hosts`.
+
+Chrome 70 is extracted once under `node_modules/.cache/classapp` and reused by
+later E2E and manual test runs.
+
+## Manual Chrome 70 test
+
+`npm run test:manual` builds the production deployment, copies it and `prod.db`
+to a temporary directory, and opens it in a headed Chrome 70 process. Closing
+Chrome (or pressing Ctrl+C) removes the temporary deployment and browser
+profile, so neither database changes nor Chrome user data are retained.

@@ -44,6 +44,8 @@ export function SidebarSection({
       sx={{
         display: "flex",
         alignItems: "center",
+        width: "100%",
+        minWidth: 0,
         px: 1,
         py: 0.5,
         minHeight: 32,
@@ -110,6 +112,9 @@ export function SidebarSection({
     return (
       <Box
         sx={{
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
           minHeight: 0,
           overflow: "hidden",
           display: "flex",
@@ -131,6 +136,9 @@ export function SidebarSection({
           unmountOnExit
           sx={{
             flex: 1,
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
@@ -139,10 +147,16 @@ export function SidebarSection({
             },
             "& .MuiCollapse-wrapper": {
               flex: 1,
+              width: "100%",
+              maxWidth: "100%",
+              minWidth: 0,
               minHeight: 0,
             },
             "& .MuiCollapse-wrapperInner": {
               flex: 1,
+              width: "100%",
+              maxWidth: "100%",
+              minWidth: 0,
               minHeight: 0,
               display: "flex",
               flexDirection: "column",
@@ -152,8 +166,12 @@ export function SidebarSection({
           <Box
             sx={{
               flex: 1,
+              width: "100%",
+              maxWidth: "100%",
+              minWidth: 0,
               minHeight: 0,
               overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
             {children}
@@ -166,6 +184,9 @@ export function SidebarSection({
   return (
     <Box
       sx={{
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: 0,
         minHeight: 0,
         overflow: "hidden",
       }}

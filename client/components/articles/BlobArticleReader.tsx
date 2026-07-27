@@ -22,6 +22,7 @@ import DarkModeIcon from "@mui/icons-material/DarkMode";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import ZoomInIcon from "@mui/icons-material/ZoomIn";
 import ZoomOutIcon from "@mui/icons-material/ZoomOut";
+import { flexGap } from "@/client/lib/css";
 import { fetchArticleRender, saveArticleProgress } from "@/client/api/articles";
 import {
   fetchReaderConfig,
@@ -1271,7 +1272,7 @@ export default function BlobArticleReader({
             pointerEvents: "auto",
             display: "flex",
             alignItems: "center",
-            gap: 1,
+            ...flexGap(1),
             px: 1.5,
             py: 0.75,
             bgcolor: "background.paper",
