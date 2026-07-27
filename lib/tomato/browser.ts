@@ -156,6 +156,6 @@ export class BrowserPool {
 let defaultPool: BrowserPool | null = null;
 
 export function getDefaultBrowserPool(): BrowserPool {
-  defaultPool ??= new BrowserPool({ headed: true });
+  defaultPool ??= new BrowserPool({ headed: false });
   return defaultPool;
 }

@@ -104,26 +104,24 @@ try {
   fs.mkdirSync(destination, { recursive: true });
 
   // better-sqlite3 13 ships N-API prebuilds inside its package. Retain only
-  // the Linux x64 (glibc/musl) and Windows x64 variants we support.
+  // the Linux x64 (glibc) and Windows x64 variants we support.
   copyPackage("better-sqlite3");
   const sqlitePrebuilds = path.join(destination, "better-sqlite3", "prebuilds");
   for (const name of fs.readdirSync(sqlitePrebuilds)) {
     if (
-      !["linux-x64.node", "linuxmusl-x64.node", "win32-x64.node"].includes(name)
+      !["linux-x64.node", "win32-x64.node"].includes(name)
     ) {
       fs.rmSync(path.join(sqlitePrebuilds, name));
     }
   }
 
   copyPackage("@napi-rs/canvas");
-  copyPackage("@napi-rs/canvas-linux-x64-gnu");
 
   // ws resolves this optional native peer at runtime. bufferutil itself ships
   // N-API prebuilds for both target platforms, so no target-side install or
   // compilation is needed.
   copyPackage("ws");
   copyPackage("bufferutil");
-  copyPackage("node-gyp-build");
 
   // Playwright contains CommonJS modules that rely on __dirname, so it stays
   // external to the server's ESM bundle. Its runtime package and core package
@@ -133,7 +131,7 @@ try {
 
   const canvas = readPackage("@napi-rs/canvas");
   for (const target of [
-    "@napi-rs/canvas-linux-x64-musl",
+    "@napi-rs/canvas-linux-x64-gnu",
     "@napi-rs/canvas-win32-x64-msvc",
   ]) {
     const version = canvas.optionalDependencies?.[target];
