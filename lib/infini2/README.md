@@ -5,6 +5,12 @@ Provider 契约、API 指南与验收清单见 [`docs/`](./docs/README.md)。
 
 ## 最小用法
 
+应用启动时先异步编译一次内联 Wasm，再创建任何 controller：
+
+```ts
+await initializeInfini2Wasm();
+```
+
 ```tsx
 const { controller, snapshot } = useInfini2({
   provider: {

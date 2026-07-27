@@ -5,6 +5,7 @@ import {
   Infini2Controller,
   Infini2DomHost,
   Infini2List,
+  initializeInfini2Wasm,
   useInfini2,
   type Infini2ControllerConfig,
   type Infini2Page,
@@ -110,6 +111,8 @@ function ReactHarness() {
 }
 
 async function run() {
+  await initializeInfini2Wasm();
+
   const bareHost = document.querySelector<HTMLDivElement>("#bare-host")!;
   const surface = document.querySelector<HTMLDivElement>("#bare-surface")!;
   Object.assign(bareHost.style, {

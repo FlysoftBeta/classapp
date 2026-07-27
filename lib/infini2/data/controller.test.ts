@@ -3,6 +3,9 @@ import test from "node:test";
 
 import { Infini2Controller } from "./controller";
 import type { Infini2Page, Infini2Provider } from "./contracts";
+import { initializeInfini2Wasm } from "../runtime";
+
+test.before(initializeInfini2Wasm);
 
 interface Row {
   id: number;

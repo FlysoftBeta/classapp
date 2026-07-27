@@ -13,7 +13,8 @@ binding privileged ports or modifying the system hosts file:
    SNI and hostname verification still use the real DuckDNS hostname and
    Let's Encrypt certificate.
 6. Enters through the legacy HTTP hostname, follows the real cached 301, logs
-   in, checks the HTTPS admin panel, and waits for Service Worker control.
+   in, opens the default chat conversation, checks the HTTPS admin panel, and
+   waits for Service Worker control.
 7. Stops the complete production launcher and navigates to the legacy HTTP URL
    again. The cached 301, cached shell, and IndexedDB app bundle must start the
    app with no origin server.

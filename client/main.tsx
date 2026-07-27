@@ -8,6 +8,7 @@ import { configureClientRuntime } from "@/client/api/runtime";
 import { transport } from "@/client/lib/remote/transport";
 import { updateBundle } from "@/client/lib/bundle";
 import { ensureEndpointsReady } from "@/client/lib/loadBalancer";
+import { initializeInfini2Wasm } from "@/lib/infini2";
 
 declare const __BUILD_ID__: string;
 
@@ -18,6 +19,7 @@ async function bootstrap(): Promise<void> {
   // Do not connect or render the stale application until its production
   // bundle has either been confirmed current or replaced and activated.
   await updateBundle(buildId);
+  await initializeInfini2Wasm();
 
   const style = document.createElement("style");
   style.textContent = globalCss;

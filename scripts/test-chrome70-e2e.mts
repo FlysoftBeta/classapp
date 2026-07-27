@@ -406,12 +406,43 @@ async function enterKonamiAndLogin(cdp: CdpClient, pin: string): Promise<void> {
   await waitForText(cdp, "Baker");
 }
 
+async function openChatConversation(
+  cdp: CdpClient,
+  conversationName: string,
+): Promise<void> {
+  await cdp.evaluate(`(async function () {
+    var name = ${JSON.stringify(conversationName)};
+    var deadline = Date.now() + 20000;
+    var button;
+    while (!button) {
+      var candidates = Array.prototype.slice.call(
+        document.querySelectorAll('[role="button"]')
+      );
+      button = candidates.find(function (candidate) {
+        return candidate.textContent.trim() === name;
+      });
+      if (button) break;
+      if (Date.now() >= deadline) {
+        throw new Error("Conversation not found: " + name);
+      }
+      await new Promise(function (resolve) { setTimeout(resolve, 50); });
+    }
+    button.click();
+  })()`);
+  await waitForText(cdp, `# ${conversationName}`);
+  await waitForExpression(
+    cdp,
+    `!!document.querySelector('textarea[placeholder="发送消息…"]')`,
+    `chat composer for ${conversationName}`,
+  );
+}
+
 async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
   await cdp.evaluate(`(function () {
-    var icon = document.querySelector('[data-testid="AdminPanelSettingsIcon"]');
-    var button = icon && icon.parentElement;
+    var button = document.querySelector('button[aria-label="管理后台"]');
     if (!button) {
-      button = document.querySelector('button[aria-label="管理后台"]');
+      var icon = document.querySelector('[data-testid="AdminPanelSettingsIcon"]');
+      button = icon && icon.parentElement;
     }
     if (!button) {
       var spans = Array.prototype.slice.call(document.querySelectorAll("span"));
@@ -425,14 +456,22 @@ async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
     button.click();
   })()`);
   await waitForText(cdp, "管理后台");
+  await waitForExpression(
+    cdp,
+    `Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'))
+      .some(function (candidate) {
+        return candidate.textContent.trim() === "运维";
+      })`,
+    "admin maintenance tab",
+  );
   await cdp.evaluate(`(function () {
     var tabs = Array.prototype.slice.call(
       document.querySelectorAll('[role="tab"]')
     );
     var tab = tabs.find(function (candidate) {
-      return candidate.textContent.trim() === "系统";
+      return candidate.textContent.trim() === "运维";
     });
-    if (!tab) throw new Error("System tab not found");
+    if (!tab) throw new Error("Maintenance tab not found");
     tab.click();
   })()`);
   await waitForText(cdp, "HTTPS 升级");
@@ -607,6 +646,7 @@ async function main(): Promise<void> {
       }).then(function (data) { return data.origins; })`,
     );
     assert.deepEqual(endpoints, [`https://${TLS_HOST}:${securePort}`]);
+    await openChatConversation(cdp, "大别野");
     await inspectHttpsAdminPanel(cdp);
     if (onlineFailures.length > 0) {
       throw new Error(onlineFailures.join("\n"));
