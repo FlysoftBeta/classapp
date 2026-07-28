@@ -126,7 +126,7 @@ export default function AdminPanel({
         {tab === 4 && <ClientsTab />}
         {tab === 5 && <GlobalTab />}
         {tab === 6 && <MaintainTab token={token} />}
-        {tab === 7 && <ToolsTab />}
+        {tab === 7 && <ToolsTab token={token} />}
       </Box>
     </Box>
   );

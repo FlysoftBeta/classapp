@@ -166,6 +166,18 @@ function initSchema(db: Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS teach_documents (
+      id            TEXT PRIMARY KEY,
+      application   TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK (document_type IN ('word', 'powerpoint', 'excel')),
+      name          TEXT NOT NULL,
+      blob_path     TEXT NOT NULL UNIQUE,
+      file_size     INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_teach_documents_created
+      ON teach_documents(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS article_bookmarks (
       user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -290,6 +302,7 @@ function migrateProdV14ToV15(db: Database) {
     `);
     applyClientManagementV15(db);
     applyArticleCenterV15(db);
+    applyTeachDocumentsV15(db);
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
   })();
 
@@ -401,10 +414,27 @@ function applyArticleCenterV15(db: Database): void {
   }
 }
 
+function applyTeachDocumentsV15(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS teach_documents (
+      id            TEXT PRIMARY KEY,
+      application   TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK (document_type IN ('word', 'powerpoint', 'excel')),
+      name          TEXT NOT NULL,
+      blob_path     TEXT NOT NULL UNIQUE,
+      file_size     INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_teach_documents_created
+      ON teach_documents(created_at DESC);
+  `);
+}
+
 function finalizeSchemaV15(db: Database): void {
   db.transaction(() => {
     applyClientManagementV15(db);
     applyArticleCenterV15(db);
+    applyTeachDocumentsV15(db);
   })();
 }
 

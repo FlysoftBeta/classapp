@@ -151,6 +151,14 @@ const articleImportTaskSchema = object({
   created_at: timestamp,
   updated_at: timestamp,
 });
+const teachDocumentSchema = object({
+  id: z.string().uuid(),
+  application: z.string(),
+  document_type: z.enum(["word", "powerpoint", "excel"]),
+  name: z.string(),
+  file_size: z.number().int().nonnegative(),
+  created_at: z.string(),
+});
 
 const groupCreateInputSchema = object({
   handle: z.string().optional(),
@@ -347,6 +355,17 @@ export const actionContracts = {
   adminRunToolAction: contract(
     one(z.enum(["kill-wps", "shutdown"])),
     object({ ok: z.literal(true), message: z.string() }),
+  ),
+  adminFetchTeachDocumentsAction: contract(
+    noArgs,
+    object({
+      documents: z.array(teachDocumentSchema),
+      monitor_available: z.boolean(),
+    }),
+  ),
+  adminCleanupTeachDocumentsAction: contract(
+    noArgs,
+    object({ ok: z.literal(true), deleted: z.number().int().nonnegative() }),
   ),
 
   probeAppStateAction: contract(

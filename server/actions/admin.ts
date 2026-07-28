@@ -5,6 +5,7 @@ import { ServiceError } from "@/server/services/errors";
 import { createAppStateService } from "@/server/services/appStateService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 import { createAnnouncementService } from "@/server/services/announcementService";
+import { createTeachDocumentsService } from "@/server/services/teachDocumentsService";
 import { expectBoolean, expectString, withActionSession } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
@@ -459,5 +460,32 @@ export async function adminRunToolAction(
     const actor = await session.asActor();
     await actor.requireAdmin();
     return createAdminSystemService(getDb()).runTool(action);
+  });
+}
+
+export async function adminFetchTeachDocumentsAction() {
+  return withActionSession(async (session) => {
+    const actor = await session.asActor();
+    await actor.requireAdmin();
+    return {
+      documents: createTeachDocumentsService(getDb()).list().map((document) => ({
+        id: document.id,
+        application: document.application,
+        document_type: document.document_type,
+        name: document.name,
+        file_size: document.file_size,
+        created_at: document.created_at,
+      })),
+      monitor_available: process.platform === "win32",
+    };
+  });
+}
+
+export async function adminCleanupTeachDocumentsAction() {
+  return withActionSession(async (session) => {
+    const actor = await session.asActor();
+    await actor.requireAdmin();
+    const deleted = await createTeachDocumentsService(getDb()).cleanupAll();
+    return { ok: true as const, deleted };
   });
 }

@@ -9,6 +9,7 @@ import { GET as articleBlob } from "@/server/http/routes/articleBlob";
 import { GET as renderArticle } from "@/server/http/routes/articleRender";
 import { POST as deploy } from "@/server/http/routes/deploy";
 import { GET as downloadBackup } from "@/server/http/routes/backupDownload";
+import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocumentDownload";
 import { renderServiceWorker } from "@/server/http/serviceWorker";
 import { getDb } from "@/server/infra/db";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
@@ -228,6 +229,20 @@ export function createHttpHandler(
           await downloadBackup(request(), {
             params: Promise.resolve({
               name: decodeURIComponent(backupMatch[1]),
+            }),
+          }),
+          res,
+        );
+        return;
+      }
+      const teachDocumentMatch = url.pathname.match(
+        /^\/api\/admin\/teach-documents\/([^/]+)\/download$/,
+      );
+      if (req.method === "GET" && teachDocumentMatch) {
+        await sendResponse(
+          await downloadTeachDocument(request(), {
+            params: Promise.resolve({
+              id: decodeURIComponent(teachDocumentMatch[1]),
             }),
           }),
           res,

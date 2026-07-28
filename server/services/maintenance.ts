@@ -13,6 +13,7 @@ import {
   listInactiveClientIds,
 } from "@/server/data/maintenance";
 import { createClientService } from "@/server/services/clientsService";
+import { createTeachDocumentsService } from "@/server/services/teachDocumentsService";
 
 /** Temporary client records with no recent activity are removed after this many days. */
 const CLIENT_TTL_DAYS = 1;
@@ -52,15 +53,24 @@ function notifyIdleLockedClients(db: BetterSqlite3.Database): number {
 
 const MAINTENANCE_INTERVAL_MS = 60_000;
 
-function runMaintenance(db: BetterSqlite3.Database): void {
+async function runMaintenance(db: BetterSqlite3.Database): Promise<void> {
   cleanupExpiredSessions(db);
   cleanupInactiveClients(db);
   notifyIdleLockedClients(db);
+  await createTeachDocumentsService(db).cleanupExpired();
 }
 
 export function startMaintenance(db: BetterSqlite3.Database): () => void {
-  runMaintenance(db);
-  const timer = setInterval(() => runMaintenance(db), MAINTENANCE_INTERVAL_MS);
+  void runMaintenance(db).catch((error) =>
+    console.error("[Maintenance] 定期维护失败", error),
+  );
+  const timer = setInterval(
+    () =>
+      void runMaintenance(db).catch((error) =>
+        console.error("[Maintenance] 定期维护失败", error),
+      ),
+    MAINTENANCE_INTERVAL_MS,
+  );
   timer.unref();
   return () => clearInterval(timer);
 }

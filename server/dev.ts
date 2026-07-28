@@ -35,20 +35,24 @@ async function main(): Promise<void> {
     { getDb },
     { WebSocketProtocol },
     { startMaintenance: startPeriodicMaintenance },
+    { startOfficeDocumentMonitor },
   ] = await Promise.all([
     import("@/server/http/handler"),
     import("@/server/infra/db"),
     import("@/server/protocol/WebSocketProtocol"),
     import("@/server/services/maintenance"),
+    import("@/server/services/officeDocumentMonitor"),
   ]);
   const backend = createServer(createHttpHandler(config));
   new WebSocketProtocol("dev").attach(backend);
   const stopMaintenance = startPeriodicMaintenance(getDb());
+  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(getDb());
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );
 
   const shutdown = async () => {
+    stopOfficeDocumentMonitor();
     stopMaintenance();
     backend.close(() => process.exit(0));
   };

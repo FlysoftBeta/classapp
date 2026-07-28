@@ -15,6 +15,7 @@ const {
   adminDeletePostAction,
   adminDeleteUserAction,
   adminFetchBackupsAction,
+  adminFetchTeachDocumentsAction,
   adminFetchClientsAction,
   adminFetchConfigAction,
   adminFetchGhostUsersAction,
@@ -26,6 +27,7 @@ const {
   adminPromoteClientAction,
   adminRollbackAction,
   adminRunToolAction,
+  adminCleanupTeachDocumentsAction,
   adminToggleClientLockAction,
   adminUpdateClientAction,
   adminUpdateConfigAction,
@@ -332,4 +334,29 @@ export async function adminRunTool(action: "kill-wps" | "shutdown") {
     res,
     data,
   };
+}
+
+export type AdminTeachDocument =
+  ActionData<"adminFetchTeachDocumentsAction">["documents"][number];
+
+export async function adminFetchTeachDocuments() {
+  const result = await adminFetchTeachDocumentsAction();
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+export async function adminCleanupTeachDocuments() {
+  const result = await adminCleanupTeachDocumentsAction();
+  return {
+    res: observeActionResult(result),
+    data: result.ok ? result.data : { error: result.error.message },
+  };
+}
+
+export function adminTeachDocumentDownloadUrl(
+  token: string,
+  id: string,
+): string {
+  return `/api/admin/teach-documents/${encodeURIComponent(id)}/download?token=${encodeURIComponent(token)}`;
 }
