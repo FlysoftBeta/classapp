@@ -18,6 +18,7 @@ import {
   setConversationMutedValue,
   upsertConversationComposeDraft,
   upsertConversationReadState,
+  purgeConversationStateForUser,
 } from "@/server/data/conversations";
 import { publishUserConv } from "./eventBus";
 import { ServiceError } from "./errors";
@@ -350,6 +351,10 @@ export class ConversationService {
   ): { draft: string; updatedAt: number } {
     setConversationComposeDraft(this.db, userId, input);
     return getConversationComposeDraft(this.db, userId, input);
+  }
+
+  purgeUser(userId: string): void {
+    purgeConversationStateForUser(this.db, userId);
   }
 }
 

@@ -279,6 +279,13 @@ export default function TextArticleReader({
     number
   >({
     debug: showInfiniLogs ? "TextArticleReader" : undefined,
+    onError: (error, context) => {
+      console.error(
+        "[TextArticleReader] Infini2 provider failed",
+        context,
+        error,
+      );
+    },
     provider,
     ops: TEXT_OPS,
     estimateSize: estimateChunkHeight,

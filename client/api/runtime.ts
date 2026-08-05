@@ -7,24 +7,27 @@ type RuntimeConfig = {
   buildId: string;
 };
 
-let _buildReloadPending = false;
+let _buildCheckPending = false;
 let _runtime: RuntimeConfig = { buildId: "dev" };
 
 export function configureClientRuntime(runtime: RuntimeConfig): void {
   _runtime = runtime;
 }
 
-function reloadOnBuildMismatch(res: Response): void {
+function checkOnBuildMismatch(res: Response): void {
   const serverBuildId = res.headers.get("x-build-id");
   if (
     !serverBuildId ||
     serverBuildId === _runtime.buildId ||
-    _buildReloadPending
+    _buildCheckPending
   ) {
     return;
   }
-  _buildReloadPending = true;
-  window.location.reload();
+  _buildCheckPending = true;
+  window.dispatchEvent(new CustomEvent("classapp:update-check"));
+  setTimeout(() => {
+    _buildCheckPending = false;
+  }, 10_000);
 }
 
 export async function apiFetch(
@@ -35,7 +38,7 @@ export async function apiFetch(
     throw new TypeError("已强制切换到离线模式");
   }
   const res = await fetch(lbFetchUrl(url), init);
-  reloadOnBuildMismatch(res);
+  checkOnBuildMismatch(res);
 
   if (res.status === 401) {
     try {
@@ -64,10 +67,13 @@ export function applyActionResultMeta<T>(result: ActionResult<T>): void {
   if (
     result.meta.buildId &&
     result.meta.buildId !== _runtime.buildId &&
-    !_buildReloadPending
+    !_buildCheckPending
   ) {
-    _buildReloadPending = true;
-    window.location.reload();
+    _buildCheckPending = true;
+    window.dispatchEvent(new CustomEvent("classapp:update-check"));
+    setTimeout(() => {
+      _buildCheckPending = false;
+    }, 10_000);
     return;
   }
 }

@@ -15,6 +15,7 @@ import {
   listWrongWordRows,
   listWrongWords,
   upsertWordPractice,
+  purgeUserWordProgress,
 } from "@/server/data/words";
 import { getUserConfig, setUserConfig } from "@/server/services/userConfig";
 import { ServiceError } from "@/server/services/errors";
@@ -252,6 +253,10 @@ export class WordsService {
       String(enabled),
     );
     return enabled;
+  }
+
+  purgeUser(userId: string): void {
+    purgeUserWordProgress(this.db, userId);
   }
 }
 

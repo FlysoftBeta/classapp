@@ -4,6 +4,7 @@ import type { User } from "@/shared/types/api";
 import { ClientBusyError, createTomatoClientPool } from "@/lib/tomato";
 import type { SearchBook } from "@/lib/tomato";
 import { createArticleService } from "./articlesService";
+import { assertCanCreateArticle } from "@/server/domain/policy/articles";
 
 export interface NetworkArticleResult {
   source: "tomato";
@@ -28,6 +29,7 @@ export interface ArticleImportTask {
   error: string | null;
   created_at: number;
   updated_at: number;
+  group_id: string;
 }
 
 function toResult(book: SearchBook): NetworkArticleResult {
@@ -75,12 +77,19 @@ export class ArticleImportService {
     }
   }
 
-  start(user: User, bookId: string, titleHint = ""): ArticleImportTask {
+  start(
+    user: User,
+    bookId: string,
+    groupId: string,
+    titleHint = "",
+  ): ArticleImportTask {
+    assertCanCreateArticle(this.db, user, groupId);
     this.prune();
     const existing = [...this.tasks.values()].find(
       (task) =>
         task.user_id === user.id &&
         task.book_id === bookId &&
+        task.group_id === groupId &&
         (task.status === "queued" || task.status === "downloading"),
     );
     if (existing) return existing;
@@ -99,6 +108,7 @@ export class ArticleImportService {
       error: null,
       created_at: now,
       updated_at: now,
+      group_id: groupId,
     };
     this.tasks.set(task.id, task);
     void this.run(user, task);
@@ -135,6 +145,7 @@ export class ArticleImportService {
       const { article } = createArticleService(this.db).createText(user, {
         title: catalog.title,
         content: `${header}\n\n${parts.join("\n\n")}`,
+        group_id: task.group_id,
       });
       task.status = "completed";
       task.article_id = article.id;

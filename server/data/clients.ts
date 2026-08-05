@@ -361,7 +361,12 @@ export function canClientLogin(
   userId: string,
 ): boolean {
   const state = getClientStoredState(db, clientId);
-  if (!state || (state.bound_user_id && state.bound_user_id !== userId)) {
+  if (
+    !state ||
+    (state.bound_user_id &&
+      state.bound_user_id !== userId &&
+      isActiveBoundUser(db, state.bound_user_id))
+  ) {
     return false;
   }
   const distinct = db
@@ -411,7 +416,9 @@ export function countClients(db: BetterSqlite3.Database, query = ""): number {
   const row = db
     .prepare(
       `SELECT COUNT(*) as n FROM clients c
-       LEFT JOIN users u ON u.id = c.bound_user_id ${where.sql}`,
+       LEFT JOIN users u ON u.id = c.bound_user_id
+         AND NOT EXISTS (SELECT 1 FROM deleted_users du WHERE du.id = u.id)
+       ${where.sql}`,
     )
     .get(
       ...(where.value
@@ -444,6 +451,7 @@ export function listClientAdminRows(
               latest.mac, latest.user_agent
        FROM clients c
        LEFT JOIN users u ON u.id = c.bound_user_id
+         AND NOT EXISTS (SELECT 1 FROM deleted_users du WHERE du.id = u.id)
        LEFT JOIN client_ips ci ON ci.client_id = c.id
        LEFT JOIN client_attempts ca ON ca.client_id = c.id
        LEFT JOIN client_associations latest ON latest.id = (
@@ -479,4 +487,33 @@ export function deleteClient(
   return (
     db.prepare("DELETE FROM clients WHERE id = ?").run(clientId).changes > 0
   );
+}
+
+export function clearUserClientReferences(
+  db: BetterSqlite3.Database,
+  userId: string,
+): string[] {
+  const clientIds = (
+    db
+      .prepare("SELECT id FROM clients WHERE bound_user_id = ?")
+      .all(userId) as { id: string }[]
+  ).map((row) => row.id);
+  db.prepare(
+    "UPDATE clients SET bound_user_id = NULL WHERE bound_user_id = ?",
+  ).run(userId);
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+  return clientIds;
+}
+
+export function isActiveBoundUser(
+  db: BetterSqlite3.Database,
+  userId: string,
+): boolean {
+  return !!db
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.id = ? AND du.id IS NULL`,
+    )
+    .get(userId);
 }

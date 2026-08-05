@@ -376,7 +376,7 @@ async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
 
 async function indexedBundleCount(cdp: CdpClient): Promise<number> {
   return cdp.evaluate<number>(`new Promise(function (resolve, reject) {
-    var request = indexedDB.open("classapp-runtime", 1);
+    var request = indexedDB.open("classapp-runtime", 2);
     request.onerror = function () { reject(request.error); };
     request.onsuccess = function () {
       var count = request.result
@@ -544,7 +544,7 @@ async function main(): Promise<void> {
       bundleCount: number;
       body: string;
     }>(`(async function () {
-      var request = indexedDB.open("classapp-runtime", 1);
+      var request = indexedDB.open("classapp-runtime", 2);
       var bundleCount = await new Promise(function (resolve, reject) {
         request.onerror = function () { reject(request.error); };
         request.onsuccess = function () {

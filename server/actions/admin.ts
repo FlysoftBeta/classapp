@@ -83,11 +83,11 @@ export async function adminUpdateUserAction(
 }
 
 export async function adminDeleteUserAction(
-  userId: ActionInput<"adminDeleteUserAction">,
+  input: ActionInput<"adminDeleteUserAction">,
 ) {
   return withActionSession(async (session) => {
     const users = await (await session.asActor()).users();
-    await users.delete(expectString(userId, "干员不存在"));
+    await users.remove(expectString(input.userId, "干员不存在"), input.mode);
     return { ok: true as const };
   });
 }
@@ -468,14 +468,16 @@ export async function adminFetchTeachDocumentsAction() {
     const actor = await session.asActor();
     await actor.requireAdmin();
     return {
-      documents: createTeachDocumentsService(getDb()).list().map((document) => ({
-        id: document.id,
-        application: document.application,
-        document_type: document.document_type,
-        name: document.name,
-        file_size: document.file_size,
-        created_at: document.created_at,
-      })),
+      documents: createTeachDocumentsService(getDb())
+        .list()
+        .map((document) => ({
+          id: document.id,
+          application: document.application,
+          document_type: document.document_type,
+          name: document.name,
+          file_size: document.file_size,
+          created_at: document.created_at,
+        })),
       monitor_available: process.platform === "win32",
     };
   });

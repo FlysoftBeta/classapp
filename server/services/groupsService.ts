@@ -20,6 +20,7 @@ import {
   listGroupMemberIds,
   listGroupMembersForView,
   listLinkedGroups,
+  listUserGroupIds,
   removeGroupMember,
   updateGroupFields,
   updateMembershipHideSelf,
@@ -147,6 +148,24 @@ export class GroupService {
     if (listGroupMemberIds(this.db, groupId).length === 0) {
       deleteGroupById(this.db, groupId);
     }
+  }
+
+  /** Remove an identity from every group, bypassing normal no-leave policy. */
+  removeUserFromAllGroups(userId: string): void {
+    for (const groupId of listUserGroupIds(this.db, userId)) {
+      removeGroupMember(this.db, userId, groupId);
+      publishConversationUpdate(this.db, userId, {
+        type: "group",
+        id: groupId,
+        removed: true,
+      });
+      this.tryDeleteEmptyGroup(groupId);
+    }
+    publishRemoteResubscribe(userId, "membership");
+  }
+
+  purgeUser(userId: string): void {
+    this.removeUserFromAllGroups(userId);
   }
 
   private createInternal(

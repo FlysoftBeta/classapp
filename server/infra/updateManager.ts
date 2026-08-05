@@ -13,11 +13,11 @@ import {
   getPendingUpdateAt,
   setPendingUpdateAt,
 } from "@/server/data/appState";
+import {
+  REQUIRED_DEPLOY_ENTRIES,
+  UPDATE_CONFIRM_TIMEOUT_MS,
+} from "./updateContract";
 
-// Matches launcher.js's UPDATE_TIMEOUT_MS — admin has 3 minutes to confirm.
-const ROLLBACK_TIMEOUT_MS = 3 * 60 * 1000;
-
-let rollbackTimer: ReturnType<typeof setTimeout> | null = null;
 let _db: BetterSqlite3.Database | null = null;
 
 export function isUpdateManagerEnabled(): boolean {
@@ -52,42 +52,20 @@ export function initUpdateManager(db: BetterSqlite3.Database): void {
     return;
   }
 
-  const appliedAt = new Date(appliedAtValue);
-  const elapsed = Date.now() - appliedAt.getTime();
-  const remaining = ROLLBACK_TIMEOUT_MS - elapsed;
-
-  if (remaining <= 0) {
-    console.log("[UpdateManager] 更新确认已超时，正在回滚…");
-    triggerRollback();
-    return;
-  }
-
+  const elapsed = Date.now() - new Date(appliedAtValue).getTime();
+  const remaining = Math.max(0, UPDATE_CONFIRM_TIMEOUT_MS - elapsed);
   console.log(
-    `[UpdateManager] 待确认更新（${Math.ceil(remaining / 1000)}s 后自动回滚）`,
+    `[UpdateManager] 待确认更新（launcher watchdog 剩余约 ${Math.ceil(remaining / 1000)}s）`,
   );
-  rollbackTimer = setTimeout(() => {
-    console.log("[UpdateManager] 更新确认超时，正在回滚…");
-    triggerRollback();
-  }, remaining);
 }
 
 export function confirmUpdate(): void {
   if (!isUpdateManagerEnabled())
     throw new ServiceError("当前环境已禁用更新管理", 403);
   if (!_db) return;
-  if (rollbackTimer) {
-    clearTimeout(rollbackTimer);
-    rollbackTimer = null;
-  }
   clearPending();
   getRuntimeController()?.confirmUpdate();
-
-  try {
-    fs.rmSync(backupDir(), { recursive: true, force: true });
-  } catch {
-    /* ignore */
-  }
-  console.log("[UpdateManager] 更新已确认，备份已清除");
+  console.log("[UpdateManager] 更新已确认，launcher 将清除应用备份");
 }
 
 /** Manually trigger a rollback (admin "立即回滚" button). Throws if nothing to roll back to. */
@@ -102,10 +80,6 @@ export function requestRollback(db: BetterSqlite3.Database): void {
   if (!fs.existsSync(backupDir()))
     throw new ServiceError("backup/ 目录不存在，无法回滚", 409);
 
-  if (rollbackTimer) {
-    clearTimeout(rollbackTimer);
-    rollbackTimer = null;
-  }
   console.log("[UpdateManager] 管理员触发回滚…");
   triggerRollback();
 }
@@ -119,7 +93,7 @@ export interface UpdateStatus {
 }
 
 export function getUpdateStatus(): UpdateStatus {
-  const timeout_seconds = Math.ceil(ROLLBACK_TIMEOUT_MS / 1000);
+  const timeout_seconds = Math.ceil(UPDATE_CONFIRM_TIMEOUT_MS / 1000);
   const disabled = !isUpdateManagerEnabled();
   if (disabled || !_db)
     return {
@@ -144,13 +118,13 @@ export function getUpdateStatus(): UpdateStatus {
   const elapsed = Date.now() - appliedAt.getTime();
   const seconds_remaining = Math.max(
     0,
-    Math.ceil((ROLLBACK_TIMEOUT_MS - elapsed) / 1000),
+    Math.ceil((UPDATE_CONFIRM_TIMEOUT_MS - elapsed) / 1000),
   );
   return {
     pending: true,
     applied_at: appliedAtValue,
     seconds_remaining,
-    timeout_seconds: Math.ceil(ROLLBACK_TIMEOUT_MS / 1000),
+    timeout_seconds,
     disabled: false,
   };
 }
@@ -187,14 +161,9 @@ export async function deployUpdate(
     throw new ServiceError("解压失败，ZIP 文件可能已损坏");
   }
 
-  const missing = [
-    "client",
-    "server",
-    "shell.html",
-    "server.js",
-    "build-id.txt",
-    "node_modules",
-  ].find((f) => !fs.existsSync(path.join(stagingDir(), f)));
+  const missing = REQUIRED_DEPLOY_ENTRIES.find(
+    (entry) => !fs.existsSync(path.join(stagingDir(), entry)),
+  );
   if (missing) {
     clearStagingDir();
     throw new ServiceError(`ZIP 中缺少 ${missing}`);

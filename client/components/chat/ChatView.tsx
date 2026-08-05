@@ -3,9 +3,11 @@ import { alpha } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
+import Button from "@mui/material/Button";
 import Fade from "@mui/material/Fade";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import ArticleIcon from "@mui/icons-material/Article";
 import type { User, Conversation } from "@/shared/types/api";
 import type {
   PostStreamEvent,
@@ -33,6 +35,7 @@ export interface ChatViewProps {
   ) => () => void;
   onBack?: () => void;
   onOpenArticle?: (articleId: string) => void;
+  onOpenArticles?: (conversation: Conversation) => void;
   online: boolean;
   offlineEnabled: boolean;
   articlesEnabled: boolean;
@@ -150,6 +153,7 @@ export default function ChatView({
   subscribeConfigEvents,
   onBack,
   onOpenArticle,
+  onOpenArticles,
   online,
   offlineEnabled,
   articlesEnabled,
@@ -221,6 +225,16 @@ export default function ChatView({
           </Typography>
           {conversation.type === "group" && (
             <>
+              {articlesEnabled && (
+                <Button
+                  size="small"
+                  aria-label="文章"
+                  startIcon={<ArticleIcon fontSize="small" />}
+                  onClick={() => onOpenArticles?.(conversation)}
+                >
+                  文章
+                </Button>
+              )}
               <DiscoverGroupsDialog
                 groupId={conversation.id}
                 groupName={conversation.name}

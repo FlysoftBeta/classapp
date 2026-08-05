@@ -1,4 +1,10 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { alpha } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
@@ -11,7 +17,7 @@ import Chip from "@mui/material/Chip";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArticleIcon from "@mui/icons-material/Article";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
-import type { ArticleWithMeta } from "@/shared/types/api";
+import type { ArticleWithMeta, Conversation } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
 import { flexGap, vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
@@ -64,6 +70,7 @@ interface ArticleListProps {
   onBack?: () => void;
   token: string;
   downloadEnabled: boolean;
+  conversation?: Conversation;
 }
 
 function formatDate(s: string) {
@@ -285,10 +292,16 @@ function ignoreArticleCreated(): void {
 
 export default function ArticleList({
   refreshKey,
+  conversation,
   ...props
 }: ArticleListProps) {
   return (
-    <ArticleListSession key={refreshKey} refreshKey={refreshKey} {...props} />
+    <ArticleListSession
+      key={`${refreshKey}:${conversation?.type ?? "all"}:${conversation?.id ?? "all"}`}
+      refreshKey={refreshKey}
+      conversation={conversation}
+      {...props}
+    />
   );
 }
 
@@ -299,16 +312,25 @@ function ArticleListSession({
   onBack,
   token,
   downloadEnabled,
+  conversation,
 }: ArticleListProps) {
+  const groupId = conversation?.type === "group" ? conversation.id : undefined;
+  const scopedSidebarArticles = useMemo(
+    () =>
+      groupId
+        ? sidebarArticles.filter((article) => article.group_id === groupId)
+        : sidebarArticles,
+    [groupId, sidebarArticles],
+  );
   const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const [total, setTotal] = useState(0);
   const totalRef = useRef(0);
-  const sidebarArticlesRef = useRef(sidebarArticles);
+  const sidebarArticlesRef = useRef(scopedSidebarArticles);
   const [headerRef, headerHeight] = useObservedElementHeight<HTMLDivElement>();
 
   useLayoutEffect(() => {
-    sidebarArticlesRef.current = sidebarArticles;
-  }, [sidebarArticles]);
+    sidebarArticlesRef.current = scopedSidebarArticles;
+  }, [scopedSidebarArticles]);
 
   const loadRows = useCallback(
     async (start: number, wanted: number, signal: AbortSignal) => {
@@ -316,7 +338,7 @@ function ArticleListSession({
       let offset = Math.max(0, start);
       let knownTotal = totalRef.current;
       while (rows.length < wanted) {
-        const data = await listArticles(offset);
+        const data = await listArticles(offset, groupId);
         if (signal.aborted) throw new Error("article list request superseded");
         if (!data) throw new Error("article list request failed");
         knownTotal = data.total ?? 0;
@@ -341,7 +363,7 @@ function ArticleListSession({
       }
       return { rows, total: knownTotal };
     },
-    [],
+    [groupId],
   );
 
   const provider: Infini2Provider<ArticleRow, ArticleCursor, string> = {
@@ -420,7 +442,7 @@ function ArticleListSession({
         0,
         Math.min(upper, anchorOffset + signedItemOffset),
       );
-      const data = await listArticles(target);
+      const data = await listArticles(target, groupId);
       if (signal.aborted)
         throw new Error("article list locate request superseded");
       if (!data) throw new Error("article list locate request failed");
@@ -453,10 +475,10 @@ function ArticleListSession({
       {
         kind: "recent",
         id: RECENT_ARTICLES_ID,
-        articles: sidebarArticles,
+        articles: scopedSidebarArticles,
       },
     ]);
-  }, [controller, sidebarArticles]);
+  }, [controller, scopedSidebarArticles]);
 
   const renderRow = useCallback(
     (row: ArticleRow) => {
@@ -513,7 +535,9 @@ function ArticleListSession({
           </IconButton>
         )}
         <Typography variant="subtitle2" sx={{ flex: 1, fontWeight: 700 }}>
-          文章
+          {conversation?.type === "group"
+            ? `# ${conversation.name} 的文章`
+            : "文章"}
         </Typography>
         {total > 0 && <Chip label={total} size="small" variant="outlined" />}
       </Box>
@@ -545,11 +569,14 @@ function ArticleListSession({
           ) : null
         }
       />
-      <ArticleImportFab
-        token={token}
-        downloadEnabled={downloadEnabled}
-        onCreated={ignoreArticleCreated}
-      />
+      {conversation?.type === "group" && (
+        <ArticleImportFab
+          token={token}
+          conversation={conversation}
+          downloadEnabled={downloadEnabled}
+          onCreated={ignoreArticleCreated}
+        />
+      )}
     </Box>
   );
 }

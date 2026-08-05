@@ -16,11 +16,29 @@ database backup, update confirmation, and rollback. It injects the runtime
 configuration into `server.js` over IPC. The server bundle is produced by Vite
 and keeps native/runtime dependencies external.
 
-`shell.html` is intentionally stable and receives a one-year HTTP cache policy.
-It opens the `classapp-runtime` IndexedDB database, loads the active application
-bundle, and only downloads `/app/app.js` when no installed bundle is usable.
-The application itself checks `/app/manifest.json`, installs a newer bundle in
-IndexedDB, and reloads so the Shell can activate it.
+Every release has exactly one build id shared by launcher, server, Shell,
+Service Worker and client bundle. `/app/manifest.json` describes the Shell and
+bundle belonging to that build. `shell.html` only performs the first bundle
+installation. After startup, `BundleManager` owns every check, download, stage
+and activation operation for both assets. The Service Worker never discovers
+updates independently: it stores the Shell selected by `BundleManager` and
+remembers that Shell's build id.
+
+Update ownership is deliberately singular:
+
+| Concern                                                  | Owner                            |
+| -------------------------------------------------------- | -------------------------------- |
+| release build id and runtime asset paths                 | runtime config / `runtimeAssets` |
+| post-bootstrap browser checks and asset download         | `BundleManager`                  |
+| active bundle pointer                                    | IndexedDB `kv`                   |
+| active Shell pointer and cached Shell                    | Service Worker Cache Storage     |
+| deployment validation and staging                        | server `UpdateManager`           |
+| directory swap, confirmation timeout and app/DB rollback | launcher                         |
+
+The launcher persists the database backup name and the original apply time in
+`.pending-update.json`. Restarting the launcher therefore neither loses the DB
+rollback target nor resets the confirmation window. The server reports status
+but does not run a second rollback timer.
 
 The production browser build is one ESM file. All application CSS is imported
 as text and injected by the entrypoint, so there is no separate CSS artifact.
@@ -50,6 +68,12 @@ Service, and Data code remains transport-independent.
 Large multipart uploads, blob downloads, PDF rendering, deployment uploads,
 and backup downloads remain HTTP routes because they require streaming or raw
 HTTP response semantics. Business calls use WebSocket Actions.
+
+User removal has two explicit service use cases. Deactivation revokes account
+credentials, asks `GroupService` to remove memberships, and records the stable
+identity in `deleted_users`; all other service data remains intact. Purge asks
+every owning Service to remove its own user data and side effects before the
+identity row is physically deleted. See [USER_LIFECYCLE.md](./USER_LIFECYCLE.md).
 
 ## Development
 

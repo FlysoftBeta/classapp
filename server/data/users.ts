@@ -3,9 +3,11 @@ import type BetterSqlite3 from "better-sqlite3";
 import { parseDbTime } from "@/shared/time";
 import type { Group, User } from "@/shared/types/api";
 
-export const USER_SELECT = `SELECT id, handle, username, feature_mask,
-   CASE WHEN is_muted = 1 AND (muted_until IS NULL OR muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
-   muted_until, banned_until, created_at FROM users WHERE id = ?`;
+export const USER_SELECT = `SELECT u.id, u.handle, u.username, u.feature_mask,
+   CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
+   u.muted_until, u.banned_until, u.created_at
+   FROM users u LEFT JOIN deleted_users du ON du.id = u.id
+   WHERE u.id = ? AND du.id IS NULL`;
 
 export interface NewUserData {
   id: string;
@@ -61,18 +63,21 @@ export function searchUsers(
   return q
     ? (db
         .prepare(
-          `SELECT id, handle, username, feature_mask,
-           CASE WHEN is_muted = 1 AND (muted_until IS NULL OR muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
-           muted_until, banned_until, created_at FROM users
-           WHERE handle LIKE ? OR username LIKE ?
+          `SELECT u.id, u.handle, u.username, u.feature_mask,
+           CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
+           u.muted_until, u.banned_until, u.created_at FROM users u
+           LEFT JOIN deleted_users du ON du.id = u.id
+           WHERE du.id IS NULL AND (handle LIKE ? OR u.username LIKE ?)
            ORDER BY created_at DESC LIMIT 50 OFFSET ?`,
         )
         .all(`%${q}%`, `%${q}%`, offset) as User[])
     : (db
         .prepare(
-          `SELECT id, handle, username, feature_mask,
-           CASE WHEN is_muted = 1 AND (muted_until IS NULL OR muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
-           muted_until, banned_until, created_at FROM users
+          `SELECT u.id, u.handle, u.username, u.feature_mask,
+           CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
+           u.muted_until, u.banned_until, u.created_at FROM users u
+           LEFT JOIN deleted_users du ON du.id = u.id
+           WHERE du.id IS NULL
            ORDER BY created_at DESC LIMIT 50 OFFSET ?`,
         )
         .all(offset) as User[]);
@@ -83,15 +88,30 @@ export function countUsers(db: BetterSqlite3.Database, q = ""): number {
     ? (
         db
           .prepare(
-            "SELECT COUNT(*) as n FROM users WHERE handle LIKE ? OR username LIKE ?",
+            `SELECT COUNT(*) as n FROM users u
+             LEFT JOIN deleted_users du ON du.id = u.id
+             WHERE du.id IS NULL AND (u.handle LIKE ? OR u.username LIKE ?)`,
           )
           .get(`%${q}%`, `%${q}%`) as { n: number }
       ).n
-    : (db.prepare("SELECT COUNT(*) as n FROM users").get() as { n: number }).n;
+    : (
+        db
+          .prepare(
+            `SELECT COUNT(*) as n FROM users u
+             LEFT JOIN deleted_users du ON du.id = u.id WHERE du.id IS NULL`,
+          )
+          .get() as { n: number }
+      ).n;
 }
 
 export function userExists(db: BetterSqlite3.Database, id: string): boolean {
-  return !!db.prepare("SELECT id FROM users WHERE id = ?").get(id);
+  return !!db
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.id = ? AND du.id IS NULL`,
+    )
+    .get(id);
 }
 
 export function findUserIdByHandle(
@@ -99,7 +119,11 @@ export function findUserIdByHandle(
   handle: string,
 ): string | null {
   const row = db
-    .prepare("SELECT id FROM users WHERE handle = ?")
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.handle = ? AND du.id IS NULL`,
+    )
     .get(handle) as { id: string } | undefined;
   return row?.id ?? null;
 }
@@ -110,7 +134,11 @@ export function findUserIdByHandleExcept(
   excludedUserId: string,
 ): string | null {
   const row = db
-    .prepare("SELECT id FROM users WHERE handle = ? AND id != ?")
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.handle = ? AND u.id != ? AND du.id IS NULL`,
+    )
     .get(handle, excludedUserId) as { id: string } | undefined;
   return row?.id ?? null;
 }
@@ -234,6 +262,19 @@ export function deleteUserSessions(
   userId: string,
 ): void {
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+}
+
+export function revokeUserCredentials(
+  db: BetterSqlite3.Database,
+  userId: string,
+): void {
+  db.prepare("DELETE FROM user_pins WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+  db.prepare(
+    `UPDATE users SET handle = ?, role = 'user', feature_mask = 0,
+       is_muted = 0, muted_until = NULL, banned_until = NULL
+     WHERE id = ?`,
+  ).run(`deleted_${userId.replace(/-/g, "")}`, userId);
 }
 
 export function getUserProfile(

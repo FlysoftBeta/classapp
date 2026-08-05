@@ -13,6 +13,10 @@ import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocument
 import { renderServiceWorker } from "@/server/http/serviceWorker";
 import { getDb } from "@/server/infra/db";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
+import {
+  createRuntimeManifest,
+  runtimeAssets,
+} from "@/server/infra/runtimeAssets";
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -99,10 +103,8 @@ export function createHttpHandler(
   options: { secure?: boolean } = {},
 ) {
   const secure = options.secure === true;
-  const clientRoot = path.join(config.appDir, "client");
   const publicRoot = path.join(config.appDir, "public");
-  const shellFile = path.join(config.appDir, "shell.html");
-  const bundleFile = path.join(clientRoot, "app", "app.js");
+  const { shellFile, bundleFile } = runtimeAssets(config.appDir);
 
   return async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -154,7 +156,7 @@ export function createHttpHandler(
         if (sendFile(shellFile, res, "no-store, max-age=0")) return;
       }
       if (url.pathname === "/service-worker.js") {
-        const body = renderServiceWorker(config.buildId);
+        const body = renderServiceWorker();
         res.statusCode = 200;
         res.setHeader("Content-Type", "text/javascript; charset=utf-8");
         res.setHeader("Service-Worker-Allowed", "/");
@@ -164,22 +166,17 @@ export function createHttpHandler(
         return;
       }
       if (url.pathname === "/app/manifest.json") {
-        const size = fs.existsSync(bundleFile)
-          ? fs.statSync(bundleFile).size
-          : 0;
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");
-        res.end(
-          JSON.stringify({
-            buildId: config.buildId,
-            bundle: `/app/app.js?v=${encodeURIComponent(config.buildId)}`,
-            size,
-          }),
-        );
+        res.end(JSON.stringify(createRuntimeManifest(config)));
         return;
       }
       if (url.pathname === "/app/app.js") {
         if (sendFile(bundleFile, res, "public, max-age=31536000, immutable"))
+          return;
+      }
+      if (url.pathname === "/app/shell.html") {
+        if (sendFile(shellFile, res, "public, max-age=31536000, immutable"))
           return;
       }
 

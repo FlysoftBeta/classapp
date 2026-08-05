@@ -17,6 +17,7 @@ import {
   startNetworkArticleDownload,
 } from "@/client/api/articles";
 import { taskStore } from "@/client/hooks/useTaskStore";
+import type { Conversation } from "@/shared/types/api";
 
 type Result =
   Awaited<ReturnType<typeof searchNetworkArticles>> extends infer R
@@ -29,9 +30,11 @@ type Result =
 
 export function NetworkArticleDialog({
   open,
+  conversation,
   onClose,
 }: {
   open: boolean;
+  conversation: Conversation;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -72,7 +75,12 @@ export function NetworkArticleDialog({
   };
 
   const download = async (item: Result) => {
-    const task = await startNetworkArticleDownload(item.book_id, item.title);
+    if (conversation.type !== "group") return;
+    const task = await startNetworkArticleDownload(
+      item.book_id,
+      conversation.id,
+      item.title,
+    );
     if (!task) {
       setError("创建下载任务失败");
       return;

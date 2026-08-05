@@ -26,10 +26,7 @@ export async function copyTeachDocument(
     /^\.[a-zA-Z0-9]{1,10}$/.test(sourceExtension) === true
       ? sourceExtension.toLowerCase()
       : "";
-  const relativePath = path.posix.join(
-    TEACH_BLOB_DIR,
-    `${id}${extension}`,
-  );
+  const relativePath = path.posix.join(TEACH_BLOB_DIR, `${id}${extension}`);
   const absolutePath = resolveTeachDocumentBlobPath(relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
   try {

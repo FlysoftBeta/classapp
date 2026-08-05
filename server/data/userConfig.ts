@@ -69,3 +69,10 @@ export function deleteUserConfigValue(
     key,
   );
 }
+
+export function purgeUserConfigValues(
+  db: BetterSqlite3.Database,
+  userId: string,
+): void {
+  db.prepare("DELETE FROM user_config WHERE user_id = ?").run(userId);
+}

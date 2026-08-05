@@ -1,9 +1,9 @@
 // Production runtime bootstrap. The launcher injects the complete runtime
 // contract over IPC; this file intentionally contains no application logic.
-import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { readBuildId } from "@/server/infra/buildIdentity";
 
 interface BootMessage {
   type: "classapp:boot";
@@ -13,13 +13,10 @@ interface BootMessage {
 function standaloneConfig(): ClassAppRuntimeConfig {
   const dataRoot = path.resolve(process.cwd());
   const appDir = __dirname;
-  const buildIdFile = path.join(appDir, "build-id.txt");
   return {
     appDir,
     dataRoot,
-    buildId: fs.existsSync(buildIdFile)
-      ? fs.readFileSync(buildIdFile, "utf8").trim()
-      : "dev",
+    buildId: readBuildId(appDir),
     ports:
       process.env.NODE_ENV === "production"
         ? [80, 81, 82, 83, 84, 85, 86, 88]

@@ -1,5 +1,5 @@
-import fs from "fs";
 import path from "path";
+import { readBuildId } from "./buildIdentity";
 
 export interface ClassAppRuntimeConfig {
   appDir: string;
@@ -41,11 +41,7 @@ function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
   const dataRoot = path.resolve(process.cwd());
   const appDir = dataRoot;
   const nodeEnv = process.env.NODE_ENV ?? "development";
-  const buildIdPath = path.join(appDir, "build-id.txt");
-  const buildId =
-    nodeEnv === "production" && fs.existsSync(buildIdPath)
-      ? fs.readFileSync(buildIdPath, "utf8").trim() || "dev"
-      : "dev";
+  const buildId = nodeEnv === "production" ? readBuildId(appDir) : "dev";
 
   return {
     appDir,

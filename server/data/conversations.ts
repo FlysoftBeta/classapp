@@ -82,7 +82,7 @@ export function listConversations(
       `SELECT
          dp.partner_id                            AS id,
          lp.created_at                            AS last_at,
-         COALESCE(u.username, '已注销')          AS name,
+         COALESCE(u.username, du.username, '已注销') AS name,
          COALESCE(u.handle, NULL)                 AS handle,
          SUBSTR(COALESCE(lp.brief, ''), 1, 100) AS last_message,
          crm.last_read_post_id,
@@ -112,12 +112,15 @@ export function listConversations(
            CASE WHEN user_id = ? THEN dm_to ELSE user_id END AS partner_id,
            MAX(rowid) AS last_rowid
          FROM posts
-         WHERE (user_id = ? OR dm_to = ?)
+         WHERE user_id IS NOT NULL
+           AND (user_id = ? OR dm_to = ?)
            AND dm_to IS NOT NULL
            AND group_id IS NULL
          GROUP BY partner_id
        ) dp
        LEFT JOIN users u ON u.id = dp.partner_id
+         AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
+       LEFT JOIN deleted_users du ON du.id = dp.partner_id
        LEFT JOIN conversation_user_state crm
          ON crm.user_id = ?
         AND crm.conversation_type = 'dm'
@@ -505,4 +508,14 @@ export function upsertConversationComposeDraft(
        updated_at = datetime('now')
      WHERE excluded.compose_draft_updated_at >= conversation_user_state.compose_draft_updated_at`,
   ).run(input.userId, input.type, input.id, input.draft, input.updatedAt);
+}
+
+export function purgeConversationStateForUser(
+  db: Database,
+  userId: string,
+): void {
+  db.prepare(
+    `DELETE FROM conversation_user_state
+     WHERE user_id = ? OR (conversation_type = 'dm' AND conversation_id = ?)`,
+  ).run(userId, userId);
 }

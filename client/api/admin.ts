@@ -82,8 +82,11 @@ export async function adminUpdateUser(
   };
 }
 
-export async function adminDeleteUser(userId: string) {
-  return observeActionResult(await adminDeleteUserAction(userId));
+export async function adminDeleteUser(
+  userId: string,
+  mode: "purge" | "deactivate",
+) {
+  return observeActionResult(await adminDeleteUserAction({ userId, mode }));
 }
 
 export async function adminSearchUsers(query: string) {

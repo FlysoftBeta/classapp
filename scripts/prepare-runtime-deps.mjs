@@ -108,9 +108,7 @@ try {
   copyPackage("better-sqlite3");
   const sqlitePrebuilds = path.join(destination, "better-sqlite3", "prebuilds");
   for (const name of fs.readdirSync(sqlitePrebuilds)) {
-    if (
-      !["linux-x64.node", "win32-x64.node"].includes(name)
-    ) {
+    if (!["linux-x64.node", "win32-x64.node"].includes(name)) {
       fs.rmSync(path.join(sqlitePrebuilds, name));
     }
   }

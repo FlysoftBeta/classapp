@@ -23,6 +23,7 @@ export class ArticleActorFacade {
   async list(input: {
     bookmarkedOnly?: boolean;
     offset?: number;
+    groupId?: string;
   }): Promise<{ articles: (Article & ArticleWithMeta)[]; total: number }> {
     const user = await this.actor.requireFeature("articles");
     return this.articles.list(user, input);
@@ -110,10 +111,10 @@ export class ArticleActorFacade {
     return this.imports.search(user.id, query);
   }
 
-  async startNetworkDownload(bookId: string, title?: string) {
+  async startNetworkDownload(bookId: string, groupId: string, title?: string) {
     const user = await this.actor.requireFeature("article_download");
     await this.actor.requireFeature("article_reader");
-    return { task: this.imports.start(user, bookId, title) };
+    return { task: this.imports.start(user, bookId, groupId, title) };
   }
 
   async listNetworkDownloads() {

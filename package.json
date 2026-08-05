@@ -14,6 +14,8 @@
     "infini2:test:browser": "tsx lib/infini2/tests/test-browser.mts",
     "infini2:test": "npm run infini2:test:rust && npm run infini2:build && npm run infini2:test:ts && npm run infini2:test:browser",
     "test:protocol": "tsx scripts/test-protocol-contracts.mts",
+    "test:schema-migrations": "tsx scripts/test-schema-migrations.mts",
+    "test:user-lifecycle": "tsx scripts/test-user-lifecycle.mts",
     "test:tomato": "tsx scripts/test-tomato-quota.mts",
     "reset": "node scripts/reset-dev.mjs",
     "test:e2e": "CLASSAPP_REQUIRE_HTTPS=1 npm run build && node --import tsx scripts/test-chrome70-e2e.mts",

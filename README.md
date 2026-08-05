@@ -128,9 +128,9 @@ npm run test:https
 
 ### 应用自己更新自己
 
-生产环境只直接提供一个很小且稳定的 Shell。真正的前端应用是单一构建包，由 Shell 下载到 IndexedDB 后再启动。应用发现新版本时，会先完整下载并提交新包，然后刷新切换，不让旧版本继续发送业务请求。
+生产环境只直接提供一个很小且稳定的 Shell。每个发布只有一个 build id，Shell 与单体客户端 bundle 必须作为同一构建一起切换。首次安装由 Shell 与 Service Worker 各自完成必要下载；此后所有检查、下载、暂存和激活统一由客户端 BundleManager 负责。bundle 保存在 IndexedDB，Shell 由 BundleManager 推送给 Service Worker；两边都完成提交后才刷新，旧版本不会继续发送业务请求。
 
-服务端更新由独立 Launcher 管理。新版本进入 staging 后，Launcher 负责切换目录、重启服务并等待确认；如果新版本持续崩溃，或者在规定时间内没有收到确认，它会自动回滚到上一个版本。这个启动器同时保留了 Windows 兼容性。
+服务端更新由独立 Launcher 管理。新版本进入 staging 后，Launcher 负责切换目录、重启服务、保存待确认元数据并独占回滚 watchdog；服务端只负责校验/暂存部署包和发送生命周期指令。如果新版本持续崩溃，或者在规定时间内没有收到确认，Launcher 会同时还原应用目录和对应数据库备份。这个启动器同时保留了 Windows 兼容性。
 
 ## 技术一览
 

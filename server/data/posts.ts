@@ -67,13 +67,19 @@ export function usersShareGroup(
 const REPLY_PREVIEW_LENGTH = 200;
 
 export const POST_WITH_REPLY_SQL = `
-  SELECT p.*, p.rowid AS sequence, u.username, u.handle,
+  SELECT p.*, p.rowid AS sequence,
+    COALESCE(u.username, du.username) AS username, u.handle,
     r.brief as reply_brief,
-    ru.username as reply_username, ru.handle as reply_handle
+    COALESCE(ru.username, rdu.username) as reply_username,
+    ru.handle as reply_handle
   FROM posts p
   LEFT JOIN users u ON p.user_id = u.id
+    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
+  LEFT JOIN deleted_users du ON p.user_id = du.id
   LEFT JOIN posts r ON p.reply_to = r.id
   LEFT JOIN users ru ON r.user_id = ru.id
+    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = ru.id)
+  LEFT JOIN deleted_users rdu ON r.user_id = rdu.id
 `;
 
 export function hydratePost(row: PostRow): Post {
@@ -338,6 +344,56 @@ export function deletePostRow(db: Database, postId: string): void {
   db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
 }
 
+export function purgePostsByUser(
+  db: Database,
+  userId: string,
+): {
+  posts: Array<{
+    id: string;
+    user_id: string | null;
+    group_id: string | null;
+    dm_to: string | null;
+  }>;
+  groupIds: string[];
+  peerIds: string[];
+} {
+  const posts = db
+    .prepare(
+      `SELECT id, user_id, group_id, dm_to FROM posts
+       WHERE user_id = ? OR dm_to = ?`,
+    )
+    .all(userId, userId) as Array<{
+    id: string;
+    user_id: string | null;
+    group_id: string | null;
+    dm_to: string | null;
+  }>;
+  const groupIds = (
+    db
+      .prepare(
+        `SELECT DISTINCT group_id FROM posts
+         WHERE user_id = ? AND group_id IS NOT NULL`,
+      )
+      .all(userId) as { group_id: string }[]
+  ).map((row) => row.group_id);
+  const peerIds = (
+    db
+      .prepare(
+        `SELECT DISTINCT CASE WHEN user_id = ? THEN dm_to ELSE user_id END AS peer_id
+         FROM posts
+         WHERE dm_to IS NOT NULL AND (user_id = ? OR dm_to = ?)`,
+      )
+      .all(userId, userId, userId) as { peer_id: string | null }[]
+  )
+    .map((row) => row.peer_id)
+    .filter((id): id is string => id !== null && id !== userId);
+  db.prepare("DELETE FROM posts WHERE user_id = ? OR dm_to = ?").run(
+    userId,
+    userId,
+  );
+  return { posts, groupIds, peerIds };
+}
+
 export function listAdminPosts(
   db: Database,
   input: { q?: string; userId?: string; offset?: number },
@@ -346,9 +402,12 @@ export function listAdminPosts(
   const userId = input.userId ?? "";
   const offset = input.offset ?? 0;
   let query = `
-    SELECT p.*, u.username, u.handle, g.name as group_name
+    SELECT p.*, COALESCE(u.username, du.username) AS username,
+           u.handle, g.name as group_name
     FROM posts p
     LEFT JOIN users u ON p.user_id = u.id
+      AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
+    LEFT JOIN deleted_users du ON p.user_id = du.id
     LEFT JOIN groups g ON p.group_id = g.id
     WHERE 1=1
   `;

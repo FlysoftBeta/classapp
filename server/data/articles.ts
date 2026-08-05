@@ -7,8 +7,9 @@ import {
 } from "@/shared/types/api/article";
 
 const META_COLUMNS = `
-  a.id, a.user_id, a.title, a.content_kind, a.blob_path, a.mime_type,
-  a.file_size, a.original_filename, a.created_at, u.username, u.handle,
+  a.id, a.user_id, a.group_id, a.title, a.content_kind, a.blob_path, a.mime_type,
+  a.file_size, a.original_filename, a.created_at,
+  COALESCE(u.username, du.username) AS username, u.handle,
   CASE WHEN a.content_kind = 'blob' THEN a.file_size ELSE length(a.content) END AS content_length,
   (SELECT bookmarked FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) AS is_bookmarked,
   (SELECT updated_at_ms FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) AS bookmark_updated_at_ms,
@@ -17,11 +18,15 @@ const META_COLUMNS = `
   (SELECT locator FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS current_locator,
   (SELECT total_read_seconds FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS total_read_seconds,
   (SELECT updated_at FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS last_read_at`;
-const FROM_ARTICLES = " FROM articles a LEFT JOIN users u ON a.user_id = u.id ";
+const FROM_ARTICLES = ` FROM articles a
+  LEFT JOIN users u ON a.user_id = u.id
+    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
+  LEFT JOIN deleted_users du ON a.user_id = du.id `;
 
 export interface ArticleRecord {
   id: string;
   user_id: string | null;
+  group_id: string;
   title: string;
   content: string;
   content_kind: string;
@@ -34,6 +39,26 @@ export interface ArticleRecord {
 
 export interface ArticleAccessRow {
   user_id: string | null;
+  group_id: string;
+}
+
+export function purgeArticlesForUser(db: Database, userId: string): string[] {
+  const blobPaths = (
+    db
+      .prepare(
+        `SELECT blob_path FROM articles
+         WHERE user_id = ? AND content_kind = 'blob' AND blob_path IS NOT NULL`,
+      )
+      .all(userId) as { blob_path: string }[]
+  ).map((row) => row.blob_path);
+  db.transaction(() => {
+    db.prepare("DELETE FROM article_bookmarks WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM article_read_progress WHERE user_id = ?").run(
+      userId,
+    );
+    db.prepare("DELETE FROM articles WHERE user_id = ?").run(userId);
+  })();
+  return blobPaths;
 }
 
 export function rowToArticle(
@@ -76,7 +101,7 @@ export function findArticleRecord(
   return (
     (db
       .prepare(
-        `SELECT id, user_id, title, content, content_kind, blob_path, mime_type,
+        `SELECT id, user_id, group_id, title, content, content_kind, blob_path, mime_type,
             file_size, original_filename, created_at FROM articles WHERE id = ?`,
       )
       .get(articleId) as ArticleRecord | undefined) ?? null
@@ -88,8 +113,9 @@ export function findArticleAccessRow(
   articleId: string,
 ): ArticleAccessRow | null {
   return (
-    (db.prepare("SELECT user_id FROM articles WHERE id = ?").get(articleId) as
-      ArticleAccessRow | undefined) ?? null
+    (db
+      .prepare("SELECT user_id, group_id FROM articles WHERE id = ?")
+      .get(articleId) as ArticleAccessRow | undefined) ?? null
   );
 }
 
@@ -98,13 +124,14 @@ export function insertTextArticle(
   input: {
     id: string;
     userId: string;
+    groupId: string;
     title: string;
     content: string;
   },
 ): void {
   db.prepare(
-    "INSERT INTO articles (id, user_id, title, content) VALUES (?, ?, ?, ?)",
-  ).run(input.id, input.userId, input.title, input.content);
+    "INSERT INTO articles (id, user_id, group_id, title, content) VALUES (?, ?, ?, ?, ?)",
+  ).run(input.id, input.userId, input.groupId, input.title, input.content);
 }
 
 export function insertBlobArticle(
@@ -112,6 +139,7 @@ export function insertBlobArticle(
   input: {
     id: string;
     userId: string;
+    groupId: string;
     title: string;
     blobPath: string;
     mimeType: string;
@@ -121,11 +149,12 @@ export function insertBlobArticle(
 ): void {
   db.prepare(
     `INSERT INTO articles
-    (id, user_id, title, content, content_kind, blob_path, mime_type, file_size, original_filename)
-    VALUES (?, ?, ?, '', 'blob', ?, ?, ?, ?)`,
+    (id, user_id, group_id, title, content, content_kind, blob_path, mime_type, file_size, original_filename)
+    VALUES (?, ?, ?, ?, '', 'blob', ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.userId,
+    input.groupId,
     input.title,
     input.blobPath,
     input.mimeType,
@@ -140,10 +169,16 @@ export function listArticlesForUser(
   options: {
     bookmarkedOnly?: boolean;
     offset?: number;
+    groupId?: string;
   },
 ): { articles: (Article & ArticleWithMeta)[]; total: number } {
-  const { bookmarkedOnly = false, offset = 0 } = options;
-  let where = "WHERE a.user_id = :uid";
+  const { bookmarkedOnly = false, offset = 0, groupId } = options;
+  let where = groupId
+    ? "WHERE a.group_id = :groupId AND EXISTS (SELECT 1 FROM user_groups ug WHERE ug.user_id = :uid AND ug.group_id = a.group_id)"
+    : `WHERE EXISTS (
+        SELECT 1 FROM user_groups ug
+        WHERE ug.user_id = :uid AND ug.group_id = a.group_id
+      )`;
   if (bookmarkedOnly)
     where +=
       " AND (SELECT bookmarked FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) = 1";
@@ -154,11 +189,14 @@ export function listArticlesForUser(
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES} ${where} ${order} LIMIT 50 OFFSET :off`,
     )
-    .all({ uid: userId, off: offset }) as Record<string, unknown>[];
+    .all({ uid: userId, groupId: groupId ?? null, off: offset }) as Record<
+    string,
+    unknown
+  >[];
   const total = (
     db
       .prepare(`SELECT COUNT(*) AS n FROM articles a ${where}`)
-      .get({ uid: userId }) as { n: number }
+      .get({ uid: userId, groupId: groupId ?? null }) as { n: number }
   ).n;
   return { articles: rows.map(rowToArticle), total };
 }
@@ -171,7 +209,10 @@ export function listArticleHistoryRows(
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
     JOIN article_read_progress rp ON rp.article_id = a.id AND rp.user_id = :uid
-    WHERE a.user_id = :uid AND rp.total_read_seconds >= :minSec
+    WHERE EXISTS (
+      SELECT 1 FROM user_groups ug
+      WHERE ug.user_id = :uid AND ug.group_id = a.group_id
+    ) AND rp.total_read_seconds >= :minSec
     ORDER BY rp.updated_at DESC LIMIT :limit`,
     )
     .all({
@@ -189,7 +230,10 @@ export function listBookmarkedArticleRows(
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
     JOIN article_bookmarks ab ON ab.article_id = a.id AND ab.user_id = :uid AND ab.bookmarked = 1
-    WHERE a.user_id = :uid
+    WHERE EXISTS (
+      SELECT 1 FROM user_groups ug
+      WHERE ug.user_id = :uid AND ug.group_id = a.group_id
+    )
     ORDER BY COALESCE((SELECT updated_at FROM article_read_progress WHERE user_id = :uid AND article_id = a.id), ab.created_at) DESC`,
     )
     .all({ uid: userId }) as Record<string, unknown>[];

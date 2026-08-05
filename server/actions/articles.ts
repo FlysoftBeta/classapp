@@ -12,6 +12,7 @@ export async function listArticlesAction(
       offset: parseOffset(
         input.offset === undefined ? null : String(input.offset),
       ),
+      groupId: input.group_id,
     });
   });
 }
@@ -114,6 +115,7 @@ export async function startNetworkArticleDownloadAction(
   return withActionSession(async (session) =>
     (await (await session.asActor()).articles()).startNetworkDownload(
       input.book_id,
+      input.group_id,
       input.title,
     ),
   );

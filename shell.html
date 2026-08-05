@@ -48,9 +48,23 @@
             });
         }
         var DB = "classapp-runtime";
+        var DB_VERSION = 2;
+        var ACTIVE_BUILD_KEY = "classapp-active-build";
+        function legacyActiveBuild() {
+          try {
+            return localStorage.getItem(ACTIVE_BUILD_KEY);
+          } catch (_) {
+            return null;
+          }
+        }
+        function clearLegacyActiveBuild() {
+          try {
+            localStorage.removeItem(ACTIVE_BUILD_KEY);
+          } catch (_) {}
+        }
         function open() {
           return new Promise(function (resolve, reject) {
-            var request = indexedDB.open(DB, 1);
+            var request = indexedDB.open(DB, DB_VERSION);
             request.onupgradeneeded = function () {
               var db = request.result;
               if (!db.objectStoreNames.contains("bundles"))
@@ -64,8 +78,18 @@
                   "touchedAt",
                 ]);
               }
+              if (!db.objectStoreNames.contains("kv")) {
+                var kv = db.createObjectStore("kv", { keyPath: "key" });
+                var legacy = legacyActiveBuild();
+                if (legacy) {
+                  kv.put({ key: ACTIVE_BUILD_KEY, value: legacy });
+                }
+              }
             };
             request.onsuccess = function () {
+              request.result.onversionchange = function () {
+                request.result.close();
+              };
               resolve(request.result);
             };
             request.onerror = function () {
@@ -85,15 +109,19 @@
         }
         function storeBundle(db, manifest, body) {
           return new Promise(function (resolve, reject) {
-            var transaction = db.transaction("bundles", "readwrite");
+            var transaction = db.transaction(["bundles", "kv"], "readwrite");
             transaction.objectStore("bundles").put({
               buildId: manifest.buildId,
               body: body,
               installedAt: Date.now(),
               active: true,
             });
+            transaction.objectStore("kv").put({
+              key: ACTIVE_BUILD_KEY,
+              value: manifest.buildId,
+            });
             transaction.oncomplete = function () {
-              localStorage.setItem("classapp-active-build", manifest.buildId);
+              clearLegacyActiveBuild();
               resolve();
             };
             transaction.onerror = function () {
@@ -135,14 +163,23 @@
           return open()
             .then(function (opened) {
               db = opened;
-              var active = localStorage.getItem("classapp-active-build");
-              if (!active) return null;
               return idb(
-                db.transaction("bundles").objectStore("bundles").get(active),
+                db.transaction("kv").objectStore("kv").get(ACTIVE_BUILD_KEY),
+              );
+            })
+            .then(function (activeRecord) {
+              if (!activeRecord || !activeRecord.value) return null;
+              clearLegacyActiveBuild();
+              return idb(
+                db
+                  .transaction("bundles")
+                  .objectStore("bundles")
+                  .get(activeRecord.value),
               );
             })
             .then(function (stored) {
               record = stored;
+              if (record) return;
               return fetch("/app/manifest.json", {
                 cache: "no-store",
               })
@@ -152,8 +189,7 @@
                   return response.json();
                 })
                 .then(function (manifest) {
-                  if (record) return;
-                  return fetch(manifest.bundle, {
+                  return fetch(manifest.bundle.url, {
                     cache: "no-store",
                   })
                     .then(function (response) {
@@ -168,9 +204,6 @@
                       };
                       return storeBundle(db, manifest, body);
                     });
-                })
-                .catch(function (error) {
-                  if (!record) throw error;
                 });
             })
             .then(function () {

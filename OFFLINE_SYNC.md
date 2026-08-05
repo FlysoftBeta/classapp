@@ -97,12 +97,15 @@ Client.onConnectionChange(true)
 
 ## 4. IndexedDB 存储模型
 
-数据库名为 `classapp-runtime`，版本为 1：
+数据库名为 `classapp-runtime`，版本为 2：
 
 - `resources`：离线业务 JSON，keyPath 为 `key`，带 `resourceClass`、`size`、`touchedAt`。
-- `bundles`：Shell/ApplicationManager 保存的单体客户端 bundle。
+- `bundles`：Shell 首次安装、之后由 BundleManager 保存的单体客户端 bundle。
+- `kv`：运行时元数据；当前保存 `classapp-active-build` 活跃构建指针。
 
-两个 object store 共用数据库版本和浏览器 origin quota。任何升级都必须同时保留两者；业务缓存淘汰不会删除 `bundles`。
+三个 object store 共用数据库版本和浏览器 origin quota。v1 升级到 v2 时保留
+`resources` 和 `bundles`，并将旧 localStorage 中的活跃构建指针迁移到 `kv`；
+业务缓存淘汰不会删除 `bundles` 或 `kv`。
 
 ### 4.1 用户作用域和 key
 
@@ -432,11 +435,13 @@ Infini 双向滚动只负责窗口、游标、保持锚点和加载状态；“�
 
 ## 10. 与应用更新、身份和 UI 子系统的协作
 
-### 10.1 Shell / ApplicationManager
+### 10.1 Shell / BundleManager / Service Worker
 
-- 生产 `shell.html` 优先从 `bundles` 读取 `classapp-active-build`，网络失败但已有 bundle 时仍可启动前端代码。
-- `ApplicationManager` 在线检查 manifest，把新 bundle 写入同一个 IndexedDB 后 reload。
-- 调试“强制离线”只拦截 Client Action 和 `apiFetch`；ApplicationManager 使用原生 `fetch`，其五分钟定时更新检查不受该开关约束。该开关不是浏览器级网络沙箱。
+- 生产 `shell.html` 先从 `kv` 读取 `classapp-active-build`，再从 `bundles` 读取对应构建；网络失败但已有 bundle 时仍可启动前端代码。
+- 整个发布只有一个 build id；manifest 同时描述该构建的 Shell 和 bundle。
+- 首次安装之后，`BundleManager` 独占 manifest 检查、两个资产的下载、大小校验、暂存和激活；API/WebSocket build mismatch 只触发 manager，不直接 reload。提交任一侧失败时会尝试把 bundle 与 Shell 指针一起恢复到之前的 build id。
+- Service Worker 不独立检查更新。它缓存 manager 推送的 Shell，并在 Cache Storage 中保存活跃 Shell build id；导航只读取该活跃 Shell。Service Worker 首次安装时自行下载 Shell 是唯一例外。
+- 调试“强制离线”只拦截 Client Action 和 `apiFetch`；BundleManager 使用原生 `fetch`，其五分钟定时更新检查不受该开关约束。该开关不是浏览器级网络沙箱。
 - bundle 激活与 `resources` 共享数据库版本但不是同一 object store；离线 schema 变更不能只修改其中一个 open/upgrade 入口。
 - bundle 可启动不等于业务会话可恢复；当前身份状态不持久化，冷启动离线仍无法进入已登录应用。
 
@@ -487,7 +492,7 @@ Infini 双向滚动只负责窗口、游标、保持锚点和加载状态；“�
 8. snapshot replace/reconcile 与 incremental merge API 必须分开命名；调用方必须明确 absence 是否表示删除。
 9. 缓存边界不得伪装成 Content Start/End；UI 必须能显示“未下载”。
 10. cache/persisted 分类变化必须立即重写资源类别并执行相应裁剪。
-11. IndexedDB 版本升级必须同时兼容 Shell、ApplicationManager 和 ResourceManager。
+11. IndexedDB 版本升级必须同时兼容 Shell、BundleManager 和 ResourceManager；Shell/bundle 激活始终使用同一个发布 build id。
 12. 新的服务器同步写入继续遵守 `API -> Action -> Actor/Policy -> Service -> Data`；SQL 只放在 Data，业务仲裁放在 Service/shared helper。
 
 ## 13. 测试与变更清单

@@ -7,7 +7,8 @@ import { handleServiceError, ServiceError } from "@/server/services/errors";
 
 const MIME_TYPES: Record<string, string> = {
   ".doc": "application/msword",
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".docx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".docm": "application/vnd.ms-word.document.macroEnabled.12",
   ".ppt": "application/vnd.ms-powerpoint",
   ".pptx":
@@ -21,8 +22,7 @@ const MIME_TYPES: Record<string, string> = {
 
 function contentDisposition(filename: string): string {
   const fallback =
-    filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") ||
-    "document";
+    filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "document";
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 

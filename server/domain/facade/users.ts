@@ -5,6 +5,7 @@ import {
   type UpdateSelfProfileParams,
   type UpdateUserParams,
   type UserService,
+  type UserRemovalMode,
 } from "@/server/services/usersService";
 
 export class UserActorFacade {
@@ -62,9 +63,9 @@ export class UserActorFacade {
     return this.users.get(input.userId);
   }
 
-  async delete(userId: string): Promise<void> {
+  async remove(userId: string, mode: UserRemovalMode): Promise<void> {
     const admin = await this.actor.requireAdmin();
-    this.users.delete(userId, admin.id);
+    await this.users.remove(userId, admin.id, mode);
   }
 
   async updateSelf(input: UpdateSelfProfileParams) {

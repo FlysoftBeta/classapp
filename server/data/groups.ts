@@ -223,6 +223,14 @@ export function listGroupMemberIds(db: Database, groupId: string): string[] {
   ).map((row) => row.user_id);
 }
 
+export function listUserGroupIds(db: Database, userId: string): string[] {
+  return (
+    db
+      .prepare("SELECT group_id FROM user_groups WHERE user_id = ?")
+      .all(userId) as { group_id: string }[]
+  ).map((row) => row.group_id);
+}
+
 export function listGroupMembersForView(
   db: Database,
   groupId: string,
@@ -276,7 +284,13 @@ export function isGroupMember(
 }
 
 export function userExists(db: Database, userId: string): boolean {
-  return !!db.prepare("SELECT id FROM users WHERE id = ?").get(userId);
+  return !!db
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.id = ? AND du.id IS NULL`,
+    )
+    .get(userId);
 }
 
 export function insertGroup(db: Database, row: GroupInsertRow): void {

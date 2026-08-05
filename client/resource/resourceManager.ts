@@ -1,5 +1,8 @@
-const DATABASE = "classapp-runtime";
-const VERSION = 1;
+import {
+  openRuntimeDatabase,
+  requestValue,
+  transactionDone,
+} from "./runtimeDatabase";
 
 export type ResourceClass = "cache" | "persisted";
 
@@ -11,41 +14,6 @@ interface ResourceRecord {
   size: number;
   touchedAt: number;
   resourceClass: ResourceClass;
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains("resources")) {
-        const store = db.createObjectStore("resources", { keyPath: "key" });
-        store.createIndex("by-class-and-touch", ["resourceClass", "touchedAt"]);
-      }
-      if (!db.objectStoreNames.contains("bundles")) {
-        db.createObjectStore("bundles", { keyPath: "buildId" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function requestValue<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function transactionDone(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onabort = () =>
-      reject(tx.error ?? new Error("IndexedDB transaction aborted"));
-    tx.onerror = () =>
-      reject(tx.error ?? new Error("IndexedDB transaction failed"));
-  });
 }
 
 /** Owns quota-aware transient cache and explicitly persistent resources. */
@@ -69,7 +37,7 @@ export class ResourceManager {
   }
 
   async get(key: string): Promise<Blob | null> {
-    const db = await openDatabase();
+    const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readwrite");
     const done = transactionDone(tx);
     const store = tx.objectStore("resources");
@@ -108,7 +76,7 @@ export class ResourceManager {
   }
 
   async remove(key: string): Promise<number> {
-    const db = await openDatabase();
+    const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readwrite");
     const done = transactionDone(tx);
     const store = tx.objectStore("resources");
@@ -120,7 +88,7 @@ export class ResourceManager {
   }
 
   async keys(prefix = ""): Promise<string[]> {
-    const db = await openDatabase();
+    const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readonly");
     const done = transactionDone(tx);
     const all = await requestValue(tx.objectStore("resources").getAllKeys());
@@ -143,7 +111,7 @@ export class ResourceManager {
   }
 
   private async put(key: string, body: Blob, resourceClass: ResourceClass) {
-    const db = await openDatabase();
+    const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readwrite");
     const done = transactionDone(tx);
     tx.objectStore("resources").put({
@@ -162,7 +130,7 @@ export class ResourceManager {
     if (!quota || usage / quota < 0.8) return;
     this.enforcingQuota = true;
     try {
-      const db = await openDatabase();
+      const db = await openRuntimeDatabase();
       const tx = db.transaction("resources", "readwrite");
       const done = transactionDone(tx);
       const store = tx.objectStore("resources");

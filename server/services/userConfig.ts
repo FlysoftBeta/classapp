@@ -3,6 +3,7 @@ import {
   deleteUserConfigValue,
   getUserConfigValue,
   upsertUserConfigValue,
+  purgeUserConfigValues,
 } from "@/server/data/userConfig";
 import { publishUser } from "./eventBus";
 
@@ -42,4 +43,25 @@ export function deleteUserConfig(
 ): void {
   deleteUserConfigValue(db, userId, key);
   publishUserConfigChanged(userId, key, null);
+}
+
+export function purgeUserConfig(
+  db: BetterSqlite3.Database,
+  userId: string,
+): void {
+  purgeUserConfigValues(db, userId);
+}
+
+export class UserConfigService {
+  constructor(private readonly db: BetterSqlite3.Database) {}
+
+  purgeUser(userId: string): void {
+    purgeUserConfig(this.db, userId);
+  }
+}
+
+export function createUserConfigService(
+  db: BetterSqlite3.Database,
+): UserConfigService {
+  return new UserConfigService(db);
 }

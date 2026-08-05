@@ -150,6 +150,7 @@ const articleImportTaskSchema = object({
   error: z.string().nullable(),
   created_at: timestamp,
   updated_at: timestamp,
+  group_id: nonEmptyString,
 });
 const teachDocumentSchema = object({
   id: z.string().uuid(),
@@ -227,7 +228,15 @@ export const actionContracts = {
     ),
     object({ user: userSchema }),
   ),
-  adminDeleteUserAction: contract(one(nonEmptyString), okSchema),
+  adminDeleteUserAction: contract(
+    one(
+      object({
+        userId: nonEmptyString,
+        mode: z.enum(["purge", "deactivate"]),
+      }),
+    ),
+    okSchema,
+  ),
   adminFetchGhostUsersAction: contract(
     noArgs,
     object({ ghosts: z.array(ghostUserSchema) }),
@@ -450,6 +459,7 @@ export const actionContracts = {
       object({
         bookmarked: z.boolean().optional(),
         offset: z.number().int().nonnegative().optional(),
+        group_id: nonEmptyString.optional(),
       }),
     ),
     object({
@@ -463,6 +473,7 @@ export const actionContracts = {
       object({
         title: nonEmptyString,
         content: nonEmptyString,
+        group_id: nonEmptyString,
       }),
     ),
     object({
@@ -484,7 +495,13 @@ export const actionContracts = {
     ]),
   ),
   startNetworkArticleDownloadAction: contract(
-    one(object({ book_id: nonEmptyString, title: z.string().optional() })),
+    one(
+      object({
+        book_id: nonEmptyString,
+        title: z.string().optional(),
+        group_id: nonEmptyString,
+      }),
+    ),
     object({ task: articleImportTaskSchema }),
   ),
   listNetworkArticleDownloadsAction: contract(

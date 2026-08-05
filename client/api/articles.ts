@@ -36,7 +36,7 @@ interface ArticleListPage {
 }
 
 const remoteArticlePageRequests = new Map<
-  number,
+  string,
   Promise<ArticleListPage | null>
 >();
 
@@ -75,12 +75,17 @@ async function reconcileArticleList(
 
 async function fetchRemoteArticlePage(
   offset: number,
+  groupId?: string,
 ): Promise<ArticleListPage | null> {
-  const existing = remoteArticlePageRequests.get(offset);
+  const key = `${groupId ?? "all"}:${offset}`;
+  const existing = remoteArticlePageRequests.get(key);
   if (existing) return existing;
 
   const request: Promise<ArticleListPage | null> = (async () => {
-    const result = await listArticlesAction({ offset });
+    const result = await listArticlesAction({
+      offset,
+      ...(groupId ? { group_id: groupId } : {}),
+    });
     observeActionResult(result);
     if (!result.ok) return null;
     return {
@@ -88,28 +93,39 @@ async function fetchRemoteArticlePage(
       total: result.data.total ?? 0,
     };
   })().finally(() => {
-    if (remoteArticlePageRequests.get(offset) === request) {
-      remoteArticlePageRequests.delete(offset);
+    if (remoteArticlePageRequests.get(key) === request) {
+      remoteArticlePageRequests.delete(key);
     }
   });
-  remoteArticlePageRequests.set(offset, request);
+  remoteArticlePageRequests.set(key, request);
   return request;
 }
 
-export async function listArticles(offset: number) {
+export async function listArticles(offset: number, groupId?: string) {
   if (!client.isConnected()) {
-    const articles = await offlineRepository.getSavedArticleList();
+    const saved = await offlineRepository.getSavedArticleList();
+    const articles = groupId
+      ? saved.filter((article) => article.group_id === groupId)
+      : saved;
     return {
       articles: articles.slice(offset, offset + 50),
       total: articles.length,
     };
   }
-  const data = await fetchRemoteArticlePage(offset);
+  const data = await fetchRemoteArticlePage(offset, groupId);
   if (data) {
-    await offlineRepository.reconcileArticlePage(data.articles, {
-      offset,
-      total: data.total,
-    });
+    if (groupId) {
+      // A group-filtered page is only a partial view of the global cache. It
+      // may add/update entries, but must never evict articles from other groups.
+      await offlineRepository.mergeArticleListEntries(data.articles);
+      for (const article of data.articles)
+        await offlineRepository.saveArticleMeta(article);
+    } else {
+      await offlineRepository.reconcileArticlePage(data.articles, {
+        offset,
+        total: data.total,
+      });
+    }
   }
   return data;
 }
@@ -240,7 +256,11 @@ export async function fetchArticleSegment(articleId: string, offset: number) {
   return data;
 }
 
-export async function createArticle(body: { title: string; content: string }) {
+export async function createArticle(body: {
+  title: string;
+  content: string;
+  group_id: string;
+}) {
   const result = await createArticleAction(body);
   const res = observeActionResult(result);
   const data = result.ok ? result.data : { error: result.error.message };
@@ -252,11 +272,13 @@ export async function createBlobArticle(
   body: {
     title: string;
     file: File;
+    group_id: string;
   },
 ) {
   const form = new FormData();
   form.set("title", body.title);
   form.set("file", body.file);
+  form.set("group_id", body.group_id);
   const res = await apiFetch("/api/articles", {
     method: "POST",
     headers: authHeaders(token),
@@ -277,11 +299,13 @@ export async function searchNetworkArticles(query: string) {
 
 export async function startNetworkArticleDownload(
   bookId: string,
+  groupId: string,
   title?: string,
 ) {
   const result = await startNetworkArticleDownloadAction({
     book_id: bookId,
     ...(title ? { title } : {}),
+    group_id: groupId,
   });
   observeActionResult(result);
   return result.ok ? result.data.task : null;

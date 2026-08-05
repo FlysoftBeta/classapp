@@ -7,6 +7,8 @@ import { fork, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { readBuildId } from "@/server/infra/buildIdentity";
+import { UPDATE_CONFIRM_TIMEOUT_MS } from "@/server/infra/updateContract";
 
 type PendingLifecycle = {
   action: "update" | "rollback";
@@ -28,6 +30,7 @@ const STAGING_DIR = path.join(ROOT, "staging");
 const APP_BACKUP_DIR = path.join(ROOT, "backup");
 const DB_BACKUP_DIR = path.join(ROOT, "backups");
 const DB_PATH = path.join(ROOT, "data.db");
+const PENDING_UPDATE_FILE = path.join(ROOT, ".pending-update.json");
 // ── Runtime state ────────────────────────────────────────────────────────────
 let child: ChildProcess | null = null;
 let restarting = false;
@@ -40,10 +43,6 @@ const FAST_CRASH_MS = 15000;
 const MAX_FAST_CRASHES = 3;
 const DEFAULT_PORTS = [80, 81, 82, 83, 84, 85, 86, 88];
 const DEFAULT_SECURE_PORTS = [443];
-// 3-minute hard ceiling — if a freshly applied update has not produced a
-// "confirm" or "rollback" signal by then, the launcher rolls back unilaterally.
-const UPDATE_TIMEOUT_MS = 3 * 60 * 1000;
-
 const PORTS = parsePorts("CLASSAPP_PORTS", DEFAULT_PORTS);
 
 function parsePorts(name: string, fallback: number[]) {
@@ -58,14 +57,6 @@ function parsePorts(name: string, fallback: number[]) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function readBuildId(appDir: string): string {
-  const buildIdPath = path.join(appDir, "build-id.txt");
-  if (fs.existsSync(buildIdPath)) {
-    return fs.readFileSync(buildIdPath, "utf8").trim();
-  }
-  return "dev";
 }
 
 function readHttpsConfig(appDir: string): ClassAppRuntimeConfig["https"] {
@@ -153,7 +144,44 @@ function restoreDatabase(dbName: string): void {
   console.log(`[Launcher] 已还原数据库: ${dbName}`);
 }
 
-function applyUpdate(): void {
+type PendingUpdateMetadata = { db?: string; appliedAt: number };
+
+function writePendingUpdate(dbName?: string): void {
+  fs.writeFileSync(
+    PENDING_UPDATE_FILE,
+    JSON.stringify({ db: dbName ?? null, appliedAt: Date.now() }),
+  );
+}
+
+function readPendingUpdate(): PendingUpdateMetadata | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(PENDING_UPDATE_FILE, "utf8")) as {
+      db?: unknown;
+      appliedAt?: unknown;
+    };
+    if (typeof value.appliedAt !== "number") return null;
+    return {
+      db: typeof value.db === "string" && value.db ? value.db : undefined,
+      appliedAt: value.appliedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readPendingUpdateDb(): string | undefined {
+  return readPendingUpdate()?.db;
+}
+
+function clearPendingUpdateFile(): void {
+  try {
+    fs.unlinkSync(PENDING_UPDATE_FILE);
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyUpdate(dbName?: string): void {
   if (!fs.existsSync(STAGING_DIR)) {
     throw new Error("staging/ 目录不存在");
   }
@@ -162,6 +190,7 @@ function applyUpdate(): void {
     fs.renameSync(CURRENT_DIR, APP_BACKUP_DIR);
   }
   fs.renameSync(STAGING_DIR, CURRENT_DIR);
+  writePendingUpdate(dbName);
 }
 
 function applyRollback(dbName?: string): void {
@@ -171,12 +200,13 @@ function applyRollback(dbName?: string): void {
   fs.rmSync(CURRENT_DIR, { recursive: true, force: true });
   fs.renameSync(APP_BACKUP_DIR, CURRENT_DIR);
 
-  const db = dbName;
+  const db = dbName ?? readPendingUpdateDb();
   if (db) {
     restoreDatabase(db);
   } else {
     console.warn("[Launcher] 未找到数据库回滚信息，仅还原应用版本");
   }
+  clearPendingUpdateFile();
 }
 
 function clearBackupDir(): void {
@@ -185,6 +215,7 @@ function clearBackupDir(): void {
   } catch {
     /* ignore */
   }
+  clearPendingUpdateFile();
 }
 
 // ── Update watchdog ──────────────────────────────────────────────────────────
@@ -194,18 +225,39 @@ function armUpdateWatchdog(): void {
   if (updateWatchdog) clearTimeout(updateWatchdog);
   if (!fs.existsSync(APP_BACKUP_DIR)) return;
 
-  updateWatchdog = setTimeout(() => {
+  const metadata = readPendingUpdate();
+  const remaining = metadata
+    ? Math.max(0, UPDATE_CONFIRM_TIMEOUT_MS - (Date.now() - metadata.appliedAt))
+    : UPDATE_CONFIRM_TIMEOUT_MS;
+  const rollback = () => {
     if (!fs.existsSync(APP_BACKUP_DIR)) return;
+    updateWatchdog = null;
     console.error("[Launcher] 3 分钟内未收到确认/回滚信号，正在自动回滚…");
-    pendingLifecycle = { action: "rollback" };
     if (child) {
+      pendingLifecycle = {
+        action: "rollback",
+        db: metadata?.db,
+      };
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
+      return;
     }
-  }, UPDATE_TIMEOUT_MS);
+    try {
+      applyRollback(metadata?.db);
+      fastCrashCount = 0;
+      console.log("[Launcher] 超时回滚完成");
+    } catch (error: unknown) {
+      console.error("[Launcher] 超时回滚失败:", errorMessage(error));
+    }
+  };
+  if (remaining === 0) {
+    rollback();
+    return;
+  }
+  updateWatchdog = setTimeout(rollback, remaining);
 }
 
 function disarmUpdateWatchdog(): void {
@@ -306,7 +358,7 @@ function startServer(): void {
     if (signal?.action === "update") {
       console.log("[Launcher] 收到 update 信号，正在应用更新…");
       try {
-        applyUpdate();
+        applyUpdate(signal.db);
         fastCrashCount = 0;
         console.log("[Launcher] 更新已应用，正在重启…");
       } catch (error: unknown) {

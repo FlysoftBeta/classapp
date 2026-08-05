@@ -36,11 +36,12 @@ export type AppRoute =
   | { view: "chat"; conversation: SelectedKey | null }
   | { view: "settings" }
   | { view: "admin" }
-  | { view: "articles" }
+  | { view: "articles"; conversation?: SelectedKey }
   | {
       view: "reader";
       articleId: string;
       from: "chat" | "articles";
+      conversation?: SelectedKey;
     }
   | { view: "learning" }
   | { view: "word-learning" }
@@ -327,7 +328,10 @@ export function appReducer(state: AppStore, action: AppAction): AppStore {
         payload.removed &&
         state.route.view === "reader" &&
         state.route.articleId === payload.removed.article_id
-          ? ({ view: "articles" } as const)
+          ? ({
+              view: "articles",
+              conversation: state.route.conversation,
+            } as const)
           : state.route;
       return {
         ...state,

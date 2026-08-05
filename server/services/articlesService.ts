@@ -26,9 +26,10 @@ import {
   setArticleBookmarkValue,
   touchArticleProgress,
   upsertArticleProgressOffset,
+  purgeArticlesForUser,
 } from "@/server/data/articles";
 import { CheckedError, MalformedRequestError } from "@/shared/protocol/errors";
-import { publishUser } from "@/server/services/eventBus";
+import { publishGroupArticle, publishUser } from "@/server/services/eventBus";
 import {
   deleteUserConfig,
   getUserConfig,
@@ -41,10 +42,12 @@ import {
 } from "@/server/domain/policy/articles";
 import { removeArticleBlob } from "@/server/infra/articleBlobs";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
+import { assertGroupMember } from "@/server/domain/policy/membership";
 
 export interface CreateArticleInput {
   title: string;
   content: string;
+  group_id: string;
 }
 export interface CreateBlobArticleInput {
   title: string;
@@ -52,6 +55,7 @@ export interface CreateBlobArticleInput {
   mime_type: string;
   file_size: number;
   original_filename: string;
+  group_id: string;
 }
 
 function requireTrimmed(value: string, message: string): string {
@@ -63,7 +67,11 @@ function requireTrimmed(value: string, message: string): string {
 export class ArticleService {
   constructor(private readonly db: Database) {}
 
-  list(user: User, input: { bookmarkedOnly?: boolean; offset?: number }) {
+  list(
+    user: User,
+    input: { bookmarkedOnly?: boolean; offset?: number; groupId?: string },
+  ) {
+    if (input.groupId) assertGroupMember(this.db, user.id, input.groupId);
     return listArticlesForUser(this.db, user.id, input);
   }
 
@@ -94,11 +102,12 @@ export class ArticleService {
     user: User,
     input: CreateArticleInput,
   ): { article: Article & ArticleWithMeta } {
-    assertCanCreateArticle(this.db, user);
+    assertCanCreateArticle(this.db, user, input.group_id);
     const article = this.insertText(
       user.id,
       requireTrimmed(input.title, "标题不能为空"),
       requireTrimmed(input.content, "内容不能为空"),
+      input.group_id,
     );
     this.notifyCreated(user.id, article.id);
     return { article };
@@ -108,7 +117,7 @@ export class ArticleService {
     user: User,
     input: CreateBlobArticleInput,
   ): { article: Article & ArticleWithMeta } {
-    assertCanCreateArticle(this.db, user);
+    assertCanCreateArticle(this.db, user, input.group_id);
     if (!input.blob_path) throw new MalformedRequestError("文件保存失败");
     if (input.mime_type !== "application/pdf")
       throw new MalformedRequestError("仅支持 PDF 文件");
@@ -121,6 +130,7 @@ export class ArticleService {
       mimeType: input.mime_type,
       fileSize: input.file_size,
       originalFilename: input.original_filename,
+      groupId: input.group_id,
     });
     const article = this.requireOwned(id, user.id);
     this.notifyCreated(user.id, id);
@@ -252,11 +262,28 @@ export class ArticleService {
         data: { removed: { article_id: articleId } },
       });
     }
+    if (record?.group_id) {
+      publishGroupArticle(record.group_id, {
+        kind: "article.list_updated",
+        data: { refresh: true },
+      });
+    }
   }
 
-  private insertText(userId: string, title: string, content: string) {
+  async purgeUser(userId: string): Promise<void> {
+    for (const blobPath of purgeArticlesForUser(this.db, userId)) {
+      await removeArticleBlob(blobPath);
+    }
+  }
+
+  private insertText(
+    userId: string,
+    title: string,
+    content: string,
+    groupId: string,
+  ) {
     const id = crypto.randomUUID();
-    insertTextArticle(this.db, { id, userId, title, content });
+    insertTextArticle(this.db, { id, userId, groupId, title, content });
     return this.requireOwned(id, userId);
   }
   private requireOwned(id: string, userId: string) {
@@ -266,6 +293,12 @@ export class ArticleService {
   }
   private notifyCreated(userId: string, articleId: string) {
     this.publishList(userId, articleId, true);
+    const article = findArticleRecord(this.db, articleId);
+    if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    publishGroupArticle(article.group_id, {
+      kind: "article.list_updated",
+      data: { refresh: true },
+    });
   }
   private publishReading(userId: string, articleId: string) {
     this.publishSidebar(userId, articleId);

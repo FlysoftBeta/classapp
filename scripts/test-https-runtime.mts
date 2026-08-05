@@ -93,7 +93,20 @@ await withServer(true, async (origin) => {
   const worker = await fetch(`${origin}/service-worker.js`);
   assert.equal(worker.status, 200);
   assert.equal(worker.headers.get("service-worker-allowed"), "/");
-  assert.match(await worker.text(), /classapp-shell-https-test-build/);
+  const workerBody = await worker.text();
+  assert.match(workerBody, /classapp:get-shell-build/);
+  assert.doesNotMatch(workerBody, /classapp-shell-https-test-build/);
+
+  const manifest = (await (
+    await fetch(`${origin}/app/manifest.json`)
+  ).json()) as {
+    buildId: string;
+    bundle: { url: string; size: number };
+    shell: { url: string; size: number };
+  };
+  assert.equal(manifest.buildId, "https-test-build");
+  assert.match(manifest.bundle.url, /https-test-build/);
+  assert.match(manifest.shell.url, /https-test-build/);
 
   const endpoints = (await (await fetch(`${origin}/api/endpoints`)).json()) as {
     origins: string[];

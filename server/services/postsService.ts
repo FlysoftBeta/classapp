@@ -6,7 +6,10 @@ import {
   publishGroupPost,
   publishDmPost,
 } from "./eventBus";
-import { publishConversationUpdateForPost } from "@/server/services/conversationsService";
+import {
+  publishConversationUpdate,
+  publishConversationUpdateForPost,
+} from "@/server/services/conversationsService";
 import {
   assertCanAccessPost,
   assertCanCreatePost,
@@ -40,6 +43,7 @@ import {
   queryDmPosts,
   queryFeedPosts,
   queryGroupPosts,
+  purgePostsByUser,
   updatePostBody,
 } from "@/server/data/posts";
 
@@ -404,6 +408,33 @@ export class PostService {
 
   adminDelete(postId: string): void {
     hardDeletePost(this.db, postId);
+  }
+
+  purgeUser(userId: string): void {
+    const affected = purgePostsByUser(this.db, userId);
+    for (const post of affected.posts) {
+      if (post.group_id) {
+        publishGroupPost(post.group_id, {
+          kind: "post.deleted",
+          data: { id: post.id },
+        });
+      } else if (post.user_id && post.dm_to) {
+        publishDmPost(post.user_id, post.dm_to, {
+          kind: "post.deleted",
+          data: { id: post.id },
+        });
+      }
+    }
+    for (const groupId of affected.groupIds) {
+      publishConversationUpdateForPost(this.db, {
+        group_id: groupId,
+        dm_to: null,
+        user_id: null,
+      });
+    }
+    for (const peerId of affected.peerIds) {
+      publishConversationUpdate(this.db, peerId, { type: "dm", id: userId });
+    }
   }
 }
 

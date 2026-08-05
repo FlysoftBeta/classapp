@@ -131,6 +131,17 @@ function AppShell({
   const articlesEnabled = hasFeature(user, "articles");
   const learningEnabled = hasFeature(user, "learning");
   const articleDownloadEnabled = hasFeature(user, "article_download");
+  const articleConversation = useMemo(() => {
+    const key =
+      route.view === "articles" || route.view === "reader"
+        ? route.conversation
+        : undefined;
+    if (!key) return undefined;
+    return conversations.find(
+      (conversation) =>
+        conversation.type === key.type && conversation.id === key.id,
+    );
+  }, [conversations, route]);
 
   const handleNavigate = useCallback(
     (newRoute: AppRoute, extra?: () => void) => {
@@ -185,7 +196,11 @@ function AppShell({
           : route.view === "reader"
             ? route.from
             : "chat";
-      navigate({ view: "reader", articleId, from });
+      const conversation =
+        route.view === "articles" || route.view === "reader"
+          ? route.conversation
+          : undefined;
+      navigate({ view: "reader", articleId, from, conversation });
       if (isMobile) setMobileShowContent(true);
     },
     [navigate, isMobile, route, articlesEnabled],
@@ -193,15 +208,17 @@ function AppShell({
 
   const handleArticlesBack = useCallback(() => {
     const destination = route.view === "reader" ? route.from : "articles";
+    const conversation =
+      route.view === "reader" ? route.conversation : undefined;
     if (isMobile) {
       navigate(
         destination === "articles"
-          ? { view: "articles" }
+          ? { view: "articles", conversation }
           : { view: "chat", conversation: null },
       );
       setMobileShowContent(destination === "articles");
     } else {
-      navigate({ view: "articles" });
+      navigate({ view: "articles", conversation });
     }
   }, [navigate, isMobile, route]);
 
@@ -413,6 +430,16 @@ function AppShell({
             subscribeConfigEvents={subscribeConfigEvents}
             onBack={isMobile ? handleMobileBack : undefined}
             onOpenArticle={handleOpenArticle}
+            onOpenArticles={(conversation) => {
+              navigate({
+                view: "articles",
+                conversation: {
+                  type: conversation.type,
+                  id: conversation.id,
+                },
+              });
+              if (isMobile) setMobileShowContent(true);
+            }}
             online={online}
             offlineEnabled={offlineEnabled}
             articlesEnabled={articlesEnabled}
@@ -455,6 +482,7 @@ function AppShell({
             onBack={isMobile ? handleMobileBack : undefined}
             token={token}
             downloadEnabled={articleDownloadEnabled}
+            conversation={articleConversation}
           />
         )}
         {route.view === "reader" && articlesEnabled && (
@@ -465,7 +493,10 @@ function AppShell({
             isAdmin={adminEnabled}
             onBack={handleArticlesBack}
             onDeleted={() => {
-              navigate({ view: "articles" });
+              navigate({
+                view: "articles",
+                conversation: route.conversation,
+              });
             }}
             themeMode={themeMode}
             subscribeConfigEvents={subscribeConfigEvents}

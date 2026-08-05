@@ -20,7 +20,8 @@ import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
 import Checkbox from "@mui/material/Checkbox";
-import DeleteIcon from "@mui/icons-material/Delete";
+import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
+import PersonOffIcon from "@mui/icons-material/PersonOff";
 import EditIcon from "@mui/icons-material/Edit";
 import AddIcon from "@mui/icons-material/Add";
 import { flexGap } from "@/client/lib/css";
@@ -154,9 +155,13 @@ export function UsersTab() {
     reload();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确认删除该干员？")) return;
-    await adminDeleteUser(id);
+  const handleDelete = async (id: string, mode: "purge" | "deactivate") => {
+    const message =
+      mode === "purge"
+        ? "确认彻底清除该干员及其所有业务数据？此操作不可恢复。"
+        : "确认注销该干员？账号将无法登录并退出所有群组，其他历史数据保留。";
+    if (!confirm(message)) return;
+    await adminDeleteUser(id, mode);
     reload();
   };
 
@@ -400,10 +405,18 @@ export function UsersTab() {
                   </IconButton>
                   <IconButton
                     size="small"
-                    color="error"
-                    onClick={() => handleDelete(u.id)}
+                    title="注销账号并保留历史数据"
+                    onClick={() => handleDelete(u.id, "deactivate")}
                   >
-                    <DeleteIcon fontSize="small" />
+                    <PersonOffIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    color="error"
+                    title="彻底清除账号和业务数据"
+                    onClick={() => handleDelete(u.id, "purge")}
+                  >
+                    <DeleteForeverIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
               </TableRow>

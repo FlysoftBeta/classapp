@@ -1,189 +1,129 @@
 import React, { useRef, useState } from "react";
-import SpeedDial from "@mui/material/SpeedDial";
-import SpeedDialAction from "@mui/material/SpeedDialAction";
-import SpeedDialIcon from "@mui/material/SpeedDialIcon";
-import Dialog from "@mui/material/Dialog";
-import DialogTitle from "@mui/material/DialogTitle";
-import DialogContent from "@mui/material/DialogContent";
-import DialogActions from "@mui/material/DialogActions";
-import TextField from "@mui/material/TextField";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
-import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
-import ContentPasteIcon from "@mui/icons-material/ContentPaste";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import Fab from "@mui/material/Fab";
+import TextField from "@mui/material/TextField";
+import AddIcon from "@mui/icons-material/Add";
+import AttachmentIcon from "@mui/icons-material/Attachment";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
+import type { Conversation } from "@/shared/types/api";
 import { createArticle, createBlobArticle } from "@/client/api/articles";
 import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
+import { decodeUploadedText } from "@/client/lib/textEncoding";
 import { NetworkArticleDialog } from "./NetworkArticleDialog";
 
 export function ArticleImportFab({
   token,
+  conversation,
   downloadEnabled,
   onCreated,
 }: {
   token: string;
+  conversation: Conversation;
   downloadEnabled: boolean;
   onCreated: () => void;
 }) {
-  const txtRef = useRef<HTMLInputElement>(null);
-  const pdfRef = useRef<HTMLInputElement>(null);
-  const [noteOpen, setNoteOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
   const [networkOpen, setNetworkOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [bodyFocused, setBodyFocused] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const runTextUpload = async (file: File) => {
-    const id = newTaskId("article-upload");
-    const taskTitle = file.name.replace(/\.txt$/i, "") || "TXT 文章";
-    taskStore.getState().upsert({
-      id,
-      kind: "article-upload",
-      title: taskTitle,
-      status: "running",
-      progress: 0,
-      total: file.size,
-      updatedAt: Date.now(),
-    });
-    try {
-      const text = await file.text();
-      const { res } = await createArticle({ title: taskTitle, content: text });
-      if (!res.ok) throw new Error("上传失败");
-      taskStore
-        .getState()
-        .patch(id, { status: "completed", progress: file.size });
-      onCreated();
-    } catch (error) {
-      taskStore.getState().patch(id, {
-        status: "failed",
-        detail: error instanceof Error ? error.message : "上传失败",
-      });
+  const groupId = conversation.type === "group" ? conversation.id : null;
+
+  const reset = () => {
+    setTitle("");
+    setContent("");
+    setAttachment(null);
+    setBodyFocused(false);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const close = () => {
+    if (saving) return;
+    setOpen(false);
+    reset();
+  };
+
+  const selectFile = async (file: File) => {
+    if (!title.trim()) setTitle(file.name);
+    setAttachment(file);
+    if (file.type === "text/plain" || /\.txt$/i.test(file.name)) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setContent(decodeUploadedText(bytes).text);
+    } else {
+      setContent("");
     }
   };
 
-  const runPdfUpload = async (file: File) => {
-    const id = newTaskId("article-upload");
-    const taskTitle = file.name.replace(/\.pdf$/i, "") || "PDF 文章";
+  const save = async () => {
+    if (!groupId || !title.trim() || (!content.trim() && !attachment)) return;
+    const taskId = newTaskId("article-upload");
+    const total = attachment?.size ?? content.length;
     taskStore.getState().upsert({
-      id,
-      kind: "article-upload",
-      title: taskTitle,
-      status: "running",
-      progress: 0,
-      total: file.size,
-      updatedAt: Date.now(),
-    });
-    try {
-      const { res } = await createBlobArticle(token, {
-        title: taskTitle,
-        file,
-      });
-      if (!res.ok) throw new Error("上传失败");
-      taskStore
-        .getState()
-        .patch(id, { status: "completed", progress: file.size });
-      onCreated();
-    } catch (error) {
-      taskStore.getState().patch(id, {
-        status: "failed",
-        detail: error instanceof Error ? error.message : "上传失败",
-      });
-    }
-  };
-
-  const saveNote = async () => {
-    if (!title.trim() || !content.trim()) return;
-    const id = newTaskId("article-upload");
-    taskStore.getState().upsert({
-      id,
+      id: taskId,
       kind: "article-upload",
       title: title.trim(),
       status: "running",
       progress: 0,
-      total: content.length,
+      total,
       updatedAt: Date.now(),
     });
+    setSaving(true);
     try {
-      const { res } = await createArticle({
-        title: title.trim(),
-        content: content.trim(),
-      });
-      if (!res.ok) throw new Error("保存失败");
+      const isPdf =
+        attachment &&
+        (attachment.type === "application/pdf" ||
+          /\.pdf$/i.test(attachment.name));
+      const { res } = isPdf
+        ? await createBlobArticle(token, {
+            title: title.trim(),
+            file: attachment,
+            group_id: groupId,
+          })
+        : await createArticle({
+            title: title.trim(),
+            content: content.trim(),
+            group_id: groupId,
+          });
+      if (!res.ok) throw new Error("上传失败");
       taskStore
         .getState()
-        .patch(id, { status: "completed", progress: content.length });
-      setNoteOpen(false);
-      setTitle("");
-      setContent("");
+        .patch(taskId, { status: "completed", progress: total });
+      setOpen(false);
+      reset();
       onCreated();
     } catch (error) {
-      taskStore.getState().patch(id, {
+      taskStore.getState().patch(taskId, {
         status: "failed",
-        detail: error instanceof Error ? error.message : "保存失败",
+        detail: error instanceof Error ? error.message : "上传失败",
       });
+    } finally {
+      setSaving(false);
     }
   };
 
+  if (!groupId) return null;
+
   return (
     <>
-      <input
-        ref={txtRef}
-        type="file"
-        accept=".txt,text/plain"
-        multiple
-        hidden
-        onChange={(event) => {
-          for (const file of Array.from(event.target.files ?? []))
-            void runTextUpload(file);
-          event.target.value = "";
-        }}
-      />
-      <input
-        ref={pdfRef}
-        type="file"
-        accept=".pdf,application/pdf"
-        multiple
-        hidden
-        onChange={(event) => {
-          for (const file of Array.from(event.target.files ?? []))
-            void runPdfUpload(file);
-          event.target.value = "";
-        }}
-      />
-      <SpeedDial
-        ariaLabel="上传文章"
-        icon={<SpeedDialIcon />}
+      <Fab
+        color="primary"
+        aria-label="上传文章"
+        onClick={() => setOpen(true)}
         sx={{ position: "fixed", right: 24, bottom: 24 }}
       >
-        <SpeedDialAction
-          icon={<UploadFileIcon />}
-          tooltipTitle="从本地上传 TXT"
-          onClick={() => txtRef.current?.click()}
-        />
-        <SpeedDialAction
-          icon={<PictureAsPdfIcon />}
-          tooltipTitle="从本地上传 PDF"
-          onClick={() => pdfRef.current?.click()}
-        />
-        <SpeedDialAction
-          icon={<ContentPasteIcon />}
-          tooltipTitle="粘贴笔记"
-          onClick={() => setNoteOpen(true)}
-        />
-        {downloadEnabled && (
-          <SpeedDialAction
-            icon={<CloudDownloadIcon />}
-            tooltipTitle="从网络下载"
-            onClick={() => setNetworkOpen(true)}
-          />
-        )}
-      </SpeedDial>
-      <Dialog
-        open={noteOpen}
-        onClose={() => setNoteOpen(false)}
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>粘贴笔记</DialogTitle>
+        <AddIcon />
+      </Fab>
+      <Dialog open={open} onClose={close} fullWidth maxWidth="sm">
+        <DialogTitle>上传到 #{conversation.name}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -193,29 +133,89 @@ export function ArticleImportFab({
             onChange={(event) => setTitle(event.target.value)}
             sx={{ mt: 0.5, mb: 2 }}
           />
-          <TextField
-            fullWidth
-            multiline
-            minRows={10}
-            label="内容"
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
+          <Box sx={{ position: "relative" }}>
+            <TextField
+              fullWidth
+              multiline
+              minRows={10}
+              label="正文"
+              value={content}
+              onChange={(event) => {
+                setContent(event.target.value);
+                if (
+                  event.target.value &&
+                  attachment?.type === "application/pdf"
+                )
+                  setAttachment(null);
+              }}
+              onFocus={() => setBodyFocused(true)}
+              onBlur={() => setBodyFocused(false)}
+              helperText={
+                attachment && !content
+                  ? `已选择：${attachment.name}`
+                  : "可直接输入正文，或上传 TXT / PDF"
+              }
+            />
+            {!content && (
+              <Button
+                startIcon={<AttachmentIcon />}
+                onClick={() => inputRef.current?.click()}
+                sx={{
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  opacity: bodyFocused ? 0 : 1,
+                  pointerEvents: bodyFocused ? "none" : "auto",
+                  transition: "opacity 120ms ease",
+                }}
+              >
+                {attachment ? attachment.name : "上传附件"}
+              </Button>
+            )}
+          </Box>
+          <input
+            ref={inputRef}
+            hidden
+            type="file"
+            accept=".txt,text/plain,.pdf,application/pdf"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void selectFile(file);
+            }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setNoteOpen(false)}>取消</Button>
+          {downloadEnabled && (
+            <Button
+              startIcon={<CloudDownloadIcon />}
+              onClick={() => {
+                setOpen(false);
+                setNetworkOpen(true);
+              }}
+            >
+              从网络下载
+            </Button>
+          )}
+          <Box sx={{ flex: 1 }} />
+          <Button onClick={close} disabled={saving}>
+            取消
+          </Button>
           <Button
             variant="contained"
-            onClick={() => void saveNote()}
-            disabled={!title.trim() || !content.trim()}
+            disabled={
+              saving || !title.trim() || (!content.trim() && !attachment)
+            }
+            onClick={() => void save()}
           >
-            保存
+            上传
           </Button>
         </DialogActions>
       </Dialog>
       {downloadEnabled && (
         <NetworkArticleDialog
           open={networkOpen}
+          conversation={conversation}
           onClose={() => setNetworkOpen(false)}
         />
       )}

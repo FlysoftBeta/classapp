@@ -17,6 +17,8 @@ import {
   unlockClient,
   type ClientAccessConfig,
   type ClientIdentityMethod,
+  clearUserClientReferences,
+  isActiveBoundUser,
 } from "@/server/data/clients";
 import { publishClient } from "@/server/services/eventBus";
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
@@ -184,11 +186,17 @@ export class ClientService {
 
   canLoginUser(clientId: string, userId: string): boolean {
     const state = getClientStoredState(this.db, clientId);
-    return !!state && (!state.bound_user_id || state.bound_user_id === userId);
+    return (
+      !!state &&
+      (!state.bound_user_id ||
+        state.bound_user_id === userId ||
+        !isActiveBoundUser(this.db, state.bound_user_id))
+    );
   }
 
   isBound(clientId: string): boolean {
-    return !!getClientStoredState(this.db, clientId)?.bound_user_id;
+    const userId = getClientStoredState(this.db, clientId)?.bound_user_id;
+    return !!userId && isActiveBoundUser(this.db, userId);
   }
 
   delete(clientId: string): boolean {
@@ -197,6 +205,17 @@ export class ClientService {
       publishClient(clientId, { kind: "client.deleted", data: {} });
     }
     return deleted;
+  }
+
+  purgeUser(userId: string): void {
+    for (const clientId of clearUserClientReferences(this.db, userId)) {
+      publishClient(clientId, {
+        kind: "client.lock_changed",
+        data: {
+          konami_locked: isClientKonamiLocked(this.db, clientId).konami_locked,
+        },
+      });
+    }
   }
 }
 

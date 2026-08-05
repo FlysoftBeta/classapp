@@ -36,6 +36,10 @@ export function initWordSchema(db: Database): void {
   `);
 }
 
+export function purgeUserWordProgress(db: Database, userId: string): void {
+  db.prepare("DELETE FROM user_word_progress WHERE user_id = ?").run(userId);
+}
+
 function rowToWord(row: Record<string, unknown>): Word {
   return {
     id: row.id as string,

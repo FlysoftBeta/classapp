@@ -41,6 +41,12 @@ function initSchema(db: Database) {
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS deleted_users (
+      id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      username   TEXT NOT NULL,
+      deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS user_pins (
       id         TEXT PRIMARY KEY,
       user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -154,7 +160,8 @@ function initSchema(db: Database) {
 
     CREATE TABLE IF NOT EXISTS articles (
       id         TEXT PRIMARY KEY,
-      user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
+      user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+      group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
       title      TEXT NOT NULL,
       content    TEXT NOT NULL,
       content_kind TEXT NOT NULL DEFAULT 'text',
@@ -165,6 +172,7 @@ function initSchema(db: Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_group ON articles(group_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS teach_documents (
       id            TEXT PRIMARY KEY,
@@ -239,7 +247,7 @@ function initSchema(db: Database) {
 const PROD_SCHEMA_VERSION = 14;
 const CURRENT_SCHEMA_VERSION = 15;
 
-function runMigrations(db: Database) {
+export function runMigrations(db: Database) {
   const row = db
     .prepare("SELECT value FROM config WHERE key = 'schema_version'")
     .get() as { value: string } | undefined;
@@ -252,22 +260,18 @@ function runMigrations(db: Database) {
 
   const version = Number.parseInt(row.value, 10);
   if (version === CURRENT_SCHEMA_VERSION) {
-    // Schema v15 was under development when the client lifecycle was replaced.
-    // Keep local/pre-release v15 databases on the final v15 shape as well.
     finalizeSchemaV15(db);
     return;
   }
-  if (version !== PROD_SCHEMA_VERSION) {
+  if (version !== PROD_SCHEMA_VERSION)
     throw new Error(
       `不支持从 Schema v${row.value} 迁移；仅支持生产基线 v${PROD_SCHEMA_VERSION}`,
     );
-  }
-
   migrateProdV14ToV15(db);
 }
 
 function migrateProdV14ToV15(db: Database) {
-  db.transaction(() => {
+  const removed = db.transaction(() => {
     db.exec(`
       ALTER TABLE conversation_user_state
         ADD COLUMN compose_draft_updated_at INTEGER NOT NULL DEFAULT 0;
@@ -303,10 +307,33 @@ function migrateProdV14ToV15(db: Database) {
     applyClientManagementV15(db);
     applyArticleCenterV15(db);
     applyTeachDocumentsV15(db);
+    const dmPosts = db
+      .prepare(
+        `DELETE FROM posts
+         WHERE user_id IS NULL AND dm_to IS NOT NULL AND group_id IS NULL`,
+      )
+      .run().changes;
+    const dmStates = db
+      .prepare(
+        `DELETE FROM conversation_user_state
+         WHERE conversation_type = 'dm'
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.id = conversation_user_state.conversation_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM deleted_users du
+             WHERE du.id = conversation_user_state.conversation_id
+           )`,
+      )
+      .run().changes;
     setSchemaVersion(db, CURRENT_SCHEMA_VERSION);
+    return { dmPosts, dmStates };
   })();
 
-  console.log("[DB] Schema v14 → v15 迁移完成");
+  console.log(
+    `[DB] Schema v14 → v15 迁移完成（移除 ${removed.dmPosts} 条幽灵私聊消息、${removed.dmStates} 条孤立私聊状态）`,
+  );
 }
 
 function tableExists(db: Database, name: string): boolean {
@@ -393,15 +420,11 @@ function applyArticleCenterV15(db: Database): void {
       ALTER TABLE posts DROP COLUMN article_id;
     `);
   }
-  const articles = columnNames(db, "articles");
-  if (articles.has("group_id")) {
-    db.exec(`
-      DROP INDEX IF EXISTS idx_articles_group;
-      ALTER TABLE articles DROP COLUMN group_id;
-    `);
-  }
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_articles_group ON articles(group_id, created_at DESC)",
   );
   const marker = db
     .prepare("SELECT 1 FROM config WHERE key = 'article_center_v15'")
@@ -508,7 +531,10 @@ function ensureDefaultGroup(db: Database) {
 
   db.prepare(
     `INSERT OR IGNORE INTO user_groups (user_id, group_id)
-     SELECT u.id, g.id FROM users u CROSS JOIN groups g WHERE g.type = 'announcement'`,
+     SELECT u.id, g.id FROM users u
+     CROSS JOIN groups g
+     LEFT JOIN deleted_users du ON du.id = u.id
+     WHERE g.type = 'announcement' AND du.id IS NULL`,
   ).run();
 
   const wildId = db

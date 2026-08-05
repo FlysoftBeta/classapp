@@ -23,12 +23,16 @@ import {
   updateUserUsername,
   userExists,
   userHasPinHash,
+  revokeUserCredentials,
 } from "@/server/data/users";
 import { ServiceError } from "./errors";
 import { toDbTimestamp } from "@/shared/time";
 import { publishUser } from "./eventBus";
 import type { User } from "@/shared/types/api";
 import { DEFAULT_FEATURE_MASK, isValidFeatureMask } from "@/shared/features";
+import { insertDeletedUser } from "@/server/data/deletedUsers";
+import { createArticleService } from "./articlesService";
+import { createWordsService } from "./wordsService";
 
 export interface UserServiceDeps {
   createId: () => string;
@@ -67,6 +71,8 @@ export interface ResetPinParams {
   current_pin: string;
   new_pins: string[];
 }
+
+export type UserRemovalMode = "purge" | "deactivate";
 
 export class UserService {
   constructor(
@@ -191,10 +197,47 @@ export class UserService {
     return updated;
   }
 
-  delete(id: string, selfId: string): void {
+  async remove(
+    id: string,
+    selfId: string,
+    mode: UserRemovalMode,
+  ): Promise<void> {
     if (id === selfId) {
       throw new ServiceError("不能删除自己");
     }
+    const user = this.get(id);
+    if (mode === "deactivate") {
+      const { createGroupService } = await import("./groupsService");
+      this.db.transaction(() => {
+        createGroupService(this.db).removeUserFromAllGroups(id);
+        insertDeletedUser(this.db, user);
+        revokeUserCredentials(this.db, id);
+      })();
+      return;
+    }
+
+    // Purge is deliberately explicit: every owning service controls deletion
+    // of its own state and side effects before the identity row is removed.
+    const [
+      { createGroupService },
+      { createConversationService },
+      { createPostService },
+      { createClientService },
+      { createUserConfigService },
+    ] = await Promise.all([
+      import("./groupsService"),
+      import("./conversationsService"),
+      import("./postsService"),
+      import("./clientsService"),
+      import("./userConfig"),
+    ]);
+    createGroupService(this.db).purgeUser(id);
+    createConversationService(this.db).purgeUser(id);
+    createPostService(this.db).purgeUser(id);
+    await createArticleService(this.db).purgeUser(id);
+    createWordsService(this.db).purgeUser(id);
+    createClientService(this.db).purgeUser(id);
+    createUserConfigService(this.db).purgeUser(id);
     deleteUserById(this.db, id);
   }
 

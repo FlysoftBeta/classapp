@@ -33,8 +33,12 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("file");
     const title = String(form.get("title") ?? "");
+    const groupId = String(form.get("group_id") ?? "").trim();
     if (!(file instanceof File)) {
       return Response.json({ error: "必须上传 PDF 文件" }, { status: 400 });
+    }
+    if (!groupId) {
+      return Response.json({ error: "文章必须归属群聊" }, { status: 400 });
     }
 
     const stored = await storeArticleBlob(file);
@@ -46,6 +50,7 @@ export async function POST(req: Request) {
         mime_type: stored.mimeType,
         file_size: stored.fileSize,
         original_filename: stored.originalFilename,
+        group_id: groupId,
       });
       return Response.json({ article: result.article }, { status: 201 });
     } catch (e) {

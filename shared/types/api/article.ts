@@ -3,6 +3,8 @@ import { z } from "zod";
 const articleBaseShape = {
   id: z.string(),
   user_id: z.string().nullable(),
+  /** Group conversation that owns this article. */
+  group_id: z.string(),
   title: z.string(),
   content_kind: z.enum(["text", "blob"]),
   blob_path: z.string().nullable().optional(),
