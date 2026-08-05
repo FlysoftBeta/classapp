@@ -5,7 +5,7 @@ BUILD_ID="${CLASSAPP_BUILD_ID:-$(git rev-parse --short HEAD)}"
 export CLASSAPP_BUILD_ID="$BUILD_ID"
 
 rm -rf ./dist ./build
-npm run infini2:build
+npm run infini:build
 npx vite build
 npx vite build --config vite.server.config.ts
 mkdir -p ./dist/server/pdfjs-dist/legacy/build

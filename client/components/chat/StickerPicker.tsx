@@ -16,7 +16,8 @@ import type { PopoverActions } from "@mui/material/Popover";
 import EmojiEmotionsIcon from "@mui/icons-material/EmojiEmotions";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
 import type { StickerPackSummary, StickerRecentItem } from "@/shared/types/api";
-import { Infini2List, useInfini2, type Infini2Provider } from "@/lib/infini2";
+import type { Provider } from "@infini-scroll/core";
+import { InfiniList, useInfini } from "@infini-scroll/react";
 import {
   fetchRecentStickers,
   fetchStickerPack,
@@ -125,7 +126,7 @@ function StickerVirtualGrid({
   const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const rows = useMemo(() => chunkStickerRows(items), [items]);
   const [scrollHost, setScrollHost] = useState<HTMLDivElement | null>(null);
-  const provider = useMemo<Infini2Provider<StickerGridRow, number, string>>(
+  const provider = useMemo<Provider<StickerGridRow, number, string>>(
     () => ({
       async bootstrap() {
         return {
@@ -144,7 +145,7 @@ function StickerVirtualGrid({
     }),
     [rows],
   );
-  const { controller } = useInfini2<StickerGridRow, number, string>({
+  const { controller } = useInfini<StickerGridRow, number, string>({
     debug: import.meta.env.DEV && showInfiniLogs ? "StickerPicker" : undefined,
     provider,
     ops: {
@@ -172,7 +173,7 @@ function StickerVirtualGrid({
       }}
     >
       {scrollHost ? (
-        <Infini2List
+        <InfiniList
           controller={controller}
           scrollHost={scrollHost}
           renderItem={(row) => <StickerRow row={row} onPick={onPick} />}

@@ -8,6 +8,7 @@ export default defineConfig([
   globalIgnores([
     "dist/**",
     "build/**",
+    "lib/infini/**",
     "deploy_test/**",
     "vendor/**",
     "lib/**/rust/target/**",

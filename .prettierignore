@@ -1,6 +1,5 @@
 /node_modules
 /build
 /dist
-/lib/infini2/runtime/generated/wasm-bytes.ts
-/lib/infini2/rust/target
+/lib/infini
 package-lock.json

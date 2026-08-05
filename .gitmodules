@@ -1,0 +1,3 @@
+[submodule "lib/infini"]
+	path = lib/infini
+	url = https://github.com/infini-scroll/infini.git

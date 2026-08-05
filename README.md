@@ -66,13 +66,13 @@ ClassApp 的离线能力分成三层：
 
 缓存内容与用户明确要求保留的内容会被区别对待：前者可以在空间不足时清理，后者会按照用户选择的期限保存。恢复连接后，应用会重新校验状态，再继续接收实时事件。
 
-## 内部使用的轮子
+## 关键依赖
 
-### Infini2
+### Infini
 
-ClassApp 内置了一个名为 [Infini2](./lib/infini2/README.md) 的虚拟滚动库。它最初用于解决聊天记录中的一个常见问题：消息高度不固定、新消息会实时插入、用户还可能从引用直接跳到很远的历史位置，而滚动条最好不要因此突然移动。
+ClassApp 使用独立维护的 [Infini](https://github.com/infini-scroll/infini) 虚拟滚动引擎，并通过 `lib/infini` Git submodule 固定源码版本。它用于解决聊天记录中的一个常见问题：消息高度不固定、新消息会实时插入、用户还可能从引用直接跳到很远的历史位置，而滚动条最好不要因此突然移动。
 
-Infini2 现在同时用于聊天记录、文章列表、长文本阅读器和贴纸列表。它支持：
+Infini 同时用于聊天记录、文章列表、长文本阅读器和贴纸列表。它支持：
 
 - 向前和向后加载，不要求列表只能从顶部开始
 - 可变高度项目的测量与滚动锚点补偿
@@ -80,9 +80,15 @@ Infini2 现在同时用于聊天记录、文章列表、长文本阅读器和贴
 - 在请求进行期间接收插入、删除事件，并按顺序重放
 - `window` 和独立滚动容器，以及 DOM、React 适配层
 
-它的平台无关状态核心使用 Rust 编写并编译为 WebAssembly，异步调度和数据协议由 TypeScript 负责。Wasm 会以内联模块的形式进入前端包，运行时不需要再请求一个单独的 `.wasm` 文件。
+它的平台无关状态核心使用 Rust 编写并编译为 WebAssembly，异步调度和数据协议由 TypeScript 负责。ClassApp 直接将 submodule 中的 core、DOM support 和 React 源码纳入 Vite 构建。
 
-这部分已经有独立的设计文档、API 说明和浏览器测试；它仍然和主项目放在同一个仓库里，因为目前最重要的使用者就是 ClassApp 自己。
+为兼容不带实验性 flag 的 Chrome 70，`npm run infini:build` 使用固定 nightly、`-Z build-std` 和 WebAssembly MVP target features 重新编译 Infini 及 Rust 标准库。开发和生产构建都会先执行这一步。首次检出需要准备依赖：
+
+```bash
+git submodule update --init --recursive
+rustup toolchain install nightly-2026-05-10 --component rust-src
+cargo install wasm-pack
+```
 
 ### 浏览器兼容：Chrome 70+
 
@@ -145,7 +151,7 @@ npm run test:https
 | 数据校验       | Zod                       |
 | 离线能力       | Service Worker、IndexedDB |
 | PDF 阅读与渲染 | PDF.js、Canvas            |
-| 虚拟滚动       | Infini2                   |
+| 虚拟滚动       | Infini                    |
 
 ClassApp 是一个 React 单页应用，不依赖全栈式 React 框架。浏览器中的业务请求通过统一的类型化接口发送，实时消息和状态通知共用 WebSocket；只有上传、下载和 PDF 渲染等需要原始文件语义的操作使用 HTTP。
 
@@ -183,7 +189,7 @@ npm run build
 ```bash
 npm run lint
 npm run test:protocol
-npm run infini2:test
+npm run test:infini:chrome70
 ```
 
 ## License

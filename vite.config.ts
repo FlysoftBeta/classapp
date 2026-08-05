@@ -10,7 +10,23 @@ export default defineConfig(({ command }) => ({
   // the monolithic client build.
   publicDir: command === "serve" ? path.resolve(__dirname, "public") : false,
   plugins: [react()],
-  resolve: { alias: { "@": path.resolve(__dirname) } },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname),
+      "@infini-scroll/core": path.resolve(
+        __dirname,
+        "lib/infini/packages/infini-core/src/index.ts",
+      ),
+      "@infini-scroll/dom-support": path.resolve(
+        __dirname,
+        "lib/infini/packages/infini-dom-support/src/index.ts",
+      ),
+      "@infini-scroll/react": path.resolve(
+        __dirname,
+        "lib/infini/packages/infini-react/src/index.ts",
+      ),
+    },
+  },
   define: { __BUILD_ID__: JSON.stringify(buildId) },
   server: {
     host: "0.0.0.0",

@@ -7,17 +7,17 @@ import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
 import { flexGap } from "@/client/lib/css";
 
-import {
-  Infini2List,
-  type Infini2Controller,
-  type Infini2DomHost,
-  type Infini2Id,
-  type Infini2Snapshot,
-} from "@/lib/infini2";
+import type {
+  InfiniController,
+  ItemId,
+  Snapshot,
+} from "@infini-scroll/core";
+import type { InfiniDomHost } from "@infini-scroll/dom-support";
+import { InfiniList } from "@infini-scroll/react";
 
-interface Infini2ViewProps<TItem, TCursor, TId extends Infini2Id, TTarget> {
-  controller: Infini2Controller<TItem, TCursor, TId, TTarget>;
-  snapshot: Infini2Snapshot<TItem, TId>;
+interface InfiniViewProps<TItem, TCursor, TId extends ItemId, TTarget> {
+  controller: InfiniController<TItem, TCursor, TId, TTarget>;
+  snapshot: Snapshot<TItem, TId>;
   renderItem: (item: TItem, id: TId) => ReactNode;
   beforeLabel: string;
   afterLabel: string;
@@ -37,7 +37,7 @@ interface Infini2ViewProps<TItem, TCursor, TId extends Infini2Id, TTarget> {
   layoutAfter?: number;
   anchorRatio?: number;
   onHostChange?: (
-    host: Infini2DomHost<TItem, TCursor, TId, TTarget> | null,
+    host: InfiniDomHost<TItem, TCursor, TId, TTarget> | null,
   ) => void;
 }
 
@@ -88,11 +88,11 @@ function DirectionalStatus({
   );
 }
 
-/** Shared visual shell for Infini2-backed application lists. */
-export default function Infini2View<
+/** Shared visual shell for Infini-backed application lists. */
+export default function InfiniView<
   TItem,
   TCursor,
-  TId extends Infini2Id,
+  TId extends ItemId,
   TTarget,
 >({
   controller,
@@ -116,7 +116,7 @@ export default function Infini2View<
   layoutAfter,
   anchorRatio,
   onHostChange,
-}: Infini2ViewProps<TItem, TCursor, TId, TTarget>) {
+}: InfiniViewProps<TItem, TCursor, TId, TTarget>) {
   const phase = snapshot.phase;
   const hasItems = snapshot.mainLength > 0;
   const isBootstrapping =
@@ -176,7 +176,7 @@ export default function Infini2View<
       <Box>
         {header}
         {!hasItems && phase.status === "ready" ? empty : null}
-        <Infini2List
+        <InfiniList
           controller={controller}
           renderItem={renderItem}
           scrollHost={scrollHost}

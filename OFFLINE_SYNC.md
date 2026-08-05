@@ -501,7 +501,6 @@ Infini 双向滚动只负责窗口、游标、保持锚点和加载状态；“�
 
 - `npm run test:offline-sync`：共享仲裁、服务器条件写入、schema v15 迁移。
 - `npm run test:protocol`：Action/wire 合约，包括 hard-delete cursor 的 sequence fallback。
-- `npm run test:infini2`：双向加载、失败和窗口状态机。
 - `npm run lint`：TypeScript 与 ESLint。
 
 修改离线域时至少覆盖：

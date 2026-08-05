@@ -1,9 +1,9 @@
 import Box from "@mui/material/Box";
-import type { Infini2Id } from "@/lib/infini2";
+import type { ItemId } from "@infini-scroll/core";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
-/** Development-only label for an Infini2 item's stable identity. */
-export function InfiniId({ id }: { id: Infini2Id }) {
+/** Development-only label for an Infini item's stable identity. */
+export function InfiniId({ id }: { id: ItemId }) {
   const showInfiniIds = useDebugStore((state) => state.showInfiniIds);
 
   if (!showInfiniIds) return null;

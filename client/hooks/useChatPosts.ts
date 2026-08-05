@@ -8,14 +8,14 @@ import {
 } from "react";
 import type { User, Conversation, Post } from "@/shared/types/api";
 import type { PostStreamEvent } from "@/client/hooks/useAppLogic";
-import {
-  useInfini2,
-  type Infini2Alignment,
-  type Infini2Controller,
-  type Infini2DomHost,
-  type Infini2Provider,
-  type Infini2Snapshot,
-} from "@/lib/infini2";
+import type {
+  Alignment,
+  InfiniController,
+  Provider,
+  Snapshot,
+} from "@infini-scroll/core";
+import type { InfiniDomHost } from "@infini-scroll/dom-support";
+import { useInfini } from "@infini-scroll/react";
 import { markConversationRead } from "@/client/api/conversations";
 import {
   fetchCachedPosts,
@@ -43,10 +43,10 @@ export interface UseChatPostsParams {
 /** Render state and domain actions consumed by ChatMessageList. */
 export interface ChatMessageTimeline {
   itemCount: number;
-  controller: Infini2Controller<Post, ChatCursor, string, string>;
-  snapshot: Infini2Snapshot<Post, string>;
+  controller: InfiniController<Post, ChatCursor, string, string>;
+  snapshot: Snapshot<Post, string>;
   onHostChange: (
-    host: Infini2DomHost<Post, ChatCursor, string, string> | null,
+    host: InfiniDomHost<Post, ChatCursor, string, string> | null,
   ) => void;
   paddingStart: number;
   paddingEnd: number;
@@ -129,7 +129,7 @@ export function useChatPosts({
   const contentKeyRef = useRef("");
   const revalidationRef = useRef<Promise<void> | null>(null);
   const processedRevalidationRef = useRef(0);
-  const domHostRef = useRef<Infini2DomHost<
+  const domHostRef = useRef<InfiniDomHost<
     Post,
     ChatCursor,
     string,
@@ -232,7 +232,7 @@ export function useChatPosts({
     [conversationId, conversationType],
   );
 
-  const provider: Infini2Provider<Post, ChatCursor, string> = {
+  const provider: Provider<Post, ChatCursor, string> = {
     async bootstrap({ cursor, signal }) {
       if (cursor == null || cursor.kind === "latest") {
         return fetchDirectional({ kind: "latest" }, "before", signal, true);
@@ -304,7 +304,7 @@ export function useChatPosts({
       } else {
         const data = await fetchPosts(ref, {
           limit: "1",
-          before_id: "__infini2_sequence_cursor__",
+          before_id: "__infini_sequence_cursor__",
           before_sequence: String(targetSequence + 1),
         });
         target = data?.posts?.[0];
@@ -322,7 +322,7 @@ export function useChatPosts({
     },
   };
 
-  const { controller, snapshot } = useInfini2<Post, ChatCursor, string, string>(
+  const { controller, snapshot } = useInfini<Post, ChatCursor, string, string>(
     {
       debug: showInfiniLogs
         ? `ChatMessageList:${conversationType}:${conversationId}`
@@ -395,7 +395,7 @@ export function useChatPosts({
   );
 
   const scrollToTarget = useCallback(
-    (id: string, options?: { alignment?: Infini2Alignment }) => {
+    (id: string, options?: { alignment?: Alignment }) => {
       const alignment = options?.alignment ?? "nearest";
       if (domHostRef.current?.scrollToItem(id, alignment)) return;
       controller.jump(id, { alignment });
@@ -427,7 +427,7 @@ export function useChatPosts({
   );
 
   const onHostChange = useCallback(
-    (host: Infini2DomHost<Post, ChatCursor, string, string> | null) => {
+    (host: InfiniDomHost<Post, ChatCursor, string, string> | null) => {
       domHostRef.current = host;
     },
     [],
@@ -677,7 +677,7 @@ export function useChatPosts({
   );
 
   const scrollToPost = useCallback(
-    (postId: string, alignment?: Infini2Alignment) => {
+    (postId: string, alignment?: Alignment) => {
       scrollToTarget(postId, alignment ? { alignment } : undefined);
     },
     [scrollToTarget],

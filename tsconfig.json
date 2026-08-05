@@ -15,9 +15,16 @@
     "types": ["vite/client", "node"],
     "incremental": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@infini-scroll/core": ["./lib/infini/packages/infini-core/src/index.ts"],
+      "@infini-scroll/dom-support": [
+        "./lib/infini/packages/infini-dom-support/src/index.ts"
+      ],
+      "@infini-scroll/react": [
+        "./lib/infini/packages/infini-react/src/index.ts"
+      ]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.mts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "lib/infini"]
 }

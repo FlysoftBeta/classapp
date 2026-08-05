@@ -21,8 +21,9 @@ import type { ArticleWithMeta, Conversation } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
 import { flexGap, vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
-import Infini2View from "@/client/components/shared/Infini2View";
-import { useInfini2, type Infini2Provider } from "@/lib/infini2";
+import InfiniView from "@/client/components/shared/InfiniView";
+import type { Provider } from "@infini-scroll/core";
+import { useInfini } from "@infini-scroll/react";
 import { listArticles } from "@/client/api/articles";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import { InfiniId } from "@/client/components/debug/InfiniId";
@@ -366,7 +367,7 @@ function ArticleListSession({
     [groupId],
   );
 
-  const provider: Infini2Provider<ArticleRow, ArticleCursor, string> = {
+  const provider: Provider<ArticleRow, ArticleCursor, string> = {
     async bootstrap({ cursor, targetSize, signal }) {
       const wanted = Math.max(
         ARTICLE_PAGE_SIZE,
@@ -455,7 +456,7 @@ function ArticleListSession({
     },
   };
 
-  const { controller, snapshot } = useInfini2<
+  const { controller, snapshot } = useInfini<
     ArticleRow,
     ArticleCursor,
     string
@@ -542,7 +543,7 @@ function ArticleListSession({
         {total > 0 && <Chip label={total} size="small" variant="outlined" />}
       </Box>
 
-      <Infini2View
+      <InfiniView
         controller={controller}
         snapshot={snapshot}
         renderItem={renderRow}

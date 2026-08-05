@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import Infini2View from "@/client/components/shared/Infini2View";
+import InfiniView from "@/client/components/shared/InfiniView";
 import {
   fetchArticleSegment,
   saveArticleProgress,
@@ -17,7 +17,8 @@ import {
   chunkEnd,
   createChunkStore,
 } from "@/client/lib/reader/textChunks";
-import { useInfini2, type Infini2Provider } from "@/lib/infini2";
+import type { Provider } from "@infini-scroll/core";
+import { useInfini } from "@infini-scroll/react";
 import { InfiniId } from "@/client/components/debug/InfiniId";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
@@ -174,7 +175,7 @@ export default function TextArticleReader({
 
   // Keep the chunk store for the lifetime of this reader. It owns the
   // cross-segment tail and the already fetched before/after chunks; creating
-  // it inside the provider methods loses both whenever Infini2 fetches an
+  // it inside the provider methods loses both whenever Infini fetches an
   // adjacent page.
   const chunkStoreRef = useRef<ReturnType<typeof createChunkStore> | null>(
     null,
@@ -189,7 +190,7 @@ export default function TextArticleReader({
   const requestedChunkCount = (targetSize: number) =>
     Math.min(64, Math.max(12, Math.ceil(targetSize / ESTIMATE_LINE_HEIGHT)));
 
-  const provider: Infini2Provider<ClientTextChunk, TextCursor, number> = {
+  const provider: Provider<ClientTextChunk, TextCursor, number> = {
     async bootstrap({ cursor, targetSize, signal }) {
       const anchor = clampOffset(
         cursor?.start ?? bootstrapOffset,
@@ -272,7 +273,7 @@ export default function TextArticleReader({
     },
   };
 
-  const { controller, snapshot } = useInfini2<
+  const { controller, snapshot } = useInfini<
     ClientTextChunk,
     TextCursor,
     number,
@@ -281,7 +282,7 @@ export default function TextArticleReader({
     debug: showInfiniLogs ? "TextArticleReader" : undefined,
     onError: (error, context) => {
       console.error(
-        "[TextArticleReader] Infini2 provider failed",
+        "[TextArticleReader] Infini provider failed",
         context,
         error,
       );
@@ -358,7 +359,7 @@ export default function TextArticleReader({
   );
 
   return (
-    <Infini2View
+    <InfiniView
       controller={controller}
       snapshot={snapshot}
       renderItem={(chunk) => <ChunkRow chunk={chunk} />}

@@ -16,8 +16,6 @@
 # generated build output
 /out/
 /dist/
-/lib/infini2/runtime/generated/wasm-bytes.ts
-/lib/infini2/rust/target/
 
 # production
 /build

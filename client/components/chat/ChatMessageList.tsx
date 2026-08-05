@@ -3,7 +3,7 @@ import Box from "@mui/material/Box";
 import Fade from "@mui/material/Fade";
 import Typography from "@mui/material/Typography";
 import ChatPostCard from "./ChatPostCard";
-import Infini2View from "@/client/components/shared/Infini2View";
+import InfiniView from "@/client/components/shared/InfiniView";
 import type { User, Conversation, Post } from "@/shared/types/api";
 import type { ChatMessageTimeline } from "@/client/hooks/useChatPosts";
 import { InfiniId } from "@/client/components/debug/InfiniId";
@@ -104,7 +104,7 @@ export function ChatMessageList({
   );
 
   return (
-    <Infini2View
+    <InfiniView
       controller={timeline.controller}
       snapshot={timeline.snapshot}
       renderItem={(post, id) => (
