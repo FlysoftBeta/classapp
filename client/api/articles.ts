@@ -239,7 +239,11 @@ export async function fetchCachedArticle(articleId: string) {
   };
 }
 
-export async function fetchArticleSegment(articleId: string, offset: number) {
+export async function fetchArticleSegment(
+  articleId: string,
+  offset: number,
+  options: { requireCache?: boolean } = {},
+) {
   const cached =
     await offlineRepository.getArticleSegment<ArticleSegmentPayload>(
       articleId,
@@ -252,7 +256,20 @@ export async function fetchArticleSegment(articleId: string, offset: number) {
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  await offlineRepository.saveArticleSegment(articleId, offset, data);
+  try {
+    await offlineRepository.saveArticleSegment(articleId, offset, data);
+  } catch (error) {
+    // The remote payload is still usable when an evictable IndexedDB cache
+    // write fails (for example, Chromium reports "Failed to write blobs"
+    // under storage pressure). Do not turn a successful reader fetch into an
+    // Infini provider failure solely because its cache could not be warmed.
+    if (options.requireCache) throw error;
+    console.warn("[articles] Failed to cache text segment", {
+      articleId,
+      offset,
+      error,
+    });
+  }
   return data;
 }
 

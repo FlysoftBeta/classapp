@@ -4,6 +4,7 @@ import {
   chooseFurthestRead,
   chooseLatestTimestamped,
 } from "@/shared/sync/arbitration";
+import { shouldSegmentArticleStorage } from "@/client/lib/articleSegmentStorage";
 
 export type ConversationDownloadPolicy = "auto" | "week" | "half-year";
 export type ArticleDownloadPolicy =
@@ -80,6 +81,9 @@ export interface ReadingProgressVersion {
 const PREFIX = "offline:v1";
 let userScope = "anonymous";
 const keyLocks = new Map<string, Promise<void>>();
+const useSegmentedArticleStorage =
+  typeof navigator !== "undefined" &&
+  shouldSegmentArticleStorage(navigator.userAgent);
 
 async function withKeyLock<T>(storageKey: string, run: () => Promise<T>) {
   const previous = keyLocks.get(storageKey) ?? Promise.resolve();
@@ -100,6 +104,52 @@ async function withKeyLock<T>(storageKey: string, run: () => Promise<T>) {
 
 function key(kind: string, id = ""): string {
   return `${PREFIX}:${userScope}:${kind}${id ? `:${id}` : ""}`;
+}
+
+function articleSegmentsKey(articleId: string): string {
+  return key("article-segments", articleId);
+}
+
+function articleSegmentKey(articleId: string, offset: number): string {
+  return `${articleSegmentsKey(articleId)}:${offset}`;
+}
+
+async function articleSegmentKeys(articleId: string): Promise<string[]> {
+  const aggregateKey = articleSegmentsKey(articleId);
+  const segmentPrefix = `${aggregateKey}:`;
+  return (await resourceManager.keys(aggregateKey)).filter(
+    (storageKey) =>
+      storageKey === aggregateKey || storageKey.startsWith(segmentPrefix),
+  );
+}
+
+async function removeArticleSegments(articleId: string): Promise<number> {
+  let freed = 0;
+  for (const storageKey of await articleSegmentKeys(articleId)) {
+    freed += await resourceManager.remove(storageKey);
+  }
+  return freed;
+}
+
+type StoredArticleSegment<T> = T & {
+  offset?: number;
+  content?: string;
+  content_length?: number;
+};
+
+function sliceStoredArticleSegment<T>(
+  segment: StoredArticleSegment<T>,
+  offset: number,
+): T | null {
+  if (typeof segment.offset !== "number" || typeof segment.content !== "string")
+    return null;
+  const relative = offset - segment.offset;
+  if (relative < 0 || relative >= segment.content.length) return null;
+  return {
+    ...segment,
+    offset,
+    content: segment.content.slice(relative),
+  } as T;
 }
 
 function conversationId(ref: Pick<Conversation, "type" | "id">): string {
@@ -568,7 +618,7 @@ export const offlineRepository = {
         await Promise.all(
           old.flatMap((article) => [
             resourceManager.remove(key("article-meta", article.id)),
-            resourceManager.remove(key("article-segments", article.id)),
+            removeArticleSegments(article.id),
             resourceManager.remove(key("article-progress", article.id)),
           ]),
         );
@@ -603,7 +653,7 @@ export const offlineRepository = {
       ...entries.map((article) => this.saveArticleMeta(article)),
       ...removedIds.flatMap((articleId) => [
         resourceManager.remove(key("article-meta", articleId)),
-        resourceManager.remove(key("article-segments", articleId)),
+        removeArticleSegments(articleId),
         resourceManager.remove(key("article-progress", articleId)),
       ]),
     ]);
@@ -619,7 +669,7 @@ export const offlineRepository = {
     await resourceManager.putJson(key("articles"), entries, "persisted");
     await Promise.all([
       resourceManager.remove(key("article-meta", articleId)),
-      resourceManager.remove(key("article-segments", articleId)),
+      removeArticleSegments(articleId),
       resourceManager.remove(key("article-progress", articleId)),
     ]);
   },
@@ -714,7 +764,7 @@ export const offlineRepository = {
         );
     if (policy.mode === "retained" && policy.expiresAt <= Date.now()) {
       await this.setArticlePolicy(articleId, { mode: "auto" });
-      await resourceManager.remove(key("article-segments", articleId));
+      await removeArticleSegments(articleId);
       return { mode: "auto" };
     }
     return policy;
@@ -723,15 +773,21 @@ export const offlineRepository = {
     const normalized = normalizeArticlePolicy(policy);
     await this.setVersionedValue("article-policy", articleId, normalized);
     const effective = await this.getArticlePolicy(articleId);
-    const storageKey = key("article-segments", articleId);
-    const segments =
-      await resourceManager.getJson<Record<string, unknown>>(storageKey);
-    if (segments) {
-      await resourceManager.putJson(
-        storageKey,
-        segments,
-        effective.mode === "auto" ? "cache" : "persisted",
-      );
+    const resourceClass = effective.mode === "auto" ? "cache" : "persisted";
+    if (useSegmentedArticleStorage) {
+      const aggregateKey = articleSegmentsKey(articleId);
+      for (const storageKey of await articleSegmentKeys(articleId)) {
+        if (storageKey === aggregateKey) continue;
+        const segment = await resourceManager.getJson<unknown>(storageKey);
+        if (segment != null)
+          await resourceManager.putJson(storageKey, segment, resourceClass);
+      }
+    } else {
+      const storageKey = articleSegmentsKey(articleId);
+      const segments =
+        await resourceManager.getJson<Record<string, unknown>>(storageKey);
+      if (segments)
+        await resourceManager.putJson(storageKey, segments, resourceClass);
     }
   },
   async getArticlePolicies() {
@@ -778,40 +834,52 @@ export const offlineRepository = {
   },
   async saveArticleSegment(articleId: string, offset: number, data: unknown) {
     const policy = await this.getArticlePolicy(articleId);
-    const storageKey = key("article-segments", articleId);
-    const segments =
-      (await resourceManager.getJson<Record<string, unknown>>(storageKey)) ??
-      {};
-    segments[String(offset)] = data;
-    await resourceManager.putJson(
-      storageKey,
-      segments,
-      policy.mode === "auto" ? "cache" : "persisted",
-    );
+    const resourceClass = policy.mode === "auto" ? "cache" : "persisted";
+    if (useSegmentedArticleStorage) {
+      await resourceManager.putJson(
+        articleSegmentKey(articleId, offset),
+        data,
+        resourceClass,
+      );
+      return;
+    }
+
+    const storageKey = articleSegmentsKey(articleId);
+    await withKeyLock(storageKey, async () => {
+      const segments =
+        (await resourceManager.getJson<Record<string, unknown>>(storageKey)) ??
+        {};
+      segments[String(offset)] = data;
+      await resourceManager.putJson(storageKey, segments, resourceClass);
+    });
   },
   async getArticleSegment<T>(articleId: string, offset: number) {
+    if (useSegmentedArticleStorage) {
+      const exact = await resourceManager.getJson<StoredArticleSegment<T>>(
+        articleSegmentKey(articleId, offset),
+      );
+      if (exact) return exact;
+
+      const aggregateKey = articleSegmentsKey(articleId);
+      for (const storageKey of await articleSegmentKeys(articleId)) {
+        if (storageKey === aggregateKey) continue;
+        const segment =
+          await resourceManager.getJson<StoredArticleSegment<T>>(storageKey);
+        if (!segment) continue;
+        const sliced = sliceStoredArticleSegment(segment, offset);
+        if (sliced) return sliced;
+      }
+      return null;
+    }
+
     const segments = await resourceManager.getJson<
-      Record<
-        string,
-        T & { offset?: number; content?: string; content_length?: number }
-      >
-    >(key("article-segments", articleId));
+      Record<string, StoredArticleSegment<T>>
+    >(articleSegmentsKey(articleId));
     if (!segments) return null;
     if (segments[String(offset)]) return segments[String(offset)];
     for (const segment of Object.values(segments)) {
-      if (
-        typeof segment.offset !== "number" ||
-        typeof segment.content !== "string"
-      )
-        continue;
-      const relative = offset - segment.offset;
-      if (relative >= 0 && relative < segment.content.length) {
-        return {
-          ...segment,
-          offset,
-          content: segment.content.slice(relative),
-        } as T;
-      }
+      const sliced = sliceStoredArticleSegment(segment, offset);
+      if (sliced) return sliced;
     }
     return null;
   },
@@ -873,9 +941,7 @@ export async function handleOfflineQuotaPressure(
       priority: ARTICLE_RETENTION_DAYS.indexOf(policy.days) + 1,
       rank: policy.expiresAt - Date.now(),
       evict: async () => {
-        const freed = await resourceManager.remove(
-          key("article-segments", articleId),
-        );
+        const freed = await removeArticleSegments(articleId);
         await offlineRepository.setArticlePolicy(articleId, { mode: "auto" });
         return freed;
       },

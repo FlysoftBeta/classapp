@@ -128,7 +128,11 @@ export async function downloadArticleForOffline(
         content: string;
         has_more: boolean;
       }>(articleId, offset);
-      const data = cached ?? (await fetchArticleSegment(articleId, offset));
+      const data =
+        cached ??
+        (await fetchArticleSegment(articleId, offset, {
+          requireCache: true,
+        }));
       if (!data?.content) break;
       offset = data.offset + data.content.length;
       const percent = Math.min(
