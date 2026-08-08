@@ -21,10 +21,11 @@ export class ArticleActorFacade {
   ) {}
 
   async list(input: {
-    bookmarkedOnly?: boolean;
-    offset?: number;
+    view?: "all" | "bookmarked" | "recent";
+    cursor?: { sortAt: string; id: string };
+    direction?: "before" | "after";
     groupId?: string;
-  }): Promise<{ articles: (Article & ArticleWithMeta)[]; total: number }> {
+  }): Promise<{ articles: (Article & ArticleWithMeta)[]; hasMore: boolean }> {
     const user = await this.actor.requireFeature("articles");
     return this.articles.list(user, input);
   }

@@ -16,12 +16,12 @@ import {
   offlineRepository,
   conversationRetentionCutoff,
   type ConversationDownloadPolicy,
-} from "./offlineRepository";
+} from "@/client/data/repository";
 import { syncPendingUserSettings } from "@/client/api/versionedSettings";
 import { taskStore } from "@/client/hooks/useTaskStore";
 
 export async function downloadConversationForOffline(
-  ref: Pick<Conversation, "type" | "id">,
+  ref: Pick<Conversation, "type" | "id" | "conv_id">,
   policy: ConversationDownloadPolicy,
   onProgress?: (count: number) => void,
 ): Promise<void> {

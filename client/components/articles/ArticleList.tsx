@@ -24,7 +24,7 @@ import { ArticleImportFab } from "./ArticleImportFab";
 import InfiniView from "@/client/components/shared/InfiniView";
 import type { Provider } from "@infini-scroll/core";
 import { useInfini } from "@infini-scroll/react";
-import { listArticles } from "@/client/api/articles";
+import { listArticles, type ArticleListCursor } from "@/client/api/articles";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import { InfiniId } from "@/client/components/debug/InfiniId";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
@@ -41,6 +41,7 @@ interface ArticleEntryRow {
   kind: "article";
   article: ArticleWithMeta;
   offset: number;
+  cursor: ArticleListCursor;
 }
 
 type ArticleRow = RecentArticlesRow | ArticleEntryRow;
@@ -48,13 +49,15 @@ type ArticleRow = RecentArticlesRow | ArticleEntryRow;
 const ARTICLE_PAGE_SIZE = 50;
 const ARTICLE_ROW_HEIGHT = 58;
 interface ArticleCursor {
-  offset: number;
+  sortAt: string;
+  id: string;
 }
 
 const ARTICLE_OPS = {
   getId: (row: ArticleRow) => (row.kind === "recent" ? row.id : row.article.id),
   getCursor: (row: ArticleRow): ArticleCursor => ({
-    offset: row.kind === "recent" ? 0 : row.offset,
+    sortAt: row.kind === "recent" ? "" : row.cursor.sortAt,
+    id: row.kind === "recent" ? "" : row.cursor.id,
   }),
 };
 
@@ -351,6 +354,10 @@ function ArticleListSession({
             kind: "article",
             article,
             offset: offset + index,
+            cursor: {
+              sortAt: article.list_sort_at ?? article.created_at,
+              id: article.id,
+            },
           })),
         );
         offset += articles.length;
@@ -373,7 +380,7 @@ function ArticleListSession({
         ARTICLE_PAGE_SIZE,
         Math.ceil(targetSize / ARTICLE_ROW_HEIGHT) + 4,
       );
-      const target = Math.max(0, cursor?.offset ?? 0);
+      const target = 0;
       const start = target === 0 ? 0 : Math.max(0, target - wanted / 2);
       const normalizedStart = Math.floor(start);
       const loaded = await loadRows(normalizedStart, wanted, signal);
@@ -400,40 +407,56 @@ function ArticleListSession({
         Math.ceil(targetSize / ARTICLE_ROW_HEIGHT) + 4,
       );
       if (direction === "before") {
-        const end = Math.max(0, cursor.offset);
-        if (end === 0) {
+        if (!cursor.id) {
           return {
             items: [],
             exhaustedBefore: true,
             exhaustedAfter: false,
           };
         }
-        const start = Math.max(0, end - wanted);
-        const loaded = await loadRows(start, end - start, signal);
-        const rows = loaded.rows.filter((row) => row.offset < end);
-        const items: ArticleRow[] =
-          start === 0
-            ? [
-                {
-                  kind: "recent",
-                  id: RECENT_ARTICLES_ID,
-                  articles: sidebarArticlesRef.current,
-                },
-                ...rows,
-              ]
-            : rows;
+        const data = await listArticles(cursor, "before", groupId);
+        if (signal.aborted) throw new Error("article list request superseded");
+        if (!data) throw new Error("article list request failed");
+        const rows = data.articles.map<ArticleEntryRow>((article, index) => ({
+          kind: "article",
+          article,
+          offset: Math.max(0, cursor.id ? -wanted + index : index),
+          cursor: {
+            sortAt: article.list_sort_at ?? article.created_at,
+            id: article.id,
+          },
+        }));
+        const items: ArticleRow[] = !data.hasMore
+          ? [
+              {
+                kind: "recent",
+                id: RECENT_ARTICLES_ID,
+                articles: sidebarArticlesRef.current,
+              },
+              ...rows,
+            ]
+          : rows;
         return {
           items,
-          exhaustedBefore: start === 0,
+          exhaustedBefore: !data.hasMore,
           exhaustedAfter: false,
         };
       }
-      const start = cursor.offset + 1;
-      const loaded = await loadRows(start, wanted, signal);
+      const data = await listArticles(cursor, "after", groupId);
+      if (signal.aborted) throw new Error("article list request superseded");
+      if (!data) throw new Error("article list request failed");
       return {
-        items: loaded.rows,
+        items: data.articles.map<ArticleEntryRow>((article, index) => ({
+          kind: "article",
+          article,
+          offset: index,
+          cursor: {
+            sortAt: article.list_sort_at ?? article.created_at,
+            id: article.id,
+          },
+        })),
         exhaustedBefore: false,
-        exhaustedAfter: start + loaded.rows.length >= loaded.total,
+        exhaustedAfter: !data.hasMore,
       };
     },
     async locateOffset({ anchor, signedItemOffset, signal }) {
@@ -450,26 +473,30 @@ function ArticleListSession({
       totalRef.current = data.total ?? 0;
       setTotal(totalRef.current);
       return {
-        cursor: { offset: target },
+        cursor: {
+          sortAt:
+            data.articles[0]?.list_sort_at ??
+            data.articles[0]?.created_at ??
+            "",
+          id: data.articles[0]?.id ?? "",
+        },
         targetId: data.articles[0]?.id ?? RECENT_ARTICLES_ID,
       };
     },
   };
 
-  const { controller, snapshot } = useInfini<
-    ArticleRow,
-    ArticleCursor,
-    string
-  >({
-    debug: showInfiniLogs ? "ArticleList" : undefined,
-    provider,
-    ops: ARTICLE_OPS,
-    estimateSize: estimateArticleRowSize,
-    initial: { cursor: { offset: 0 }, alignment: "start" },
-    residentBefore: 8,
-    residentAfter: 8,
-    defaultItemEstimate: ARTICLE_ROW_HEIGHT,
-  });
+  const { controller, snapshot } = useInfini<ArticleRow, ArticleCursor, string>(
+    {
+      debug: showInfiniLogs ? "ArticleList" : undefined,
+      provider,
+      ops: ARTICLE_OPS,
+      estimateSize: estimateArticleRowSize,
+      initial: { cursor: null, alignment: "start" },
+      residentBefore: 8,
+      residentAfter: 8,
+      defaultItemEstimate: ARTICLE_ROW_HEIGHT,
+    },
+  );
 
   useLayoutEffect(() => {
     controller.updateExternal([

@@ -23,7 +23,7 @@ interface ChatMessageListItemProps {
   currentUser: User;
   setReplyTo: (post: Post | null) => void;
   onUpdated: (post: Post) => void;
-  onDeleted: (id: string) => void;
+  onDeleted: (post: Post) => void;
   scrollToItem: (postId: string) => void;
   onOpenArticle?: (articleId: string) => void;
   online: boolean;

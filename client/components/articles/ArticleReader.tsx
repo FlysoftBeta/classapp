@@ -34,8 +34,8 @@ import {
   ARTICLE_RETENTION_DAYS,
   offlineRepository,
   type ArticleDownloadPolicy,
-} from "@/client/resource/offlineRepository";
-import { downloadArticleForOffline } from "@/client/resource/offlineSync";
+} from "@/client/data/repository";
+import { downloadArticleForOffline } from "@/client/data/sync";
 
 interface ArticleReaderProps {
   articleId: string;

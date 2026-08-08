@@ -55,8 +55,8 @@ as text and injected by the entrypoint, so there is no separate CSS artifact.
   and evicts least-recently-used cache entries before quota pressure becomes
   critical.
 
-The detailed storage schema, merge/retention rules, reconnect flow, known risks,
-and change invariants are maintained in [OFFLINE_SYNC.md](./OFFLINE_SYNC.md).
+The authoritative entity schema, consistency protocols, reconnect flow, and
+migration invariants are maintained in [DATA_MODEL_V16.md](./DATA_MODEL_V16.md).
 
 ## Server runtime
 

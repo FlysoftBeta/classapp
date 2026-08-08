@@ -14,6 +14,8 @@ import {
   isGroupConversationMember,
   listConversations as listConversationEntries,
   listConversationGroupMemberIds,
+  listConversationRevisions,
+  listConversationParticipantIds,
   setConversationPinnedValue,
   setConversationMutedValue,
   upsertConversationComposeDraft,
@@ -23,6 +25,7 @@ import {
 import { publishUserConv } from "./eventBus";
 import { ServiceError } from "./errors";
 import { chooseFurthestRead } from "@/shared/sync/arbitration";
+import { parseConvId } from "@/shared/conversations/id";
 
 /**
  * Returns a single chronologically-sorted conversation list.
@@ -90,21 +93,22 @@ export function publishConversationUpdate(
 export function publishConversationUpdateForPost(
   db: BetterSqlite3.Database,
   post: {
-    group_id: string | null;
-    dm_to: string | null;
-    user_id: string | null;
+    conv_id: string;
   },
 ): void {
-  if (post.group_id) {
-    for (const userId of listConversationGroupMemberIds(db, post.group_id)) {
+  const parsed = parseConvId(post.conv_id);
+  if (parsed?.type === "group") {
+    for (const userId of listConversationGroupMemberIds(db, parsed.groupId)) {
       publishConversationUpdate(db, userId, {
         type: "group",
-        id: post.group_id,
+        id: parsed.groupId,
       });
     }
-  } else if (post.dm_to && post.user_id) {
-    publishConversationUpdate(db, post.user_id, { type: "dm", id: post.dm_to });
-    publishConversationUpdate(db, post.dm_to, { type: "dm", id: post.user_id });
+  } else if (parsed?.type === "dm") {
+    for (const userId of listConversationParticipantIds(db, post.conv_id)) {
+      const peerId = parsed.peerA === userId ? parsed.peerB : parsed.peerA;
+      publishConversationUpdate(db, userId, { type: "dm", id: peerId });
+    }
   }
 }
 
@@ -315,6 +319,10 @@ export class ConversationService {
 
   list(userId: string): Conversation[] {
     return listConversations(this.db, userId);
+  }
+
+  revisions(userId: string): Array<{ conv_id: string; revision: number }> {
+    return listConversationRevisions(this.db, userId);
   }
 
   markRead(

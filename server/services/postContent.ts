@@ -1,4 +1,3 @@
-import { LONG_TEXT_THRESHOLD } from "@/shared/validation/posts";
 import { getStickerEntry } from "@/server/infra/stickerLoader";
 import { stickerBrief } from "@/shared/posts/brief";
 import type { CreatePostPayload } from "@/shared/validation/posts";
@@ -12,7 +11,9 @@ type StoredSticker = {
   sticker_pack: string;
   sticker_id: string;
 };
-type StoredPostContent = StoredTextInline | StoredTextBody | StoredSticker;
+type StoredDeleted = { type: "deleted" };
+type StoredPostContent =
+  StoredTextInline | StoredTextBody | StoredSticker | StoredDeleted;
 
 function isStoredPostContent(value: unknown): value is StoredPostContent {
   if (!value || typeof value !== "object") return false;
@@ -31,6 +32,7 @@ function isStoredPostContent(value: unknown): value is StoredPostContent {
       v.sticker_id.length > 0
     );
   }
+  if (t === "deleted") return Object.keys(value).length === 1;
   return false;
 }
 
@@ -50,13 +52,13 @@ export function serializeStoredPostContent(content: StoredPostContent): string {
   return JSON.stringify(content);
 }
 
-const EMPTY_STORED: StoredTextInline = {
+const INLINE_TEXT_STORED: StoredTextInline = {
   type: "text",
   text_same_as_brief: true,
 };
 
 export function emptyStoredPostContent(): string {
-  return serializeStoredPostContent(EMPTY_STORED);
+  return serializeStoredPostContent({ type: "deleted" });
 }
 
 /** 从 DB 行读取存储形态；解析失败时视为短文本 inline。 */
@@ -66,7 +68,7 @@ export function loadStoredContent(row: {
 }): StoredPostContent {
   const parsed = parseStoredPostContent(row.content_json);
   if (parsed) return parsed;
-  return EMPTY_STORED;
+  return INLINE_TEXT_STORED;
 }
 
 /** 纯文本 → 存储形态 */
@@ -75,15 +77,9 @@ export function encodeTextBody(text: string): {
   stored: StoredPostContent;
 } {
   const trimmed = text.trim();
-  if (trimmed.length <= LONG_TEXT_THRESHOLD) {
-    return {
-      brief: trimmed,
-      stored: { type: "text", text_same_as_brief: true },
-    };
-  }
   return {
-    brief: trimmed.slice(0, LONG_TEXT_THRESHOLD),
-    stored: { type: "text", text: trimmed },
+    brief: trimmed,
+    stored: { type: "text", text_same_as_brief: true },
   };
 }
 

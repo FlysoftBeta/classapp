@@ -5,35 +5,53 @@ import {
   READING_HISTORY_MIN_SECONDS,
   SEGMENT_SIZE,
 } from "@/shared/types/api/article";
+import { splitTextArticle } from "@/shared/articles/segments";
+
+type TextProvider = { type: "text"; words: number; chunks: number };
+type BlobProvider = {
+  type: "blob";
+  file_name: string;
+  mime_type?: string | null;
+  bytes?: number;
+  original_name?: string | null;
+};
+type ArticleProvider = TextProvider | BlobProvider;
 
 const META_COLUMNS = `
-  a.id, a.user_id, a.group_id, a.title, a.content_kind, a.blob_path, a.mime_type,
-  a.file_size, a.original_filename, a.created_at,
+  a.id, a.user_id, a.group_id, a.title, a.provider_json, a.created_at,
   COALESCE(u.username, du.username) AS username, u.handle,
-  CASE WHEN a.content_kind = 'blob' THEN a.file_size ELSE length(a.content) END AS content_length,
-  (SELECT bookmarked FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) AS is_bookmarked,
-  (SELECT updated_at_ms FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) AS bookmark_updated_at_ms,
-  (SELECT offset FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS current_offset,
-  (SELECT updated_at_ms FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS current_offset_updated_at,
-  (SELECT locator FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS current_locator,
-  (SELECT total_read_seconds FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS total_read_seconds,
-  (SELECT updated_at FROM article_read_progress WHERE user_id = :uid AND article_id = a.id) AS last_read_at`;
-const FROM_ARTICLES = ` FROM articles a
+  ab.bookmarked AS is_bookmarked,
+  ab.updated_at_ms AS bookmark_updated_at_ms,
+  rp.offset AS current_offset,
+  rp.updated_at_ms AS current_offset_updated_at,
+  rp.locator AS current_locator,
+  rp.total_read_seconds AS total_read_seconds,
+  rp.updated_at AS last_read_at`;
+const ARTICLE_AUTHOR_JOINS = `
   LEFT JOIN users u ON a.user_id = u.id
     AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-  LEFT JOIN deleted_users du ON a.user_id = du.id `;
+  LEFT JOIN deleted_users du ON a.user_id = du.id`;
+const FROM_ARTICLES = ` FROM articles a
+  LEFT JOIN article_bookmarks ab ON ab.user_id = :uid AND ab.article_id = a.id
+  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id
+  ${ARTICLE_AUTHOR_JOINS}`;
+const FROM_BOOKMARKED_ARTICLES = ` FROM article_bookmarks ab
+  JOIN articles a ON a.id = ab.article_id
+  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id
+  ${ARTICLE_AUTHOR_JOINS}`;
 
 export interface ArticleRecord {
   id: string;
   user_id: string | null;
   group_id: string;
   title: string;
-  content: string;
-  content_kind: string;
+  provider: ArticleProvider;
+  content_kind: "text" | "blob";
   blob_path: string | null;
   mime_type: string | null;
   file_size: number;
   original_filename: string | null;
+  content_length: number;
   created_at: string;
 }
 
@@ -42,15 +60,94 @@ export interface ArticleAccessRow {
   group_id: string;
 }
 
+export type ArticleListView = "all" | "bookmarked" | "recent";
+export interface ArticleListCursor {
+  sortAt: string;
+  id: string;
+}
+
+function parseProvider(raw: unknown): ArticleProvider {
+  const value =
+    typeof raw === "string"
+      ? (JSON.parse(raw) as ArticleProvider)
+      : (raw as ArticleProvider);
+  if (value?.type === "text") {
+    return {
+      type: "text",
+      words: Math.max(0, value.words | 0),
+      chunks: Math.max(0, value.chunks | 0),
+    };
+  }
+  if (value?.type === "blob") {
+    return {
+      ...value,
+      file_name: value.file_name || "",
+      bytes: typeof value.bytes === "number" ? Math.max(0, value.bytes | 0) : 0,
+    };
+  }
+  throw new Error("Invalid article provider metadata");
+}
+
+function providerReadModel(provider: ArticleProvider) {
+  return provider.type === "text"
+    ? {
+        content_kind: "text" as const,
+        blob_path: null,
+        mime_type: null,
+        file_size: 0,
+        original_filename: null,
+        content_length: provider.words,
+      }
+    : {
+        content_kind: "blob" as const,
+        blob_path: provider.file_name,
+        mime_type: provider.mime_type ?? null,
+        file_size: provider.bytes ?? 0,
+        original_filename: provider.original_name ?? null,
+        content_length: provider.bytes ?? 0,
+      };
+}
+
+export function rowToArticle(
+  row: Record<string, unknown>,
+): Article & ArticleWithMeta {
+  const provider = parseProvider(row.provider_json ?? row.provider);
+  return {
+    id: String(row.id),
+    user_id: typeof row.user_id === "string" ? row.user_id : null,
+    group_id: String(row.group_id),
+    title: String(row.title),
+    provider,
+    ...providerReadModel(provider),
+    created_at: String(row.created_at),
+    username: typeof row.username === "string" ? row.username : null,
+    handle: typeof row.handle === "string" ? row.handle : null,
+    ...(typeof row.content === "string" ? { content: row.content } : {}),
+    is_bookmarked: !!row.is_bookmarked,
+    bookmark_updated_at_ms: (row.bookmark_updated_at_ms as number | null) ?? 0,
+    current_offset: (row.current_offset as number | null) ?? 0,
+    current_offset_updated_at:
+      (row.current_offset_updated_at as number | null) ?? 0,
+    current_locator:
+      typeof row.current_locator === "string" ? row.current_locator : null,
+    total_read_seconds: (row.total_read_seconds as number | null) ?? 0,
+    last_read_at: (row.last_read_at as string | null) ?? null,
+    ...(typeof row.list_sort_at === "string"
+      ? { list_sort_at: row.list_sort_at }
+      : {}),
+  } as Article & ArticleWithMeta;
+}
+
 export function purgeArticlesForUser(db: Database, userId: string): string[] {
-  const blobPaths = (
+  const paths = (
     db
       .prepare(
-        `SELECT blob_path FROM articles
-         WHERE user_id = ? AND content_kind = 'blob' AND blob_path IS NOT NULL`,
+        `SELECT provider_json FROM articles WHERE user_id = ? AND json_extract(provider_json, '$.type') = 'blob'`,
       )
-      .all(userId) as { blob_path: string }[]
-  ).map((row) => row.blob_path);
+      .all(userId) as Array<{ provider_json: string }>
+  )
+    .map((row) => (parseProvider(row.provider_json) as BlobProvider).file_name)
+    .filter(Boolean);
   db.transaction(() => {
     db.prepare("DELETE FROM article_bookmarks WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM article_read_progress WHERE user_id = ?").run(
@@ -58,27 +155,7 @@ export function purgeArticlesForUser(db: Database, userId: string): string[] {
     );
     db.prepare("DELETE FROM articles WHERE user_id = ?").run(userId);
   })();
-  return blobPaths;
-}
-
-export function rowToArticle(
-  row: Record<string, unknown>,
-): Article & ArticleWithMeta {
-  return {
-    ...row,
-    is_bookmarked: !!row.is_bookmarked,
-    bookmark_updated_at_ms: (row.bookmark_updated_at_ms as number | null) ?? 0,
-    current_offset: (row.current_offset as number | null) ?? 0,
-    current_offset_updated_at:
-      (row.current_offset_updated_at as number | null) ?? 0,
-    total_read_seconds: (row.total_read_seconds as number | null) ?? 0,
-    last_read_at: (row.last_read_at as string | null) ?? null,
-    content_length:
-      (row.content_length as number | null) ??
-      ((row.content as string) ?? "").length,
-    file_size: (row.file_size as number | null) ?? 0,
-    content_kind: (row.content_kind as "text" | "blob" | null) ?? "text",
-  } as Article & ArticleWithMeta;
+  return paths;
 }
 
 export function findArticleForUser(
@@ -87,9 +164,7 @@ export function findArticleForUser(
   userId: string,
 ) {
   const row = db
-    .prepare(
-      `SELECT ${META_COLUMNS}, a.content ${FROM_ARTICLES} WHERE a.id = :id`,
-    )
+    .prepare(`SELECT ${META_COLUMNS} ${FROM_ARTICLES} WHERE a.id = :id`)
     .get({ id: articleId, uid: userId }) as Record<string, unknown> | undefined;
   return row ? rowToArticle(row) : null;
 }
@@ -98,14 +173,27 @@ export function findArticleRecord(
   db: Database,
   articleId: string,
 ): ArticleRecord | null {
-  return (
-    (db
-      .prepare(
-        `SELECT id, user_id, group_id, title, content, content_kind, blob_path, mime_type,
-            file_size, original_filename, created_at FROM articles WHERE id = ?`,
-      )
-      .get(articleId) as ArticleRecord | undefined) ?? null
-  );
+  const row = db
+    .prepare(
+      "SELECT id, user_id, group_id, title, provider_json, created_at FROM articles WHERE id = ?",
+    )
+    .get(articleId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const provider = parseProvider(row.provider_json);
+  return {
+    ...(row as Omit<
+      ArticleRecord,
+      | "provider"
+      | "content_kind"
+      | "blob_path"
+      | "mime_type"
+      | "file_size"
+      | "original_filename"
+      | "content_length"
+    >),
+    provider,
+    ...providerReadModel(provider),
+  };
 }
 
 export function findArticleAccessRow(
@@ -129,9 +217,35 @@ export function insertTextArticle(
     content: string;
   },
 ): void {
-  db.prepare(
-    "INSERT INTO articles (id, user_id, group_id, title, content) VALUES (?, ?, ?, ?, ?)",
-  ).run(input.id, input.userId, input.groupId, input.title, input.content);
+  const segments = splitTextArticle(input.content, SEGMENT_SIZE);
+  const insertSegment = db.prepare(
+    `INSERT INTO text_article_segments (article_id, segment_index, start_offset, char_count, content)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO articles (id, user_id, group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      input.id,
+      input.userId,
+      input.groupId,
+      input.title,
+      JSON.stringify({
+        type: "text",
+        words: input.content.length,
+        chunks: segments.length,
+      }),
+    );
+    for (const segment of segments) {
+      insertSegment.run(
+        input.id,
+        segment.index,
+        segment.startOffset,
+        segment.content.length,
+        segment.content,
+      );
+    }
+  })();
 }
 
 export function insertBlobArticle(
@@ -148,57 +262,75 @@ export function insertBlobArticle(
   },
 ): void {
   db.prepare(
-    `INSERT INTO articles
-    (id, user_id, group_id, title, content, content_kind, blob_path, mime_type, file_size, original_filename)
-    VALUES (?, ?, ?, ?, '', 'blob', ?, ?, ?, ?)`,
+    "INSERT INTO articles (id, user_id, group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
   ).run(
     input.id,
     input.userId,
     input.groupId,
     input.title,
-    input.blobPath,
-    input.mimeType,
-    input.fileSize,
-    input.originalFilename,
+    JSON.stringify({
+      type: "blob",
+      file_name: input.blobPath,
+      mime_type: input.mimeType,
+      bytes: input.fileSize,
+      original_name: input.originalFilename,
+    }),
   );
+}
+
+function accessCondition(groupId?: string) {
+  const membership =
+    "EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)";
+  return groupId ? `a.group_id = :groupId AND ${membership}` : membership;
 }
 
 export function listArticlesForUser(
   db: Database,
   userId: string,
   options: {
-    bookmarkedOnly?: boolean;
-    offset?: number;
+    view?: ArticleListView;
+    cursor?: ArticleListCursor;
+    direction?: "before" | "after";
     groupId?: string;
   },
-): { articles: (Article & ArticleWithMeta)[]; total: number } {
-  const { bookmarkedOnly = false, offset = 0, groupId } = options;
-  let where = groupId
-    ? "WHERE a.group_id = :groupId AND EXISTS (SELECT 1 FROM user_groups ug WHERE ug.user_id = :uid AND ug.group_id = a.group_id)"
-    : `WHERE EXISTS (
-        SELECT 1 FROM user_groups ug
-        WHERE ug.user_id = :uid AND ug.group_id = a.group_id
-      )`;
-  if (bookmarkedOnly)
-    where +=
-      " AND (SELECT bookmarked FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id) = 1";
-  const order = bookmarkedOnly
-    ? `ORDER BY COALESCE((SELECT updated_at FROM article_read_progress WHERE user_id = :uid AND article_id = a.id), (SELECT created_at FROM article_bookmarks WHERE user_id = :uid AND article_id = a.id)) DESC`
-    : "ORDER BY a.created_at DESC";
+): { articles: (Article & ArticleWithMeta)[]; hasMore: boolean } {
+  const view = options.view ?? "all";
+  const direction = options.direction ?? "after";
+  const from = view === "bookmarked" ? FROM_BOOKMARKED_ARTICLES : FROM_ARTICLES;
+  let where = `WHERE ${accessCondition(options.groupId)}`;
+  const sortAt =
+    view === "bookmarked"
+      ? "COALESCE(rp.updated_at, ab.created_at)"
+      : view === "recent"
+        ? "rp.updated_at"
+        : "a.created_at";
+  if (view === "bookmarked") where += " AND ab.bookmarked = 1";
+  if (view === "recent")
+    where += " AND rp.total_read_seconds >= :minReadSeconds";
+  if (options.cursor) {
+    const comparison = direction === "after" ? "<" : ">";
+    where += ` AND (${sortAt} ${comparison} :cursorSortAt OR (${sortAt} = :cursorSortAt AND a.id ${comparison} :cursorId))`;
+  }
+  const orderDirection = direction === "after" ? "DESC" : "ASC";
+  const params = {
+    uid: userId,
+    groupId: options.groupId ?? null,
+    cursorSortAt: options.cursor?.sortAt ?? null,
+    cursorId: options.cursor?.id ?? null,
+    minReadSeconds: READING_HISTORY_MIN_SECONDS,
+  };
   const rows = db
     .prepare(
-      `SELECT ${META_COLUMNS} ${FROM_ARTICLES} ${where} ${order} LIMIT 50 OFFSET :off`,
+      `SELECT ${META_COLUMNS}, ${sortAt} AS list_sort_at
+       ${from} ${where}
+       ORDER BY ${sortAt} ${orderDirection}, a.id ${orderDirection}
+       LIMIT 51`,
     )
-    .all({ uid: userId, groupId: groupId ?? null, off: offset }) as Record<
-    string,
-    unknown
-  >[];
-  const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM articles a ${where}`)
-      .get({ uid: userId, groupId: groupId ?? null }) as { n: number }
-  ).n;
-  return { articles: rows.map(rowToArticle), total };
+    .all(params) as Record<string, unknown>[];
+  const hasMore = rows.length > 50;
+  const page = rows.slice(0, 50);
+  if (direction === "before") page.reverse();
+  return { articles: page.map(rowToArticle), hasMore };
 }
 
 export function listArticleHistoryRows(
@@ -208,12 +340,10 @@ export function listArticleHistoryRows(
   return db
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
-    JOIN article_read_progress rp ON rp.article_id = a.id AND rp.user_id = :uid
-    WHERE EXISTS (
-      SELECT 1 FROM user_groups ug
-      WHERE ug.user_id = :uid AND ug.group_id = a.group_id
-    ) AND rp.total_read_seconds >= :minSec
-    ORDER BY rp.updated_at DESC LIMIT :limit`,
+     JOIN article_read_progress history_rp ON history_rp.article_id = a.id AND history_rp.user_id = :uid
+     WHERE EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)
+       AND history_rp.total_read_seconds >= :minSec
+     ORDER BY history_rp.updated_at DESC LIMIT :limit`,
     )
     .all({
       uid: userId,
@@ -229,12 +359,9 @@ export function listBookmarkedArticleRows(
   return db
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
-    JOIN article_bookmarks ab ON ab.article_id = a.id AND ab.user_id = :uid AND ab.bookmarked = 1
-    WHERE EXISTS (
-      SELECT 1 FROM user_groups ug
-      WHERE ug.user_id = :uid AND ug.group_id = a.group_id
-    )
-    ORDER BY COALESCE((SELECT updated_at FROM article_read_progress WHERE user_id = :uid AND article_id = a.id), ab.created_at) DESC`,
+     JOIN article_bookmarks bookmarked_ab ON bookmarked_ab.article_id = a.id AND bookmarked_ab.user_id = :uid AND bookmarked_ab.bookmarked = 1
+     WHERE EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)
+     ORDER BY COALESCE(rp.updated_at, bookmarked_ab.created_at) DESC`,
     )
     .all({ uid: userId }) as Record<string, unknown>[];
 }
@@ -248,14 +375,14 @@ export function setArticleBookmarkValue(
 ) {
   db.prepare(
     `INSERT INTO article_bookmarks (user_id, article_id, bookmarked, updated_at_ms, created_at)
-    VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET
-    bookmarked = excluded.bookmarked, updated_at_ms = excluded.updated_at_ms,
-    created_at = CASE WHEN excluded.bookmarked = 1 THEN datetime('now') ELSE article_bookmarks.created_at END
-    WHERE excluded.updated_at_ms >= article_bookmarks.updated_at_ms`,
+     VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET
+       bookmarked = excluded.bookmarked, updated_at_ms = excluded.updated_at_ms,
+       created_at = CASE WHEN excluded.bookmarked = 1 THEN datetime('now') ELSE article_bookmarks.created_at END
+     WHERE excluded.updated_at_ms >= article_bookmarks.updated_at_ms`,
   ).run(userId, articleId, bookmarked ? 1 : 0, updatedAt);
   const row = db
     .prepare(
-      `SELECT bookmarked AS value, updated_at_ms AS updatedAt FROM article_bookmarks WHERE user_id = ? AND article_id = ?`,
+      "SELECT bookmarked AS value, updated_at_ms AS updatedAt FROM article_bookmarks WHERE user_id = ? AND article_id = ?",
     )
     .get(userId, articleId) as { value: number; updatedAt: number } | undefined;
   return row
@@ -272,9 +399,9 @@ export function upsertArticleProgressOffset(
 ) {
   db.prepare(
     `INSERT INTO article_read_progress (user_id, article_id, offset, updated_at, updated_at_ms)
-    VALUES (?, ?, ?, datetime('now'), ?) ON CONFLICT(user_id, article_id) DO UPDATE SET
-    offset = excluded.offset, updated_at = excluded.updated_at, updated_at_ms = excluded.updated_at_ms
-    WHERE excluded.updated_at_ms >= article_read_progress.updated_at_ms`,
+     VALUES (?, ?, ?, datetime('now'), ?) ON CONFLICT(user_id, article_id) DO UPDATE SET
+       offset = excluded.offset, updated_at = excluded.updated_at, updated_at_ms = excluded.updated_at_ms
+     WHERE excluded.updated_at_ms >= article_read_progress.updated_at_ms`,
   ).run(userId, articleId, offset, updatedAt);
   return getArticleProgressOffset(db, userId, articleId);
 }
@@ -287,7 +414,7 @@ export function getArticleProgressOffset(
   return (
     (db
       .prepare(
-        `SELECT offset, updated_at_ms AS updatedAt FROM article_read_progress WHERE user_id = ? AND article_id = ?`,
+        "SELECT offset, updated_at_ms AS updatedAt FROM article_read_progress WHERE user_id = ? AND article_id = ?",
       )
       .get(userId, articleId) as
       { offset: number; updatedAt: number } | undefined) ?? {
@@ -305,8 +432,9 @@ export function addArticleProgressSeconds(
 ): void {
   db.prepare(
     `INSERT INTO article_read_progress (user_id, article_id, offset, total_read_seconds, updated_at)
-    VALUES (?, ?, 0, ?, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET
-    total_read_seconds = article_read_progress.total_read_seconds + excluded.total_read_seconds, updated_at = datetime('now')`,
+     VALUES (?, ?, 0, ?, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET
+       total_read_seconds = article_read_progress.total_read_seconds + excluded.total_read_seconds,
+       updated_at = datetime('now')`,
   ).run(userId, articleId, seconds);
 }
 
@@ -317,7 +445,7 @@ export function touchArticleProgress(
 ): void {
   db.prepare(
     `INSERT INTO article_read_progress (user_id, article_id, offset, total_read_seconds, updated_at)
-    VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET updated_at = datetime('now')`,
+     VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET updated_at = datetime('now')`,
   ).run(userId, articleId);
 }
 
@@ -330,17 +458,45 @@ export function getArticleTextSegment(
   articleId: string,
   offset: number,
 ) {
-  const article = db
-    .prepare("SELECT content, content_kind FROM articles WHERE id = ?")
-    .get(articleId) as { content: string; content_kind: string } | undefined;
-  if (!article) return null;
-  const contentLength = article.content.length;
-  const clampedOffset = Math.max(0, Math.min(offset, contentLength));
+  const row = db
+    .prepare("SELECT provider_json FROM articles WHERE id = ?")
+    .get(articleId) as { provider_json: string } | undefined;
+  if (!row) return null;
+  const provider = parseProvider(row.provider_json);
+  if (provider.type === "blob") {
+    return {
+      content: "",
+      content_kind: "blob" as const,
+      content_length: provider.bytes ?? 0,
+      clamped_offset: 0,
+      has_more: false,
+    };
+  }
+  const clamped = Math.max(0, Math.min(Math.floor(offset), provider.words));
+  if (clamped === provider.words) {
+    return {
+      content: "",
+      content_kind: "text" as const,
+      content_length: provider.words,
+      clamped_offset: clamped,
+      has_more: false,
+    };
+  }
+  const segment = db
+    .prepare(
+      `SELECT start_offset, content FROM text_article_segments
+       WHERE article_id = ? AND start_offset <= ?
+       ORDER BY start_offset DESC LIMIT 1`,
+    )
+    .get(articleId, clamped) as
+    { start_offset: number; content: string } | undefined;
+  if (!segment) return null;
+  const content = segment.content.slice(clamped - segment.start_offset);
   return {
-    content: article.content.slice(clampedOffset, clampedOffset + SEGMENT_SIZE),
-    content_kind: article.content_kind,
-    content_length: contentLength,
-    clamped_offset: clampedOffset,
-    has_more: clampedOffset + SEGMENT_SIZE < contentLength,
+    content,
+    content_kind: "text" as const,
+    content_length: provider.words,
+    clamped_offset: clamped,
+    has_more: clamped + content.length < provider.words,
   };
 }

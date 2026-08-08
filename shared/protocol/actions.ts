@@ -457,14 +457,18 @@ export const actionContracts = {
   listArticlesAction: contract(
     one(
       object({
-        bookmarked: z.boolean().optional(),
-        offset: z.number().int().nonnegative().optional(),
+        view: z.enum(["all", "bookmarked", "recent"]).optional(),
+        cursor: object({
+          sortAt: z.string(),
+          id: nonEmptyString,
+        }).optional(),
+        direction: z.enum(["before", "after"]).optional(),
         group_id: nonEmptyString.optional(),
       }),
     ),
     object({
       articles: z.array(articleWithMetaSchema),
-      total: z.number().int().nonnegative(),
+      hasMore: z.boolean(),
     }),
   ),
   fetchArticleSidebarAction: contract(noArgs, articleSidebarPayloadSchema),
@@ -559,6 +563,17 @@ export const actionContracts = {
   deleteArticleAction: contract(one(nonEmptyString), okSchema),
 
   fetchConversationsAction: contract(noArgs, z.array(conversationSchema)),
+  fetchConversationRevisionsAction: contract(
+    noArgs,
+    object({
+      revisions: z.array(
+        object({
+          conv_id: nonEmptyString,
+          revision: z.number().int().nonnegative(),
+        }),
+      ),
+    }),
+  ),
   markConversationReadAction: contract(
     one(
       conversationRefSchema
@@ -613,7 +628,16 @@ export const actionContracts = {
     object({ groups: z.array(groupSchema) }),
   ),
   joinGroupAction: contract(
-    one(object({ groupId: nonEmptyString, password: z.string().optional() })),
+    one(
+      object({
+        groupId: nonEmptyString,
+        source: z.discriminatedUnion("type", [
+          object({ type: z.literal("search") }),
+          object({ type: z.literal("group"), groupId: nonEmptyString }),
+        ]),
+        password: z.string().optional(),
+      }),
+    ),
     object({ ok: z.literal(true), group: groupSchema }),
   ),
   leaveGroupAction: contract(one(nonEmptyString), okSchema),
@@ -643,15 +667,16 @@ export const actionContracts = {
   fetchPostsAction: contract(
     one(
       object({
-        type: z.enum(["feed", "group", "dm"]).optional(),
+        type: z.enum(["feed", "conversation"]).optional(),
+        conv_id: nonEmptyString.optional(),
         before_id: z.string().optional(),
         after_id: z.string().optional(),
         before_sequence: z.number().int().nonnegative().optional(),
         after_sequence: z.number().int().nonnegative().optional(),
+        changed_after_revision: z.number().int().nonnegative().optional(),
+        changed_through_revision: z.number().int().nonnegative().optional(),
         limit: z.string().optional(),
         offset: z.string().optional(),
-        with: z.string().optional(),
-        group: z.string().optional(),
       }),
     ),
     object({ posts: z.array(postSchema) }),
@@ -661,8 +686,7 @@ export const actionContracts = {
     one(
       object({
         content: z.union([z.string(), createPostPayloadSchema]).optional(),
-        group_id: z.string().optional(),
-        dm_to: z.string().optional(),
+        conv_id: nonEmptyString,
         reply_to: z.string().optional(),
       }),
     ),
@@ -672,7 +696,7 @@ export const actionContracts = {
     one(object({ postId: nonEmptyString, text: z.string() })),
     object({ post: postSchema }),
   ),
-  deletePostAction: contract(one(nonEmptyString), okSchema),
+  deletePostAction: contract(one(nonEmptyString), object({ post: postSchema })),
 
   fetchReaderConfigAction: contract(noArgs, blobReaderConfigSchema),
   updateReaderConfigAction: contract(
@@ -705,8 +729,7 @@ export const actionContracts = {
     one(
       object({
         content: createStickerPostPayloadSchema.optional(),
-        group_id: z.string().optional(),
-        dm_to: z.string().optional(),
+        conv_id: nonEmptyString,
         reply_to: z.string().optional(),
       }),
     ),

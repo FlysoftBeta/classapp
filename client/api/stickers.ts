@@ -32,8 +32,7 @@ export async function fetchRecentStickers() {
 
 export async function sendStickerPost(body: {
   content: Extract<CreatePostPayload, { type: "sticker" }>;
-  group_id?: string;
-  dm_to?: string;
+  conv_id: string;
   reply_to?: string;
 }) {
   const result = await sendStickerPostAction(body);

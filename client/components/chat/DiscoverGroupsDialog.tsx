@@ -66,7 +66,11 @@ export function DiscoverGroupsDialog({
     }
     setJoining(true);
     setError("");
-    const { res, data } = await joinGroup(g.id, password || undefined);
+    const { res, data } = await joinGroup(
+      g.id,
+      { type: "group", groupId },
+      password || undefined,
+    );
     setJoining(false);
     if (!res.ok) {
       if (data.needs_password) {

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const groupSchema = z
   .object({
     id: z.string(),
+    conv_id: z.string(),
+    revision: z.number().int().nonnegative(),
     handle: z.string(),
     name: z.string(),
     has_password: z.number().int(),

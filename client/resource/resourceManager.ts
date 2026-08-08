@@ -10,7 +10,7 @@ type QuotaPressureHandler = (bytesToFree: number) => Promise<number>;
 
 interface ResourceRecord {
   key: string;
-  body: Blob;
+  body: ArrayBuffer;
   size: number;
   touchedAt: number;
   resourceClass: ResourceClass;
@@ -25,18 +25,23 @@ export class ResourceManager {
     this.quotaPressureHandler = handler;
   }
 
-  async persist(key: string, body: Blob): Promise<void> {
+  async noteDomainWrite(resourceClass: ResourceClass): Promise<void> {
+    if (resourceClass === "persisted") await navigator.storage?.persist?.();
+    await this.enforceQuota();
+  }
+
+  async persist(key: string, body: ArrayBuffer): Promise<void> {
     await this.put(key, body, "persisted");
     await navigator.storage?.persist?.();
     await this.enforceQuota();
   }
 
-  async cache(key: string, body: Blob): Promise<void> {
+  async cache(key: string, body: ArrayBuffer): Promise<void> {
     await this.put(key, body, "cache");
     await this.enforceQuota();
   }
 
-  async get(key: string): Promise<Blob | null> {
+  async get(key: string): Promise<ArrayBuffer | null> {
     const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readwrite");
     const done = transactionDone(tx);
@@ -58,9 +63,7 @@ export class ResourceManager {
     value: T,
     resourceClass: ResourceClass = "cache",
   ): Promise<void> {
-    const body = new Blob([JSON.stringify(value)], {
-      type: "application/json",
-    });
+    const body = new TextEncoder().encode(JSON.stringify(value)).buffer;
     if (resourceClass === "persisted") await this.persist(key, body);
     else await this.cache(key, body);
   }
@@ -69,7 +72,7 @@ export class ResourceManager {
     const body = await this.get(key);
     if (!body) return null;
     try {
-      return JSON.parse(await body.text()) as T;
+      return JSON.parse(new TextDecoder().decode(body)) as T;
     } catch {
       return null;
     }
@@ -110,14 +113,18 @@ export class ResourceManager {
     };
   }
 
-  private async put(key: string, body: Blob, resourceClass: ResourceClass) {
+  private async put(
+    key: string,
+    body: ArrayBuffer,
+    resourceClass: ResourceClass,
+  ) {
     const db = await openRuntimeDatabase();
     const tx = db.transaction("resources", "readwrite");
     const done = transactionDone(tx);
     tx.objectStore("resources").put({
       key,
       body,
-      size: body.size,
+      size: body.byteLength,
       touchedAt: Date.now(),
       resourceClass,
     } satisfies ResourceRecord);

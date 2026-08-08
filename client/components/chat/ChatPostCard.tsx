@@ -26,7 +26,7 @@ interface ChatPostCardProps {
   currentUser: User;
   onReply?: (post: Post) => void;
   onUpdated: (post: Post) => void;
-  onDeleted: (id: string) => void;
+  onDeleted: (post: Post) => void;
   onJumpToPost?: (postId: string) => void;
   onOpenArticle?: (articleId: string) => void;
   showGroupTag?: boolean;
@@ -158,9 +158,8 @@ export default function ChatPostCard({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  const canEdit =
-    !post.is_deleted && post.type === "text" && post.user_id === currentUser.id;
-  const canDelete = !post.is_deleted && post.user_id === currentUser.id;
+  const canEdit = post.type === "text" && post.user_id === currentUser.id;
+  const canDelete = post.type !== "deleted" && post.user_id === currentUser.id;
 
   const handleOpenEdit = async () => {
     setAnchorEl(null);
@@ -198,10 +197,10 @@ export default function ChatPostCard({
       setErr(data.error || "失败");
       return;
     }
-    onDeleted(post.id);
+    onDeleted(data.post!);
   };
 
-  if (post.is_deleted) {
+  if (post.type === "deleted") {
     return (
       <Box
         sx={{ px: 2, py: 1, borderBottom: "1px solid", borderColor: "divider" }}

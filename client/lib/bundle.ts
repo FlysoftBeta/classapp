@@ -80,7 +80,7 @@ async function stageBundle(buildId: string, body: Blob): Promise<void> {
     const done = transactionDone(tx);
     tx.objectStore("bundles").put({
       buildId,
-      body,
+      body: await body.arrayBuffer(),
       installedAt: Date.now(),
     });
     await done;

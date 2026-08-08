@@ -8,6 +8,7 @@
     "dev:server": "tsx watch --clear-screen=false server/dev.ts",
     "dev:client": "vite",
     "infini:build": "node scripts/build-infini.mjs",
+    "zstd:build": "node scripts/build-zstd-web.mjs",
     "build": "sh ./build.sh",
     "test:protocol": "tsx scripts/test-protocol-contracts.mts",
     "test:schema-migrations": "tsx scripts/test-schema-migrations.mts",

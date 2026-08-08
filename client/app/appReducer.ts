@@ -12,6 +12,7 @@ import type {
   ArticleSidebarUpdatedPayload,
   ArticleListUpdatedPayload,
 } from "@/shared/types/events";
+import { dmConvId } from "@/shared/conversations/id";
 
 export type AppState =
   "loading" | "konami" | "login" | "oobe" | "app_locked" | "app";
@@ -384,6 +385,8 @@ export function appReducer(state: AppStore, action: AppAction): AppStore {
         (d) => d.type === "dm" && d.id === action.peerId,
       );
       const entry: ConvEntry = {
+        conv_id: dmConvId(state.user!.id, action.peerId),
+        revision: 0,
         type: "dm",
         id: action.peerId,
         handle: action.handle ?? null,

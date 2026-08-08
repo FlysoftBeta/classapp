@@ -69,7 +69,12 @@ export class ArticleService {
 
   list(
     user: User,
-    input: { bookmarkedOnly?: boolean; offset?: number; groupId?: string },
+    input: {
+      view?: "all" | "bookmarked" | "recent";
+      cursor?: { sortAt: string; id: string };
+      direction?: "before" | "after";
+      groupId?: string;
+    },
   ) {
     if (input.groupId) assertGroupMember(this.db, user.id, input.groupId);
     return listArticlesForUser(this.db, user.id, input);
@@ -198,7 +203,7 @@ export class ArticleService {
     const safe =
       article.content_kind === "blob"
         ? Math.max(0, Math.floor(offset))
-        : Math.max(0, Math.min(Math.floor(offset), article.content.length));
+        : Math.max(0, Math.min(Math.floor(offset), article.content_length));
     const value = upsertArticleProgressOffset(
       this.db,
       user.id,

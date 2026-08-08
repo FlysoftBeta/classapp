@@ -11,9 +11,12 @@ import { SidebarSection } from "./SidebarSection";
 import type { ConvEntry } from "@/client/app/appReducer";
 import { TaskManagerPopover } from "@/client/components/tasks/TaskManagerPopover";
 import { hasFeature } from "@/shared/features";
+import { groupConvId } from "@/shared/conversations/id";
 
 function emptyGroupEntry(g: { id: string; name: string }): ConvEntry {
   return {
+    conv_id: groupConvId(g.id),
+    revision: 0,
     type: "group",
     id: g.id,
     name: g.name,

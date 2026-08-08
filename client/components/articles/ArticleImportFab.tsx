@@ -16,6 +16,23 @@ import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
 import { decodeUploadedText } from "@/client/lib/textEncoding";
 import { NetworkArticleDialog } from "./NetworkArticleDialog";
 
+function readFileBytes(file: File): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (!(reader.result instanceof ArrayBuffer)) {
+        reject(new Error("无法读取 TXT 附件"));
+        return;
+      }
+      resolve(new Uint8Array(reader.result));
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("无法读取 TXT 附件"));
+    reader.onabort = () => reject(new Error("TXT 附件读取已取消"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export function ArticleImportFab({
   token,
   conversation,
@@ -52,15 +69,11 @@ export function ArticleImportFab({
     reset();
   };
 
-  const selectFile = async (file: File) => {
+  const selectFile = (file: File) => {
     if (!title.trim()) setTitle(file.name);
     setAttachment(file);
-    if (file.type === "text/plain" || /\.txt$/i.test(file.name)) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      setContent(decodeUploadedText(bytes).text);
-    } else {
-      setContent("");
-    }
+    setContent("");
+    setBodyFocused(false);
   };
 
   const save = async () => {
@@ -82,6 +95,11 @@ export function ArticleImportFab({
         attachment &&
         (attachment.type === "application/pdf" ||
           /\.pdf$/i.test(attachment.name));
+      const articleContent = isPdf
+        ? ""
+        : attachment
+          ? decodeUploadedText(await readFileBytes(attachment)).text.trim()
+          : content.trim();
       const { res } = isPdf
         ? await createBlobArticle(token, {
             title: title.trim(),
@@ -90,7 +108,7 @@ export function ArticleImportFab({
           })
         : await createArticle({
             title: title.trim(),
-            content: content.trim(),
+            content: articleContent,
             group_id: groupId,
           });
       if (!res.ok) throw new Error("上传失败");
@@ -140,19 +158,13 @@ export function ArticleImportFab({
               minRows={10}
               label="正文"
               value={content}
-              onChange={(event) => {
-                setContent(event.target.value);
-                if (
-                  event.target.value &&
-                  attachment?.type === "application/pdf"
-                )
-                  setAttachment(null);
-              }}
+              disabled={Boolean(attachment)}
+              onChange={(event) => setContent(event.target.value)}
               onFocus={() => setBodyFocused(true)}
               onBlur={() => setBodyFocused(false)}
               helperText={
-                attachment && !content
-                  ? `已选择：${attachment.name}`
+                attachment
+                  ? `已选择附件：${attachment.name}；正文已锁定`
                   : "可直接输入正文，或上传 TXT / PDF"
               }
             />
@@ -181,7 +193,7 @@ export function ArticleImportFab({
             accept=".txt,text/plain,.pdf,application/pdf"
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file) void selectFile(file);
+              if (file) selectFile(file);
             }}
           />
         </DialogContent>

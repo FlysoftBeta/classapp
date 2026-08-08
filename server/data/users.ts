@@ -46,7 +46,7 @@ export function insertNewUser(
     ).run(crypto.randomUUID(), data.id, pinHash);
   }
   db.prepare(
-    `INSERT OR IGNORE INTO user_groups (user_id, group_id)
+    `INSERT OR IGNORE INTO group_members (user_id, group_id)
      SELECT ?, id FROM groups WHERE type IN ('wild', 'announcement')`,
   ).run(data.id);
 }
@@ -291,8 +291,8 @@ export function getUserProfile(
   const groups = db
     .prepare(
       `SELECT g.id, g.handle, g.name, (g.password_hash IS NOT NULL) as has_password,
-       g.type, g.members_hidden, g.admin_only, g.no_leave, g.parent_group_id, g.created_at
-       FROM user_groups ug
+       g.conv_id, g.revision, g.type, g.members_hidden, g.admin_only, g.no_leave, g.parent_group_id, g.created_at
+       FROM group_members ug
        JOIN groups g ON ug.group_id = g.id
        WHERE ug.user_id = ?`,
     )

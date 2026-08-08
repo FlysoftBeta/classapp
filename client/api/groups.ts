@@ -71,9 +71,14 @@ export async function discoverSubgroups(groupId: string) {
   return result.ok ? result.data : null;
 }
 
-export async function joinGroup(groupId: string, password?: string) {
+export async function joinGroup(
+  groupId: string,
+  source: { type: "search" } | { type: "group"; groupId: string },
+  password?: string,
+) {
   const result = await joinGroupAction({
     groupId,
+    source,
     password: password || undefined,
   });
   const res = observeActionResult(result);

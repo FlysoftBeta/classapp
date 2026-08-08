@@ -7,6 +7,9 @@
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
     />
     <meta name="theme-color" content="#ffffff" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>Talos II</title>
     <style>
       html,
@@ -48,7 +51,7 @@
             });
         }
         var DB = "classapp-runtime";
-        var DB_VERSION = 2;
+        var DB_VERSION = 3;
         var ACTIVE_BUILD_KEY = "classapp-active-build";
         function legacyActiveBuild() {
           try {
@@ -65,26 +68,50 @@
         function open() {
           return new Promise(function (resolve, reject) {
             var request = indexedDB.open(DB, DB_VERSION);
-            request.onupgradeneeded = function () {
+            request.onupgradeneeded = function (event) {
               var db = request.result;
-              if (!db.objectStoreNames.contains("bundles"))
-                db.createObjectStore("bundles", { keyPath: "buildId" });
-              if (!db.objectStoreNames.contains("resources")) {
-                var store = db.createObjectStore("resources", {
-                  keyPath: "key",
-                });
-                store.createIndex("by-class-and-touch", [
-                  "resourceClass",
-                  "touchedAt",
-                ]);
-              }
-              if (!db.objectStoreNames.contains("kv")) {
-                var kv = db.createObjectStore("kv", { keyPath: "key" });
-                var legacy = legacyActiveBuild();
-                if (legacy) {
-                  kv.put({ key: ACTIVE_BUILD_KEY, value: legacy });
+              if (event.oldVersion > 0) {
+                while (db.objectStoreNames.length) {
+                  db.deleteObjectStore(db.objectStoreNames[0]);
                 }
               }
+              db.createObjectStore("bundles", { keyPath: "buildId" });
+              var store = db.createObjectStore("resources", { keyPath: "key" });
+              store.createIndex("by-class-and-touch", [
+                "resourceClass",
+                "touchedAt",
+              ]);
+              var kv = db.createObjectStore("kv", { keyPath: "key" });
+              var conversations = db.createObjectStore("domain_conversations", {
+                keyPath: ["userScope", "convId"],
+              });
+              conversations.createIndex("by-user", "userScope");
+              var posts = db.createObjectStore("domain_posts", {
+                keyPath: ["userScope", "id"],
+              });
+              posts.createIndex("by-conversation", ["userScope", "convId"]);
+              posts.createIndex("by-conversation-sequence", [
+                "userScope",
+                "convId",
+                "sequence",
+              ]);
+              var articles = db.createObjectStore("domain_articles", {
+                keyPath: ["userScope", "id"],
+              });
+              articles.createIndex("by-user", "userScope");
+              var articleState = db.createObjectStore("domain_article_state", {
+                keyPath: ["userScope", "articleId"],
+              });
+              articleState.createIndex("by-user", "userScope");
+              var segments = db.createObjectStore("domain_article_segments", {
+                keyPath: ["userScope", "articleId", "startOffset"],
+              });
+              segments.createIndex("by-article", ["userScope", "articleId"]);
+              segments.createIndex("by-article-start", [
+                "userScope",
+                "articleId",
+                "startOffset",
+              ]);
             };
             request.onsuccess = function () {
               request.result.onversionchange = function () {
@@ -133,7 +160,9 @@
           });
         }
         function loadBundle(body) {
-          var url = URL.createObjectURL(body);
+          var url = URL.createObjectURL(
+            new Blob([body], { type: "text/javascript" }),
+          );
           return new Promise(function (resolve, reject) {
             var script = document.createElement("script");
             script.type = "module";
@@ -195,7 +224,7 @@
                     .then(function (response) {
                       if (!response.ok)
                         throw new Error("bundle " + response.status);
-                      return response.blob();
+                      return response.arrayBuffer();
                     })
                     .then(function (body) {
                       record = {

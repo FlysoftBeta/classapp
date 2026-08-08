@@ -35,11 +35,12 @@ export const postChangedPayloadSchema = z
     post: postSchema,
   })
   .strict();
-export const postDeletedPayloadSchema = z
-  .object({
-    id: z.string(),
-  })
-  .strict();
+/**
+ * Deletion is a normal post version. Carry the authoritative tombstone so a
+ * live client stores the same revision as a client that later performs a
+ * revision-based catch-up.
+ */
+export const postDeletedPayloadSchema = postChangedPayloadSchema;
 
 export type PostStreamEvent =
   | {

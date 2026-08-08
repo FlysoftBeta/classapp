@@ -1,10 +1,7 @@
 import { probeAppState } from "@/client/api/auth";
 import { client } from "@/client/lib/remote/client";
 import { session } from "@/client/lib/remote/session";
-import {
-  syncOfflineContent,
-  syncPendingMutations,
-} from "@/client/resource/offlineSync";
+import { syncOfflineContent, syncPendingMutations } from "@/client/data/sync";
 import { offlineSession } from "@/client/resource/offlineSession";
 import { useAppStore } from "@/client/app/appStore";
 import type { EventData } from "@/shared/protocol/events";
@@ -21,6 +18,7 @@ import {
   scheduleConversationRefresh,
 } from "./resources";
 import { announcementEvents, configEvents, postEvents } from "./events";
+import { offlineRepository } from "@/client/data/repository";
 
 type RemoteCallbacks = {
   onArticleListUpdated: () => void;
@@ -110,6 +108,16 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     // mutations and persistence; it no longer blocks the visible update.
     scheduleConversationRefresh();
   };
+  const onPost = (
+    kind: "post.created" | "post.updated" | "post.deleted",
+    data: EventData<typeof kind>,
+  ) => {
+    // Persist every authoritative row version globally, even when its
+    // conversation is not the active view. The view subscription is only a
+    // rendering concern; revision catch-up remains the reconnect fallback.
+    void offlineRepository.applyPostVersion(data.post);
+    postEvents.emit({ kind, data });
+  };
 
   const unsubscribers = [
     client.subscribe("client.lock_changed", () => void refreshState()),
@@ -127,15 +135,9 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
       dispatch({ type: "REMOTE_RESUBSCRIBE" }),
     ),
     client.subscribe("conv.updated", onConversationUpdated),
-    client.subscribe("post.created", (data) =>
-      postEvents.emit({ kind: "post.created", data }),
-    ),
-    client.subscribe("post.updated", (data) =>
-      postEvents.emit({ kind: "post.updated", data }),
-    ),
-    client.subscribe("post.deleted", (data) =>
-      postEvents.emit({ kind: "post.deleted", data }),
-    ),
+    client.subscribe("post.created", (data) => onPost("post.created", data)),
+    client.subscribe("post.updated", (data) => onPost("post.updated", data)),
+    client.subscribe("post.deleted", (data) => onPost("post.deleted", data)),
     client.subscribe("article.sidebar_updated", scheduleArticleRefresh),
     client.subscribe("article.list_updated", callbacks.onArticleListUpdated),
     client.subscribe("user.config_changed", onConfig),

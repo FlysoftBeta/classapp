@@ -28,8 +28,12 @@ const originalGroupColumn = (
 assert.equal(originalGroupColumn?.notnull, 1);
 
 const sample = fixture
-  .prepare("SELECT id, group_id FROM articles ORDER BY id LIMIT 1")
-  .get() as { id: string; group_id: string } | undefined;
+  .prepare(
+    "SELECT id, group_id, content, content_kind FROM articles ORDER BY id LIMIT 1",
+  )
+  .get() as
+  | { id: string; group_id: string; content: string; content_kind: string }
+  | undefined;
 const adminId = (
   fixture
     .prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
@@ -42,6 +46,13 @@ fixture
     `INSERT OR REPLACE INTO posts
        (id, user_id, content, brief, group_id, dm_to)
      VALUES ('migration-test-ghost-dm', NULL, 'ghost', 'ghost', NULL, ?)`,
+  )
+  .run(adminId);
+fixture
+  .prepare(
+    `INSERT OR REPLACE INTO posts
+       (id, user_id, content, brief, group_id, dm_to, is_deleted, deleted_at)
+     VALUES ('migration-test-tombstone', ?, 'secret', 'secret', 'wild', NULL, 1, datetime('now'))`,
   )
   .run(adminId);
 fixture
@@ -88,7 +99,16 @@ try {
         value: string;
       }
     ).value,
-    "15",
+    "16",
+  );
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT brief, content_json, (deleted_at IS NOT NULL) AS deleted
+         FROM posts WHERE id = 'migration-test-tombstone'`,
+      )
+      .get(),
+    { brief: "", content_json: '{"type":"deleted"}', deleted: 1 },
   );
   const groupColumn = (
     db.pragma("table_info(articles)") as { name: string; notnull: number }[]
@@ -102,13 +122,63 @@ try {
     ).n,
     0,
   );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT conv_id FROM posts GROUP BY conv_id
+             HAVING COUNT(*) != COUNT(DISTINCT revision)
+           )`,
+        )
+        .get() as { n: number }
+    ).n,
+    0,
+    "Migrated post revisions must be unique within each conversation",
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT c.conv_id
+             FROM (
+               SELECT conv_id, revision FROM groups
+               UNION ALL SELECT conv_id, revision FROM dms
+             ) c
+             LEFT JOIN posts p ON p.conv_id = c.conv_id
+             GROUP BY c.conv_id, c.revision
+             HAVING c.revision != COALESCE(MAX(p.revision), 0)
+           )`,
+        )
+        .get() as { n: number }
+    ).n,
+    0,
+    "Conversation awareness revision must equal its latest current post row",
+  );
   if (sample) {
     assert.deepEqual(
       db
         .prepare("SELECT id, group_id FROM articles WHERE id = ?")
         .get(sample.id),
-      sample,
+      { id: sample.id, group_id: sample.group_id },
     );
+    const migrated = db
+      .prepare("SELECT provider_json FROM articles WHERE id = ?")
+      .get(sample.id) as { provider_json: string };
+    assert.equal(JSON.parse(migrated.provider_json).type, sample.content_kind);
+    if (sample.content_kind === "text") {
+      const content = (
+        db
+          .prepare(
+            "SELECT content FROM text_article_segments WHERE article_id = ? ORDER BY segment_index",
+          )
+          .all(sample.id) as Array<{ content: string }>
+      )
+        .map((row) => row.content)
+        .join("");
+      assert.equal(content, sample.content);
+    }
   }
   assert.equal(
     (
@@ -124,14 +194,33 @@ try {
     (
       db
         .prepare(
-          `SELECT COUNT(*) AS n FROM conversation_user_state
-           WHERE conversation_type = 'dm'
-             AND conversation_id = 'migration-test-missing-user'`,
+          `SELECT COUNT(*) AS n FROM convs_user
+           WHERE conv_id LIKE '%migration-test-missing-user%'`,
         )
         .get() as { n: number }
     ).n,
     0,
   );
+  assert.equal(
+    (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM pragma_foreign_key_check")
+        .get() as { n: number }
+    ).n,
+    0,
+  );
+  for (const obsolete of ["user_groups", "conversation_user_state"]) {
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?",
+          )
+          .get(obsolete) as { n: number }
+      ).n,
+      0,
+    );
+  }
 } finally {
   db.close();
   fs.rmSync(root, { recursive: true, force: true });

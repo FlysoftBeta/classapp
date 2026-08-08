@@ -24,8 +24,8 @@ import {
 import {
   offlineRepository,
   type ConversationDownloadPolicy,
-} from "@/client/resource/offlineRepository";
-import { downloadConversationForOffline } from "@/client/resource/offlineSync";
+} from "@/client/data/repository";
+import { downloadConversationForOffline } from "@/client/data/sync";
 import { flexGap } from "@/client/lib/css";
 import Tooltip from "@mui/material/Tooltip";
 

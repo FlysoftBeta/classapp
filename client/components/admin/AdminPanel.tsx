@@ -111,6 +111,13 @@ export default function AdminPanel({
           flex: 1,
           minHeight: 0,
           overflow: "auto",
+          "& .MuiTable-root": {
+            width: "max-content",
+            minWidth: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "nowrap",
+          },
           px: 2,
           pb: 2,
           "@media (orientation: landscape) and (max-height: 600px)": {

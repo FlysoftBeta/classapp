@@ -3,13 +3,13 @@ import type { AdminGroup, GroupMember } from "@/shared/types/api";
 import type { Group } from "@/shared/types/api";
 
 const GROUP_SELECT = `
-  SELECT id, handle, name, (password_hash IS NOT NULL) as has_password,
+  SELECT id, conv_id, revision, handle, name, (password_hash IS NOT NULL) as has_password,
          type, members_hidden, admin_only, no_leave, parent_group_id, created_at
   FROM groups
 `;
 
 const GROUP_LIST_SELECT = `
-  id, handle, name, (password_hash IS NOT NULL) as has_password,
+  id, conv_id, revision, handle, name, (password_hash IS NOT NULL) as has_password,
   type, members_hidden, admin_only, no_leave, parent_group_id, created_at
 `;
 
@@ -30,6 +30,8 @@ export interface GroupMembershipRow {
 export interface GroupJoinRow {
   id: string;
   password_hash: string | null;
+  discoverable: number;
+  parent_group_id: string | null;
 }
 
 export interface GroupTypeRow {
@@ -43,6 +45,7 @@ export interface GroupAdminOnlyRow {
 
 export interface GroupInsertRow {
   id: string;
+  conv_id: string;
   handle: string;
   name: string;
   discoverable: number;
@@ -96,8 +99,11 @@ export function findGroupJoinInfo(
   id: string,
 ): GroupJoinRow | null {
   return (
-    (db.prepare("SELECT id, password_hash FROM groups WHERE id = ?").get(id) as
-      GroupJoinRow | undefined) ?? null
+    (db
+      .prepare(
+        "SELECT id, password_hash, discoverable, parent_group_id FROM groups WHERE id = ?",
+      )
+      .get(id) as GroupJoinRow | undefined) ?? null
   );
 }
 
@@ -152,7 +158,7 @@ export function listDiscoveryParents(
   return db
     .prepare(
       `SELECT g.id, g.name
-       FROM user_groups ug
+       FROM group_members ug
        JOIN groups g ON g.id = ug.group_id
        WHERE ug.user_id = ?
        ORDER BY CASE WHEN g.type = 'wild' THEN 0 ELSE 1 END, g.name`,
@@ -172,7 +178,8 @@ export function listLinkedGroups(
         `SELECT ${GROUP_LIST_SELECT}
          FROM groups g
          WHERE g.parent_group_id = ?
-           AND g.id NOT IN (SELECT group_id FROM user_groups WHERE user_id = ?)
+           AND g.discoverable = 1
+           AND g.id NOT IN (SELECT group_id FROM group_members WHERE user_id = ?)
          ORDER BY g.name`,
       )
       .all(parentGroupId, userId) as Group[];
@@ -183,7 +190,8 @@ export function listLinkedGroups(
       `SELECT ${GROUP_LIST_SELECT}
        FROM groups g
        WHERE g.parent_group_id = ?
-         AND g.id NOT IN (SELECT group_id FROM user_groups WHERE user_id = ?)
+         AND g.discoverable = 1
+         AND g.id NOT IN (SELECT group_id FROM group_members WHERE user_id = ?)
          AND (g.id LIKE ? OR g.name LIKE ?)
        ORDER BY g.name
        LIMIT 30`,
@@ -197,13 +205,13 @@ export function listAllGroups(
 ): { groups: AdminGroup[]; total: number } {
   const groups = db
     .prepare(
-      `SELECT g.id, g.handle, g.name,
+      `SELECT g.id, g.conv_id, g.revision, g.handle, g.name,
               (g.password_hash IS NOT NULL) as has_password,
               g.type, g.discoverable, g.members_hidden, g.admin_only, g.no_leave,
               g.parent_group_id, g.created_at,
               COUNT(ug.user_id) as member_count
        FROM groups g
-       LEFT JOIN user_groups ug ON g.id = ug.group_id
+       LEFT JOIN group_members ug ON g.id = ug.group_id
        GROUP BY g.id
        ORDER BY g.created_at DESC
        LIMIT 50 OFFSET ?`,
@@ -218,7 +226,7 @@ export function listAllGroups(
 export function listGroupMemberIds(db: Database, groupId: string): string[] {
   return (
     db
-      .prepare("SELECT user_id FROM user_groups WHERE group_id = ?")
+      .prepare("SELECT user_id FROM group_members WHERE group_id = ?")
       .all(groupId) as { user_id: string }[]
   ).map((row) => row.user_id);
 }
@@ -226,7 +234,7 @@ export function listGroupMemberIds(db: Database, groupId: string): string[] {
 export function listUserGroupIds(db: Database, userId: string): string[] {
   return (
     db
-      .prepare("SELECT group_id FROM user_groups WHERE user_id = ?")
+      .prepare("SELECT group_id FROM group_members WHERE user_id = ?")
       .all(userId) as { group_id: string }[]
   ).map((row) => row.group_id);
 }
@@ -241,7 +249,7 @@ export function listGroupMembersForView(
     ? (db
         .prepare(
           `SELECT u.id, u.handle, u.username, u.created_at, ug.joined_at, ug.hide_self
-           FROM user_groups ug
+           FROM group_members ug
            JOIN users u ON ug.user_id = u.id
            WHERE ug.group_id = ?
            ORDER BY ug.joined_at ASC`,
@@ -250,7 +258,7 @@ export function listGroupMembersForView(
     : (db
         .prepare(
           `SELECT u.id, u.handle, u.username, u.created_at, ug.joined_at, ug.hide_self
-           FROM user_groups ug
+           FROM group_members ug
            JOIN users u ON ug.user_id = u.id
            WHERE ug.group_id = ?
              AND (ug.hide_self = 0 OR ug.user_id = ?)
@@ -267,7 +275,7 @@ export function findMembership(
   return (
     (db
       .prepare(
-        "SELECT hide_self FROM user_groups WHERE user_id = ? AND group_id = ?",
+        "SELECT hide_self FROM group_members WHERE user_id = ? AND group_id = ?",
       )
       .get(userId, groupId) as GroupMembershipRow | undefined) ?? null
   );
@@ -279,7 +287,7 @@ export function isGroupMember(
   groupId: string,
 ): boolean {
   return !!db
-    .prepare("SELECT 1 FROM user_groups WHERE user_id = ? AND group_id = ?")
+    .prepare("SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?")
     .get(userId, groupId);
 }
 
@@ -296,10 +304,10 @@ export function userExists(db: Database, userId: string): boolean {
 export function insertGroup(db: Database, row: GroupInsertRow): void {
   db.prepare(
     `INSERT INTO groups (
-      id, handle, name, discoverable, password_hash, type,
+      id, conv_id, handle, name, discoverable, password_hash, type,
       members_hidden, admin_only, no_leave, parent_group_id
     ) VALUES (
-      @id, @handle, @name, @discoverable, @password_hash, @type,
+      @id, @conv_id, @handle, @name, @discoverable, @password_hash, @type,
       @members_hidden, @admin_only, @no_leave, @parent_group_id
     )`,
   ).run(row);
@@ -331,7 +339,7 @@ export function addGroupMember(
   groupId: string,
 ): void {
   db.prepare(
-    "INSERT OR IGNORE INTO user_groups (user_id, group_id) VALUES (?, ?)",
+    "INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, ?)",
   ).run(userId, groupId);
 }
 
@@ -340,10 +348,9 @@ export function removeGroupMember(
   userId: string,
   groupId: string,
 ): void {
-  db.prepare("DELETE FROM user_groups WHERE user_id = ? AND group_id = ?").run(
-    userId,
-    groupId,
-  );
+  db.prepare(
+    "DELETE FROM group_members WHERE user_id = ? AND group_id = ?",
+  ).run(userId, groupId);
 }
 
 export function updateMembershipHideSelf(
@@ -353,7 +360,7 @@ export function updateMembershipHideSelf(
   hideSelf: boolean,
 ): void {
   db.prepare(
-    "UPDATE user_groups SET hide_self = ? WHERE user_id = ? AND group_id = ?",
+    "UPDATE group_members SET hide_self = ? WHERE user_id = ? AND group_id = ?",
   ).run(hideSelf ? 1 : 0, userId, groupId);
 }
 

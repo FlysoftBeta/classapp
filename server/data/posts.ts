@@ -10,19 +10,19 @@ import { POST_PREVIEW_LENGTH } from "@/shared/validation/posts";
 
 export interface PostRow {
   id: string;
-  sequence?: number;
+  sequence: number;
   user_id: string | null;
+  conv_id: string;
+  revision: number;
   brief: string;
   content_json: string;
-  group_id: string | null;
-  dm_to: string | null;
   reply_to: string | null;
-  is_deleted: number;
   deleted_at: string | null;
   edited_at: string | null;
   created_at: string;
   username?: string | null;
   handle?: string | null;
+  group_name?: string | null;
   reply_username?: string | null;
   reply_handle?: string | null;
   reply_brief?: string | null;
@@ -31,55 +31,26 @@ export interface PostRow {
 export interface PostAccessRow {
   id: string;
   user_id: string | null;
-  group_id: string | null;
-  dm_to: string | null;
-  content_json: string | null;
-  is_deleted: number;
+  conv_id: string;
+  content_json: string;
+  deleted_at: string | null;
 }
-
-export function findPostAccessRow(
-  db: Database,
-  postId: string,
-): PostAccessRow | null {
-  return (
-    (db
-      .prepare(
-        "SELECT id, user_id, group_id, dm_to, content_json, is_deleted FROM posts WHERE id = ?",
-      )
-      .get(postId) as PostAccessRow | undefined) ?? null
-  );
-}
-
-export function usersShareGroup(
-  db: Database,
-  firstUserId: string,
-  secondUserId: string,
-): boolean {
-  return !!db
-    .prepare(
-      `SELECT 1 FROM user_groups ug1
-     JOIN user_groups ug2 ON ug1.group_id = ug2.group_id
-     WHERE ug1.user_id = ? AND ug2.user_id = ? LIMIT 1`,
-    )
-    .get(firstUserId, secondUserId);
-}
-
-const REPLY_PREVIEW_LENGTH = 200;
 
 export const POST_WITH_REPLY_SQL = `
-  SELECT p.*, p.rowid AS sequence,
+  SELECT p.id, p.sequence, p.author_id AS user_id, p.conv_id, p.revision, p.brief,
+    p.content_json, p.reply_to, p.deleted_at, p.edited_at, p.created_at,
     COALESCE(u.username, du.username) AS username, u.handle,
-    r.brief as reply_brief,
-    COALESCE(ru.username, rdu.username) as reply_username,
-    ru.handle as reply_handle
+    r.brief AS reply_brief,
+    COALESCE(ru.username, rdu.username) AS reply_username,
+    ru.handle AS reply_handle
   FROM posts p
-  LEFT JOIN users u ON p.user_id = u.id
+  LEFT JOIN users u ON p.author_id = u.id
     AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-  LEFT JOIN deleted_users du ON p.user_id = du.id
+  LEFT JOIN deleted_users du ON p.author_id = du.id
   LEFT JOIN posts r ON p.reply_to = r.id
-  LEFT JOIN users ru ON r.user_id = ru.id
+  LEFT JOIN users ru ON r.author_id = ru.id
     AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = ru.id)
-  LEFT JOIN deleted_users rdu ON r.user_id = rdu.id
+  LEFT JOIN deleted_users rdu ON r.author_id = rdu.id
 `;
 
 export function hydratePost(row: PostRow): Post {
@@ -88,21 +59,23 @@ export function hydratePost(row: PostRow): Post {
     id: row.id,
     sequence: row.sequence,
     user_id: row.user_id,
+    conv_id: row.conv_id,
+    revision: row.revision,
     brief: row.brief,
-    group_id: row.group_id,
-    dm_to: row.dm_to,
     reply_to: row.reply_to,
-    is_deleted: row.is_deleted,
     deleted_at: row.deleted_at,
     edited_at: row.edited_at,
     created_at: row.created_at,
     username: row.username,
     handle: row.handle,
+    group_name: row.group_name,
     reply_username: row.reply_username,
     reply_handle: row.reply_handle,
     reply_brief: row.reply_brief,
   };
   switch (stored.type) {
+    case "deleted":
+      return { ...base, type: "deleted" };
     case "text":
       return {
         ...base,
@@ -125,16 +98,12 @@ export function hydratePost(row: PostRow): Post {
 
 export function truncatePosts(posts: Post[]): Post[] {
   return posts.map((post) => {
-    let out: Post = post;
-    if (post.reply_brief && post.reply_brief.length > REPLY_PREVIEW_LENGTH) {
-      out = {
-        ...out,
-        reply_brief: post.reply_brief.slice(0, REPLY_PREVIEW_LENGTH),
-      };
+    let out = post;
+    if (post.reply_brief && post.reply_brief.length > 200) {
+      out = { ...out, reply_brief: post.reply_brief.slice(0, 200) };
     }
-    if (post.type !== "text" || post.text.length <= POST_PREVIEW_LENGTH) {
+    if (post.type !== "text" || post.text.length <= POST_PREVIEW_LENGTH)
       return out;
-    }
     return {
       ...post,
       text: post.text.slice(0, POST_PREVIEW_LENGTH),
@@ -143,71 +112,101 @@ export function truncatePosts(posts: Post[]): Post[] {
   });
 }
 
-export function getPostRowid(db: Database, id: string): number | null {
-  const row = db.prepare("SELECT rowid FROM posts WHERE id = ?").get(id) as
-    { rowid: number } | undefined;
-  return row?.rowid ?? null;
-}
-
-export function getPostById(db: Database, id: string): Post | null {
-  const row =
-    (db.prepare(`${POST_WITH_REPLY_SQL} WHERE p.id = ?`).get(id) as
-      PostRow | undefined) ?? null;
-  return row ? hydratePost(row) : null;
-}
-
-export function getPostAccessRow(
+export function findPostAccessRow(
   db: Database,
-  id: string,
-): {
-  id: string;
-  user_id: string | null;
-  group_id: string | null;
-  dm_to: string | null;
-  content_json: string | null;
-  is_deleted: number;
-} | null {
+  postId: string,
+): PostAccessRow | null {
   return (
     (db
       .prepare(
-        "SELECT id, user_id, group_id, dm_to, content_json, is_deleted FROM posts WHERE id = ?",
+        `SELECT id, author_id AS user_id, conv_id, content_json, deleted_at
+         FROM posts WHERE id = ?`,
       )
-      .get(id) as
-      | {
-          id: string;
-          user_id: string | null;
-          group_id: string | null;
-          dm_to: string | null;
-          content_json: string | null;
-          is_deleted: number;
-        }
-      | undefined) ?? null
+      .get(postId) as PostAccessRow | undefined) ?? null
   );
+}
+
+export const getPostAccessRow = findPostAccessRow;
+
+export function findSharedVisibleGroup(
+  db: Database,
+  firstUserId: string,
+  secondUserId: string,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT first.group_id
+       FROM group_members first
+       JOIN group_members second ON second.group_id = first.group_id
+       WHERE first.user_id = ? AND second.user_id = ?
+         AND first.hide_self = 0 AND second.hide_self = 0
+       ORDER BY first.joined_at, first.group_id LIMIT 1`,
+    )
+    .get(firstUserId, secondUserId) as { group_id: string } | undefined;
+  return row?.group_id ?? null;
+}
+
+export function usersShareGroup(
+  db: Database,
+  firstUserId: string,
+  secondUserId: string,
+): boolean {
+  return findSharedVisibleGroup(db, firstUserId, secondUserId) !== null;
+}
+
+export function getPostRowid(db: Database, id: string): number | null {
+  const row = db.prepare("SELECT sequence FROM posts WHERE id = ?").get(id) as
+    { sequence: number } | undefined;
+  return row?.sequence ?? null;
+}
+
+export function getPostById(db: Database, id: string): Post | null {
+  const row = db.prepare(`${POST_WITH_REPLY_SQL} WHERE p.id = ?`).get(id) as
+    PostRow | undefined;
+  return row ? hydratePost(row) : null;
+}
+
+interface PageQuery {
+  beforeClause: string;
+  afterClause: string;
+  order: "ASC" | "DESC";
+  revisionOrder?: boolean;
+  args: (string | number)[];
+  limit: number;
+  offset: number;
+}
+
+function queryPostsForConv(
+  db: Database,
+  convId: string,
+  input: PageQuery,
+): Post[] {
+  const rows = db
+    .prepare(
+      `${POST_WITH_REPLY_SQL}
+       WHERE p.conv_id = ? ${input.beforeClause} ${input.afterClause}
+       ORDER BY ${input.revisionOrder ? "p.revision ASC, p.sequence ASC" : `p.sequence ${input.order}`}
+       LIMIT ? OFFSET ?`,
+    )
+    .all(convId, ...input.args, input.limit, input.offset) as PostRow[];
+  return truncatePosts(rows.map(hydratePost));
 }
 
 export function queryFeedPosts(
   db: Database,
   userId: string,
-  input: {
-    beforeClause: string;
-    afterClause: string;
-    order: "ASC" | "DESC";
-    args: (string | number)[];
-    limit: number;
-    offset: number;
-  },
+  input: PageQuery,
 ): Post[] {
   const rows = db
     .prepare(
       `${POST_WITH_REPLY_SQL}
-       WHERE (
-         (p.dm_to IS NULL AND p.group_id IN (
-           SELECT group_id FROM user_groups WHERE user_id = ?
-         ))
-         OR (p.dm_to IS NOT NULL AND (p.user_id = ? OR p.dm_to = ?))
-       )
-       ${input.beforeClause} ${input.afterClause}
-       ORDER BY p.rowid ${input.order}
+       WHERE p.conv_id IN (
+         SELECT g.conv_id FROM group_members gm
+         JOIN groups g ON g.id = gm.group_id WHERE gm.user_id = ?
+         UNION
+         SELECT d.conv_id FROM dms d WHERE d.peer_a = ? OR d.peer_b = ?
+       ) ${input.beforeClause} ${input.afterClause}
+       ORDER BY ${input.revisionOrder ? "p.revision ASC, p.sequence ASC" : `p.sequence ${input.order}`}
        LIMIT ? OFFSET ?`,
     )
     .all(
@@ -223,60 +222,18 @@ export function queryFeedPosts(
 
 export function queryGroupPosts(
   db: Database,
-  groupId: string,
-  input: {
-    beforeClause: string;
-    afterClause: string;
-    order: "ASC" | "DESC";
-    args: (string | number)[];
-    limit: number;
-    offset: number;
-  },
+  convId: string,
+  input: PageQuery,
 ): Post[] {
-  const rows = db
-    .prepare(
-      `${POST_WITH_REPLY_SQL}
-       WHERE p.group_id = ? AND p.dm_to IS NULL
-       ${input.beforeClause} ${input.afterClause}
-       ORDER BY p.rowid ${input.order}
-       LIMIT ? OFFSET ?`,
-    )
-    .all(groupId, ...input.args, input.limit, input.offset) as PostRow[];
-  return truncatePosts(rows.map(hydratePost));
+  return queryPostsForConv(db, convId, input);
 }
 
 export function queryDmPosts(
   db: Database,
-  userId: string,
-  partnerId: string,
-  input: {
-    beforeClause: string;
-    afterClause: string;
-    order: "ASC" | "DESC";
-    args: (string | number)[];
-    limit: number;
-    offset: number;
-  },
+  convId: string,
+  input: PageQuery,
 ): Post[] {
-  const rows = db
-    .prepare(
-      `${POST_WITH_REPLY_SQL}
-       WHERE p.dm_to IS NOT NULL
-         AND ((p.user_id = ? AND p.dm_to = ?) OR (p.user_id = ? AND p.dm_to = ?))
-         ${input.beforeClause} ${input.afterClause}
-         ORDER BY p.rowid ${input.order}
-         LIMIT ? OFFSET ?`,
-    )
-    .all(
-      userId,
-      partnerId,
-      partnerId,
-      userId,
-      ...input.args,
-      input.limit,
-      input.offset,
-    ) as PostRow[];
-  return truncatePosts(rows.map(hydratePost));
+  return queryPostsForConv(db, convId, input);
 }
 
 export function groupMembershipExists(
@@ -285,7 +242,7 @@ export function groupMembershipExists(
   groupId: string,
 ): boolean {
   return !!db
-    .prepare("SELECT 1 FROM user_groups WHERE user_id = ? AND group_id = ?")
+    .prepare("SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?")
     .get(userId, groupId);
 }
 
@@ -294,24 +251,21 @@ export function insertPost(
   input: {
     id: string;
     userId: string;
+    convId: string;
     brief: string;
     contentJson: string;
-    groupId: string | null;
-    dmTo: string | null;
     replyTo: string | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO posts (id, user_id, content, brief, content_json, group_id, dm_to, reply_to)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO posts (id, author_id, conv_id, brief, content_json, reply_to)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.userId,
-    input.brief,
+    input.convId,
     input.brief,
     input.contentJson,
-    input.groupId,
-    input.dmTo,
     input.replyTo,
   );
 }
@@ -323,75 +277,32 @@ export function updatePostBody(
   contentJson: string,
 ): void {
   db.prepare(
-    `UPDATE posts SET content = ?, brief = ?, content_json = ?, edited_at = datetime('now')
-     WHERE id = ?`,
-  ).run(brief, brief, contentJson, postId);
+    `UPDATE posts SET brief = ?, content_json = ?, edited_at = datetime('now')
+     WHERE id = ? AND deleted_at IS NULL`,
+  ).run(brief, contentJson, postId);
 }
 
-export function markPostDeleted(
-  db: Database,
-  postId: string,
-  emptyContentJson: string,
-): void {
+export function markPostDeleted(db: Database, postId: string): void {
   db.prepare(
-    `UPDATE posts SET is_deleted = 1, deleted_at = datetime('now'),
-     content = '', brief = '', content_json = ?
+    `UPDATE posts SET brief = '', content_json = '{"type":"deleted"}',
+       deleted_at = COALESCE(deleted_at, datetime('now')), edited_at = NULL
      WHERE id = ?`,
-  ).run(emptyContentJson, postId);
-}
-
-export function deletePostRow(db: Database, postId: string): void {
-  db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+  ).run(postId);
 }
 
 export function purgePostsByUser(
   db: Database,
   userId: string,
-): {
-  posts: Array<{
-    id: string;
-    user_id: string | null;
-    group_id: string | null;
-    dm_to: string | null;
-  }>;
-  groupIds: string[];
-  peerIds: string[];
-} {
+): { posts: Array<{ id: string; conv_id: string }>; convIds: string[] } {
   const posts = db
-    .prepare(
-      `SELECT id, user_id, group_id, dm_to FROM posts
-       WHERE user_id = ? OR dm_to = ?`,
-    )
-    .all(userId, userId) as Array<{
-    id: string;
-    user_id: string | null;
-    group_id: string | null;
-    dm_to: string | null;
-  }>;
-  const groupIds = (
-    db
-      .prepare(
-        `SELECT DISTINCT group_id FROM posts
-         WHERE user_id = ? AND group_id IS NOT NULL`,
-      )
-      .all(userId) as { group_id: string }[]
-  ).map((row) => row.group_id);
-  const peerIds = (
-    db
-      .prepare(
-        `SELECT DISTINCT CASE WHEN user_id = ? THEN dm_to ELSE user_id END AS peer_id
-         FROM posts
-         WHERE dm_to IS NOT NULL AND (user_id = ? OR dm_to = ?)`,
-      )
-      .all(userId, userId, userId) as { peer_id: string | null }[]
-  )
-    .map((row) => row.peer_id)
-    .filter((id): id is string => id !== null && id !== userId);
-  db.prepare("DELETE FROM posts WHERE user_id = ? OR dm_to = ?").run(
-    userId,
-    userId,
-  );
-  return { posts, groupIds, peerIds };
+    .prepare("SELECT id, conv_id FROM posts WHERE author_id = ?")
+    .all(userId) as Array<{ id: string; conv_id: string }>;
+  db.prepare(
+    `UPDATE posts SET brief = '', content_json = '{"type":"deleted"}',
+       deleted_at = COALESCE(deleted_at, datetime('now')), edited_at = NULL
+     WHERE author_id = ?`,
+  ).run(userId);
+  return { posts, convIds: [...new Set(posts.map((post) => post.conv_id))] };
 }
 
 export function listAdminPosts(
@@ -401,42 +312,42 @@ export function listAdminPosts(
   const q = input.q ?? "";
   const userId = input.userId ?? "";
   const offset = input.offset ?? 0;
-  let query = `
-    SELECT p.*, COALESCE(u.username, du.username) AS username,
-           u.handle, g.name as group_name
-    FROM posts p
-    LEFT JOIN users u ON p.user_id = u.id
-      AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-    LEFT JOIN deleted_users du ON p.user_id = du.id
-    LEFT JOIN groups g ON p.group_id = g.id
-    WHERE 1=1
-  `;
+  let where = "WHERE 1=1";
   const args: (string | number)[] = [];
   if (q) {
-    query += ` AND p.brief LIKE ?`;
+    where += " AND p.brief LIKE ?";
     args.push(`%${q}%`);
   }
   if (userId) {
-    query += ` AND p.user_id = ?`;
+    where += " AND p.author_id = ?";
     args.push(userId);
   }
-  query += ` ORDER BY p.created_at DESC LIMIT 50 OFFSET ?`;
-  args.push(offset);
-  const rawPosts = db.prepare(query).all(...args) as PostRow[];
-  const posts = truncatePosts(rawPosts.map(hydratePost));
-
-  let countQuery = "SELECT COUNT(*) as n FROM posts p WHERE 1=1";
-  const countArgs: (string | number)[] = [];
-  if (q) {
-    countQuery += " AND p.brief LIKE ?";
-    countArgs.push(`%${q}%`);
-  }
-  if (userId) {
-    countQuery += " AND p.user_id = ?";
-    countArgs.push(userId);
-  }
-  const total = (db.prepare(countQuery).get(...countArgs) as { n: number }).n;
-  return { posts, total };
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.sequence, p.author_id AS user_id, p.conv_id, p.revision, p.brief,
+              p.content_json, p.reply_to, p.deleted_at, p.edited_at, p.created_at,
+              COALESCE(u.username, du.username) AS username, u.handle,
+              g.name AS group_name,
+              r.brief AS reply_brief,
+              COALESCE(ru.username, rdu.username) AS reply_username,
+              ru.handle AS reply_handle
+       FROM posts p
+       LEFT JOIN users u ON p.author_id = u.id
+         AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
+       LEFT JOIN deleted_users du ON p.author_id = du.id
+       LEFT JOIN groups g ON g.conv_id = p.conv_id
+       LEFT JOIN posts r ON p.reply_to = r.id
+       LEFT JOIN users ru ON r.author_id = ru.id
+       LEFT JOIN deleted_users rdu ON r.author_id = rdu.id
+       ${where} ORDER BY p.sequence DESC LIMIT 50 OFFSET ?`,
+    )
+    .all(...args, offset) as PostRow[];
+  const total = (
+    db.prepare(`SELECT COUNT(*) AS n FROM posts p ${where}`).get(...args) as {
+      n: number;
+    }
+  ).n;
+  return { posts: truncatePosts(rows.map(hydratePost)), total };
 }
 
 export function parsePostStoredContent(contentJson: string | null | undefined) {

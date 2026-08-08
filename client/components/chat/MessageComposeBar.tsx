@@ -19,7 +19,7 @@ import type {
   StickerRecentItem,
 } from "@/shared/types/api";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
-import { createPost } from "@/client/api/posts";
+import { createPost, type CreatePostBody } from "@/client/api/posts";
 import { sendStickerPost } from "@/client/api/stickers";
 import {
   fetchConversationDraft,
@@ -154,12 +154,10 @@ export function MessageComposeBar({
     if (!text.trim()) return false;
 
     try {
-      const body: Record<string, string> = { content: text.trim() };
-      if (conversation.type === "group") {
-        body.group_id = conversation.id;
-      } else {
-        body.dm_to = conversation.id;
-      }
+      const body: CreatePostBody = {
+        content: text.trim(),
+        conv_id: conversation.conv_id,
+      };
       if (opts?.attachReply && replyTo) body.reply_to = replyTo.id;
 
       const { res, data } = await createPost(body);
@@ -224,9 +222,7 @@ export function MessageComposeBar({
             sticker_pack: item.pack,
             sticker_id: item.id,
           },
-          ...(conversation.type === "group"
-            ? { group_id: conversation.id }
-            : { dm_to: conversation.id }),
+          conv_id: conversation.conv_id,
           ...(replyTo ? { reply_to: replyTo.id } : {}),
         };
         const { res, data } = await sendStickerPost(body);

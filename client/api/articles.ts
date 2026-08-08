@@ -21,7 +21,7 @@ const {
 } = client.actions;
 import { client } from "@/client/lib/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -32,7 +32,12 @@ export interface ArticleSegmentPayload {
 
 interface ArticleListPage {
   articles: ArticleWithMeta[];
-  total: number;
+  hasMore: boolean;
+}
+
+export interface ArticleListCursor {
+  sortAt: string;
+  id: string;
 }
 
 const remoteArticlePageRequests = new Map<
@@ -74,23 +79,26 @@ async function reconcileArticleList(
 }
 
 async function fetchRemoteArticlePage(
-  offset: number,
+  cursor?: ArticleListCursor,
+  direction: "before" | "after" = "after",
   groupId?: string,
 ): Promise<ArticleListPage | null> {
-  const key = `${groupId ?? "all"}:${offset}`;
+  const key = `${groupId ?? "all"}:${direction}:${cursor?.sortAt ?? "start"}:${cursor?.id ?? "start"}`;
   const existing = remoteArticlePageRequests.get(key);
   if (existing) return existing;
 
   const request: Promise<ArticleListPage | null> = (async () => {
     const result = await listArticlesAction({
-      offset,
+      view: "all",
+      direction,
+      ...(cursor ? { cursor } : {}),
       ...(groupId ? { group_id: groupId } : {}),
     });
     observeActionResult(result);
     if (!result.ok) return null;
     return {
       articles: await reconcileArticleList(result.data.articles ?? []),
-      total: result.data.total ?? 0,
+      hasMore: result.data.hasMore,
     };
   })().finally(() => {
     if (remoteArticlePageRequests.get(key) === request) {
@@ -101,18 +109,50 @@ async function fetchRemoteArticlePage(
   return request;
 }
 
-export async function listArticles(offset: number, groupId?: string) {
+export async function listArticles(
+  cursor?: ArticleListCursor | number,
+  directionOrGroup?: "before" | "after" | string,
+  explicitGroupId?: string,
+): Promise<(ArticleListPage & { total: number }) | null> {
+  const direction =
+    directionOrGroup === "before" || directionOrGroup === "after"
+      ? directionOrGroup
+      : "after";
+  const groupId =
+    directionOrGroup === "before" || directionOrGroup === "after"
+      ? explicitGroupId
+      : directionOrGroup;
   if (!client.isConnected()) {
     const saved = await offlineRepository.getSavedArticleList();
     const articles = groupId
       ? saved.filter((article) => article.group_id === groupId)
       : saved;
     return {
-      articles: articles.slice(offset, offset + 50),
+      articles: articles.slice(0, 50),
+      hasMore: articles.length > 50,
       total: articles.length,
     };
   }
-  const data = await fetchRemoteArticlePage(offset, groupId);
+  // Infini's locateOffset is an estimate, not a server pagination contract.
+  // Translate it into cursor walks so the transport never falls back to OFFSET.
+  let skipped = typeof cursor === "number" ? Math.max(0, cursor) : 0;
+  let pageCursor = typeof cursor === "number" ? undefined : cursor;
+  let data: ArticleListPage | null = null;
+  while (true) {
+    data = await fetchRemoteArticlePage(pageCursor, direction, groupId);
+    if (!data || skipped < data.articles.length || !data.hasMore) break;
+    skipped -= data.articles.length;
+    const last =
+      direction === "after" ? data.articles.at(-1) : data.articles[0];
+    if (!last?.list_sort_at) break;
+    pageCursor = { sortAt: last.list_sort_at, id: last.id };
+  }
+  if (data && skipped > 0) {
+    data = {
+      ...data,
+      articles: data.articles.slice(skipped),
+    };
+  }
   if (data) {
     if (groupId) {
       // A group-filtered page is only a partial view of the global cache. It
@@ -122,12 +162,22 @@ export async function listArticles(offset: number, groupId?: string) {
         await offlineRepository.saveArticleMeta(article);
     } else {
       await offlineRepository.reconcileArticlePage(data.articles, {
-        offset,
-        total: data.total,
+        offset: 0,
+        total: data.articles.length,
       });
     }
   }
-  return data;
+  return data
+    ? {
+        ...data,
+        // The virtualizer only uses this as a local exhaustion estimate. Exact
+        // totals would require the COUNT scan cursor pagination removes.
+        total:
+          (typeof cursor === "number" ? cursor : 0) +
+          data.articles.length +
+          (data.hasMore ? 1 : 0),
+      }
+    : null;
 }
 
 export async function listBookmarkedArticles() {
@@ -135,7 +185,7 @@ export async function listBookmarkedArticles() {
     const articles = await offlineRepository.getSavedArticleList();
     return { articles: articles.filter((article) => article.is_bookmarked) };
   }
-  const result = await listArticlesAction({ bookmarked: true });
+  const result = await listArticlesAction({ view: "bookmarked" });
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
@@ -167,12 +217,15 @@ export async function fetchArticleSidebar() {
 export async function primeOfflineArticleList(): Promise<void> {
   if (!client.isConnected()) return;
   const pages: ArticleWithMeta[] = [];
-  for (const offset of [0, 50, 100, 150]) {
-    const page = await fetchRemoteArticlePage(offset);
+  let cursor: ArticleListCursor | undefined;
+  for (let pageNumber = 0; pageNumber < 4; pageNumber++) {
+    const page = await fetchRemoteArticlePage(cursor);
     if (!page) break;
     const entries = page.articles;
     pages.push(...entries);
-    if (entries.length < 50) break;
+    const last = entries.at(-1);
+    if (!page.hasMore || !last?.list_sort_at) break;
+    cursor = { sortAt: last.list_sort_at, id: last.id };
   }
   await offlineRepository.saveArticleList(pages.slice(0, 200));
 }
@@ -260,9 +313,9 @@ export async function fetchArticleSegment(
     await offlineRepository.saveArticleSegment(articleId, offset, data);
   } catch (error) {
     // The remote payload is still usable when an evictable IndexedDB cache
-    // write fails (for example, Chromium reports "Failed to write blobs"
-    // under storage pressure). Do not turn a successful reader fetch into an
-    // Infini provider failure solely because its cache could not be warmed.
+    // write fails under storage pressure. Do not turn a successful reader
+    // fetch into an Infini provider failure solely because its cache could not
+    // be warmed.
     if (options.requireCache) throw error;
     console.warn("[articles] Failed to cache text segment", {
       articleId,

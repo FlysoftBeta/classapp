@@ -28,7 +28,8 @@ import {
   conversationKey,
   postBelongsToConversation,
 } from "@/client/lib/chat/posts";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
+import { collectRevisionRange } from "@/client/data/consistency";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export interface UseChatPostsParams {
@@ -52,7 +53,7 @@ export interface ChatMessageTimeline {
   paddingEnd: number;
   replyToPost: (post: Post | null) => void;
   updatePost: (post: Post) => void;
-  deletePost: (id: string) => void;
+  deletePost: (post: Post) => void;
   scrollToPost: (postId: string) => void;
   retryLoad: () => void;
   offlineBoundaryBefore: boolean;
@@ -129,6 +130,7 @@ export function useChatPosts({
   const contentKeyRef = useRef("");
   const revalidationRef = useRef<Promise<void> | null>(null);
   const processedRevalidationRef = useRef(0);
+  const appliedRevisionRef = useRef(conversation.revision);
   const domHostRef = useRef<InfiniDomHost<
     Post,
     ChatCursor,
@@ -138,6 +140,8 @@ export function useChatPosts({
 
   const conversationType = conversation.type;
   const conversationId = conversation.id;
+  const conversationConvId = conversation.conv_id;
+  const conversationRevision = conversation.revision;
   const contentKey = conversationKey(conversation);
 
   useLayoutEffect(() => {
@@ -182,15 +186,32 @@ export function useChatPosts({
         if (sequence != null) params.after_sequence = String(sequence);
       }
 
-      const ref = { type: conversationType, id: conversationId } as const;
+      const ref = {
+        type: conversationType,
+        id: conversationId,
+        conv_id: conversationConvId,
+      } as const;
       const canWarmStart =
         onlineRef.current &&
         warmLatest &&
         direction === "before" &&
         cursor.kind === "latest";
-      let data = canWarmStart ? await fetchCachedPosts(ref, params) : null;
-      if (!data?.posts.length) data = await fetchPosts(ref, params);
-      else queueMicrotask(() => setRevalidateGeneration((value) => value + 1));
+      let data = null;
+      try {
+        // A conversation revision describes server awareness, not cache-page
+        // coverage. Even when IndexedDB contains a row at the current
+        // revision, it may be the only row left after cache eviction or a
+        // revision catch-up. Therefore an online latest-page bootstrap must
+        // read the authoritative page instead of treating any non-empty cache
+        // as a complete latest window.
+        data = await fetchPosts(ref, params);
+      } catch (error) {
+        if (!canWarmStart) throw error;
+      }
+      // Preserve a usable warm start if the connection drops after the online
+      // check or the authoritative request fails. Offline calls already read
+      // this same cache through fetchPosts.
+      if (!data && canWarmStart) data = await fetchCachedPosts(ref, params);
       if (signal.aborted) throw new Error("post request superseded");
       if (!data) throw new Error("post request failed");
 
@@ -209,7 +230,7 @@ export function useChatPosts({
           direction === "after" ? !hasMore : cursor.kind === "latest",
       };
     },
-    [conversationId, conversationType],
+    [conversationConvId, conversationId, conversationType],
   );
 
   // ---- resolveItem: fetch a single post by ID for re-bootstrap ----
@@ -219,6 +240,7 @@ export function useChatPosts({
         await offlineRepository.getPosts({
           type: conversationType,
           id: conversationId,
+          conv_id: conversationConvId,
         })
       ).find((post) => post.id === id);
       if (!authoritative && cached) return cached;
@@ -229,7 +251,7 @@ export function useChatPosts({
       }
       return null;
     },
-    [conversationId, conversationType],
+    [conversationConvId, conversationId, conversationType],
   );
 
   const provider: Provider<Post, ChatCursor, string> = {
@@ -247,7 +269,7 @@ export function useChatPosts({
           true,
         );
         if (signal.aborted) throw new Error("post bootstrap superseded");
-        if (!readAnchor || readAnchor.is_deleted) {
+        if (!readAnchor || readAnchor.type === "deleted") {
           setUnreadBoundary(null);
           setFallbackToBottom(true);
           return fetchDirectional({ kind: "latest" }, "before", signal, true);
@@ -255,7 +277,7 @@ export function useChatPosts({
       }
       const target = await resolveItem(cursor.id);
       if (signal.aborted) throw new Error("post bootstrap superseded");
-      if (!target || target.is_deleted) {
+      if (!target || target.type === "deleted") {
         setUnreadBoundary(null);
         setFallbackToBottom(true);
         return fetchDirectional({ kind: "latest" }, "before", signal, true);
@@ -285,7 +307,11 @@ export function useChatPosts({
       return fetchDirectional(cursor, direction, signal);
     },
     async locateOffset({ anchor, signedItemOffset, signal }) {
-      const ref = { type: conversationType, id: conversationId } as const;
+      const ref = {
+        type: conversationType,
+        id: conversationId,
+        conv_id: conversationConvId,
+      } as const;
       const targetSequence = Math.max(
         1,
         (anchor.sequence ?? 1) + signedItemOffset,
@@ -322,29 +348,27 @@ export function useChatPosts({
     },
   };
 
-  const { controller, snapshot } = useInfini<Post, ChatCursor, string, string>(
-    {
-      debug: showInfiniLogs
-        ? `ChatMessageList:${conversationType}:${conversationId}`
-        : undefined,
-      provider,
-      ops: POST_OPS,
-      estimateSize: estimatePostSize,
-      initial: unreadBoundary
-        ? {
-            cursor: { kind: "post", id: unreadBoundary.postId },
-            target: unreadBoundary.postId,
-            alignment: "start",
-          }
-        : { cursor: { kind: "latest" }, alignment: "end" },
-      targetToCursor: (id) => ({ kind: "post", id }),
-      locateTarget: (posts, id) =>
-        posts.some((post) => post.id === id) ? id : null,
-      residentBefore: 16,
-      residentAfter: 16,
-      defaultItemEstimate: ESTIMATE_POST_HEIGHT,
-    },
-  );
+  const { controller, snapshot } = useInfini<Post, ChatCursor, string, string>({
+    debug: showInfiniLogs
+      ? `ChatMessageList:${conversationType}:${conversationId}`
+      : undefined,
+    provider,
+    ops: POST_OPS,
+    estimateSize: estimatePostSize,
+    initial: unreadBoundary
+      ? {
+          cursor: { kind: "post", id: unreadBoundary.postId },
+          target: unreadBoundary.postId,
+          alignment: "start",
+        }
+      : { cursor: { kind: "latest" }, alignment: "end" },
+    targetToCursor: (id) => ({ kind: "post", id }),
+    locateTarget: (posts, id) =>
+      posts.some((post) => post.id === id) ? id : null,
+    residentBefore: 16,
+    residentAfter: 16,
+    defaultItemEstimate: ESTIMATE_POST_HEIGHT,
+  });
 
   const loadState = snapshot;
   const items = snapshot.mainItems.map((row) => row.item);
@@ -440,70 +464,61 @@ export function useChatPosts({
   const revalidateVisiblePosts = useCallback(() => {
     if (!onlineRef.current || revalidationRef.current) return false;
     const runKey = contentKey;
-    const ref = { type: conversationType, id: conversationId } as const;
+    const ref = {
+      type: conversationType,
+      id: conversationId,
+      conv_id: conversationConvId,
+    } as const;
     const run = (async () => {
       const held = [...itemsRef.current];
-      for (let start = 0; start < held.length; start += 8) {
-        const batch = held.slice(start, start + 8);
-        const results = await Promise.all(
-          batch.map(async (cached) => ({
-            result: await fetchPost(cached.id)
-              .then((result) => ({
-                status: "fulfilled" as const,
-                value: { cached, result },
-              }))
-              .catch(() => ({ status: "rejected" as const })),
-          })),
-        );
-        if (contentKeyRef.current !== runKey || !onlineRef.current) return;
-        for (const settled of results) {
-          if (settled.result.status !== "fulfilled") continue;
-          const { cached, result } = settled.result.value;
-          if (result.res.ok && result.data.post) {
-            const remote = result.data.post;
-            await offlineRepository.savePosts(ref, [remote]);
-            mutateItems((item) => (item.id === remote.id ? remote : item));
-          } else if (!result.res.ok && result.res.error.code === "NOT_FOUND") {
-            await offlineRepository.markPostDeleted(ref, cached.id);
-            mutateItems((item) =>
-              item.id === cached.id ? { ...item, is_deleted: 1 } : item,
-            );
-          }
-        }
+      const sinceRevision = appliedRevisionRef.current;
+      if (conversationRevision <= sinceRevision) return;
+      const rows = await collectRevisionRange(
+        sinceRevision,
+        conversationRevision,
+        async (cursor, through, limit) => {
+          const data = await fetchRemotePosts(ref, {
+            changed_after_revision: String(cursor),
+            changed_through_revision: String(through),
+            limit: String(limit),
+          });
+          if (!data) throw new Error("Post revision catch-up failed");
+          return data.posts;
+        },
+      );
+      if (contentKeyRef.current !== runKey) return;
+      const changed = new Map(rows.map((post) => [post.id, post]));
+
+      if (changed.size) {
+        mutateItems((item) => {
+          const remote = changed.get(item.id);
+          return remote && remote.revision >= item.revision ? remote : item;
+        });
       }
 
-      if (!loadState.exhaustedAfter || contentKeyRef.current !== runKey) return;
       const maxSequence = held.reduce(
         (max, post) => Math.max(max, post.sequence ?? 0),
         0,
       );
-      const newer = new Map<string, Post>();
-      let beforeId = "";
-      const seenCursors = new Set<string>();
-      while (true) {
-        const data = await fetchRemotePosts(ref, {
-          limit: String(LOAD_LIMIT),
-          ...(beforeId ? { before_id: beforeId } : {}),
-        });
-        if (!data || contentKeyRef.current !== runKey || !onlineRef.current)
-          return;
-        const page = data.posts ?? [];
-        let reachedKnownRange = false;
-        for (const post of page) {
-          if ((post.sequence ?? 0) > maxSequence) newer.set(post.id, post);
-          else reachedKnownRange = true;
-        }
-        if (reachedKnownRange || page.length < LOAD_LIMIT) break;
-        beforeId = page[page.length - 1]?.id ?? "";
-        if (!beforeId || seenCursors.has(beforeId)) break;
-        seenCursors.add(beforeId);
-      }
-      const appended = [...newer.values()].sort(
-        (a, b) =>
-          (a.sequence ?? 0) - (b.sequence ?? 0) ||
-          a.created_at.localeCompare(b.created_at),
+      const heldIds = new Set(held.map((post) => post.id));
+      const appended = loadState.exhaustedAfter
+        ? [...changed.values()]
+            .filter(
+              (post) =>
+                !heldIds.has(post.id) && (post.sequence ?? 0) > maxSequence,
+            )
+            .sort(
+              (a, b) =>
+                (a.sequence ?? 0) - (b.sequence ?? 0) ||
+                a.created_at.localeCompare(b.created_at),
+            )
+        : [];
+      appliedRevisionRef.current = Math.max(
+        sinceRevision,
+        conversationRevision,
+        ...[...changed.values()].map((post) => post.revision),
       );
-      if (!appended.length || contentKeyRef.current !== runKey) return;
+      if (!appended.length) return;
       const wasAtBottom = atBottomRef.current;
       const last = appended[appended.length - 1]!;
       lastPostIdRef.current = last.id;
@@ -529,7 +544,9 @@ export function useChatPosts({
   }, [
     contentKey,
     conversation,
+    conversationConvId,
     conversationId,
+    conversationRevision,
     conversationType,
     loadState.exhaustedAfter,
     markRead,
@@ -546,8 +563,7 @@ export function useChatPosts({
       setOfflineBoundaryBefore(false);
       setOfflineBoundaryAfter(false);
       // Keep the known end closed until the authoritative catch-up below has
-      // compared it with the server. This avoids using a locally deleted last
-      // post as an after-cursor.
+      // merged all current rows newer than our last applied revision.
       clearExhausted("before");
       setRevalidateGeneration((value) => value + 1);
     });
@@ -566,6 +582,12 @@ export function useChatPosts({
     }
   }, [loadState.phase.status, revalidateGeneration, revalidateVisiblePosts]);
 
+  useEffect(() => {
+    if (online && conversationRevision > appliedRevisionRef.current) {
+      setRevalidateGeneration((value) => value + 1);
+    }
+  }, [conversationRevision, online]);
+
   useLayoutEffect(() => {
     didSetLastIdRef.current = false;
     // The first layout measurement must always synchronize the affordance.
@@ -580,13 +602,14 @@ export function useChatPosts({
   useEffect(() => {
     if (convKeyRef.current === contentKey) return;
     convKeyRef.current = contentKey;
+    appliedRevisionRef.current = conversation.revision;
 
     setReplyTo(null);
     lastPostIdRef.current = "";
     atBottomRef.current = true;
     setShowScrollDown(false);
     markedReadRef.current = false;
-  }, [contentKey]);
+  }, [contentKey, conversation.revision]);
 
   const markReadAtBottom = useCallback(() => {
     const lastId = lastPostIdRef.current;
@@ -690,11 +713,14 @@ export function useChatPosts({
 
       if (evt.kind === "post.created" && evt.data?.post) {
         const post = evt.data.post;
-        if (!postBelongsToConversation(post, conversation, currentUser.id))
-          return;
+        if (!postBelongsToConversation(post, conversation)) return;
 
         lastPostIdRef.current = post.id;
         void offlineRepository.savePosts(conversation, [post]);
+        appliedRevisionRef.current = Math.max(
+          appliedRevisionRef.current,
+          post.revision,
+        );
         markedReadRef.current = false;
         pushUniqueItems("after", [post]);
 
@@ -710,19 +736,25 @@ export function useChatPosts({
 
       if (evt.kind === "post.updated" && evt.data?.post) {
         const post = evt.data.post;
-        if (!postBelongsToConversation(post, conversation, currentUser.id))
-          return;
+        if (!postBelongsToConversation(post, conversation)) return;
         void offlineRepository.savePosts(conversation, [post]);
+        appliedRevisionRef.current = Math.max(
+          appliedRevisionRef.current,
+          post.revision,
+        );
         mutateItems((item) => (item.id === post.id ? post : item));
         return;
       }
 
-      if (evt.kind === "post.deleted" && evt.data?.id) {
-        const id = evt.data.id;
-        void offlineRepository.markPostDeleted(conversation, id);
-        mutateItems((item) =>
-          item.id === id ? { ...item, is_deleted: 1 } : item,
+      if (evt.kind === "post.deleted" && evt.data?.post) {
+        const post = evt.data.post;
+        if (!postBelongsToConversation(post, conversation)) return;
+        void offlineRepository.savePosts(conversation, [post]);
+        appliedRevisionRef.current = Math.max(
+          appliedRevisionRef.current,
+          post.revision,
         );
+        mutateItems((item) => (item.id === post.id ? post : item));
       }
     });
   }, [
@@ -770,12 +802,11 @@ export function useChatPosts({
 
   /** Called by ChatPostCard when a post is deleted. */
   const handleDeleted = useCallback(
-    (id: string) => {
-      mutateItems((item) =>
-        item.id === id ? { ...item, is_deleted: 1 } : item,
-      );
+    (post: Post) => {
+      void offlineRepository.savePosts(conversation, [post]);
+      mutateItems((item) => (item.id === post.id ? post : item));
     },
-    [mutateItems],
+    [conversation, mutateItems],
   );
 
   const clearReplyTo = useCallback(() => setReplyTo(null), []);

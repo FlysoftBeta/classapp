@@ -35,9 +35,9 @@ export class PostActorFacade {
     return this.posts.update(user, postId, text);
   }
 
-  async softDelete(postId: string): Promise<void> {
+  async softDelete(postId: string): Promise<Post> {
     const user = await this.actor.requireUser();
-    this.posts.softDelete(user, postId);
+    return this.posts.softDelete(user, postId);
   }
 
   async adminList(input: { q?: string; userId?: string; offset?: number }) {

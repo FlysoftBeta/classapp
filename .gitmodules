@@ -1,3 +1,6 @@
 [submodule "lib/infini"]
 	path = lib/infini
 	url = https://github.com/infini-scroll/infini.git
+[submodule "lib/poppler"]
+	path = lib/poppler
+	url = https://github.com/FlysoftBeta/pdf-render.git

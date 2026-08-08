@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TEXT_ARTICLE_SEGMENT_SIZE } from "@/shared/articles/segments";
 
 const articleBaseShape = {
   id: z.string(),
@@ -6,6 +7,20 @@ const articleBaseShape = {
   /** Group conversation that owns this article. */
   group_id: z.string(),
   title: z.string(),
+  provider: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("text"),
+      words: z.number().int().nonnegative(),
+      chunks: z.number().int().nonnegative(),
+    }),
+    z.object({
+      type: z.literal("blob"),
+      file_name: z.string(),
+      mime_type: z.string().nullable().optional(),
+      bytes: z.number().int().nonnegative().optional(),
+      original_name: z.string().nullable().optional(),
+    }),
+  ]),
   content_kind: z.enum(["text", "blob"]),
   blob_path: z.string().nullable().optional(),
   mime_type: z.string().nullable().optional(),
@@ -29,6 +44,8 @@ export const articleWithMetaSchema = z
     content_length: z.number().int().nonnegative(),
     total_read_seconds: z.number().optional(),
     last_read_at: z.string().nullable().optional(),
+    /** Opaque server ordering value for cursor pagination. */
+    list_sort_at: z.string().optional(),
   })
   .strict();
 export type ArticleWithMeta = z.infer<typeof articleWithMetaSchema>;
@@ -57,7 +74,7 @@ export const articleWithContentAndMetaSchema = articleWithMetaSchema
   .strict();
 
 /** Max characters returned per text segment API response. */
-export const SEGMENT_SIZE = 10_000;
+export const SEGMENT_SIZE = TEXT_ARTICLE_SEGMENT_SIZE;
 
 export const READING_HEARTBEAT_SECONDS = 15;
 export const READING_HISTORY_MIN_SECONDS = 30;

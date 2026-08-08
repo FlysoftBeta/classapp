@@ -121,6 +121,10 @@ export function launchChrome70(
     "--disable-dev-shm-usage",
     "--no-first-run",
     "--disable-background-networking",
+    "--enable-gpu-rasterization",
+    "--enable-oop-rasterization",
+    "--enable-features=VizDisplayCompositor,UseSkiaRenderer",
+    "--enable-blink-features=MiddleClickAutoscroll", // QOL for massive scrolling tests
     "--password-store=basic",
     `--user-data-dir=${options.userDataDir}`,
   ];

@@ -1,10 +1,18 @@
 import type { ArticleWithMeta, Conversation, Post } from "@/shared/types/api";
-import { resourceManager } from "./resourceManager";
+import { resourceManager } from "@/client/resource/resourceManager";
 import {
   chooseFurthestRead,
-  chooseLatestTimestamped,
-} from "@/shared/sync/arbitration";
-import { shouldSegmentArticleStorage } from "@/client/lib/articleSegmentStorage";
+  chooseLww,
+  choosePostVersion,
+  nextDeviceTimestamp,
+} from "@/client/data/consistency";
+import {
+  dmConvId,
+  groupConvId,
+  parseConvId,
+  peerIdFromDmConvId,
+} from "@/shared/conversations/id";
+import { entities } from "@/client/data/entities";
 
 export type ConversationDownloadPolicy = "auto" | "week" | "half-year";
 export type ArticleDownloadPolicy =
@@ -63,6 +71,8 @@ export interface DraftVersion {
 
 export interface VersionedValue<T> {
   value: T;
+  /** Semantic option this proposal intends to assign. */
+  purpose: string;
   updatedAt: number;
   syncedAt: number | null;
 }
@@ -81,9 +91,6 @@ export interface ReadingProgressVersion {
 const PREFIX = "offline:v1";
 let userScope = "anonymous";
 const keyLocks = new Map<string, Promise<void>>();
-const useSegmentedArticleStorage =
-  typeof navigator !== "undefined" &&
-  shouldSegmentArticleStorage(navigator.userAgent);
 
 async function withKeyLock<T>(storageKey: string, run: () => Promise<T>) {
   const previous = keyLocks.get(storageKey) ?? Promise.resolve();
@@ -106,29 +113,8 @@ function key(kind: string, id = ""): string {
   return `${PREFIX}:${userScope}:${kind}${id ? `:${id}` : ""}`;
 }
 
-function articleSegmentsKey(articleId: string): string {
-  return key("article-segments", articleId);
-}
-
-function articleSegmentKey(articleId: string, offset: number): string {
-  return `${articleSegmentsKey(articleId)}:${offset}`;
-}
-
-async function articleSegmentKeys(articleId: string): Promise<string[]> {
-  const aggregateKey = articleSegmentsKey(articleId);
-  const segmentPrefix = `${aggregateKey}:`;
-  return (await resourceManager.keys(aggregateKey)).filter(
-    (storageKey) =>
-      storageKey === aggregateKey || storageKey.startsWith(segmentPrefix),
-  );
-}
-
 async function removeArticleSegments(articleId: string): Promise<number> {
-  let freed = 0;
-  for (const storageKey of await articleSegmentKeys(articleId)) {
-    freed += await resourceManager.remove(storageKey);
-  }
-  return freed;
+  return entities.removeSegments(userScope, articleId);
 }
 
 type StoredArticleSegment<T> = T & {
@@ -152,8 +138,13 @@ function sliceStoredArticleSegment<T>(
   } as T;
 }
 
-function conversationId(ref: Pick<Conversation, "type" | "id">): string {
-  return `${ref.type}:${ref.id}`;
+function conversationId(
+  ref: Pick<Conversation, "type" | "id"> &
+    Partial<Pick<Conversation, "conv_id">>,
+): string {
+  if (ref.conv_id) return ref.conv_id;
+  if (ref.type === "group") return groupConvId(ref.id);
+  return dmConvId(userScope, ref.id);
 }
 
 function sortedPosts(posts: Post[]): Post[] {
@@ -161,7 +152,7 @@ function sortedPosts(posts: Post[]): Post[] {
 }
 
 function nextUpdatedAt(current?: { updatedAt: number } | null): number {
-  return Math.max(Date.now(), (current?.updatedAt ?? 0) + 1);
+  return nextDeviceTimestamp(current?.updatedAt ?? 0);
 }
 
 export const offlineRepository = {
@@ -188,6 +179,7 @@ export const offlineRepository = {
       if (current && current.updatedAt > updatedAt) return current;
       const next: VersionedValue<T> = {
         value,
+        purpose: `${namespace}:${id}`,
         updatedAt,
         syncedAt: options?.synced ? updatedAt : null,
       };
@@ -204,12 +196,26 @@ export const offlineRepository = {
     return withKeyLock(storageKey, async () => {
       const current =
         await resourceManager.getJson<VersionedValue<T>>(storageKey);
-      const winner = chooseLatestTimestamped(current, remote);
-      if (winner === current) return current;
+      const winner = chooseLww(
+        current
+          ? {
+              proposed: current.value,
+              purpose: current.purpose,
+              timestamp: current.updatedAt,
+            }
+          : null,
+        {
+          proposed: remote.value,
+          purpose: `${namespace}:${id}`,
+          timestamp: remote.updatedAt,
+        },
+      );
+      if (current && current.updatedAt > remote.updatedAt) return current;
       const canonical: VersionedValue<T> = {
-        value: remote.value,
-        updatedAt: remote.updatedAt,
-        syncedAt: remote.updatedAt,
+        value: winner.proposed,
+        purpose: winner.purpose,
+        updatedAt: winner.timestamp,
+        syncedAt: winner.timestamp,
       };
       await resourceManager.putJson(storageKey, canonical, "persisted");
       return canonical;
@@ -247,6 +253,7 @@ export const offlineRepository = {
     );
     return {
       ...stored,
+      purpose: stored.purpose ?? "conversation-read",
       value: {
         postId: stored.value,
         sequence:
@@ -305,6 +312,7 @@ export const offlineRepository = {
                   : (cachedEntry?.last_read_post_id ?? null),
               sequence: Math.max(storedSequence, cachedSequence),
             },
+            purpose: "conversation-read",
             updatedAt:
               stored?.updatedAt ?? cachedEntry?.read_updated_at_ms ?? 0,
             syncedAt: stored?.syncedAt ?? cachedEntry?.read_updated_at_ms ?? 0,
@@ -315,6 +323,7 @@ export const offlineRepository = {
       const updatedAt = nextUpdatedAt(stored);
       const version: VersionedValue<ConversationReadValue> = {
         value: { postId, sequence: targetSequence },
+        purpose: "conversation-read",
         updatedAt,
         syncedAt: null,
       };
@@ -360,12 +369,20 @@ export const offlineRepository = {
         : null;
       if (storedValue) {
         const local = { ...storedValue, updatedAt: stored!.updatedAt };
-        if (chooseFurthestRead(local, remote) === local) {
+        const winner = chooseFurthestRead(
+          { ...local, timestamp: local.updatedAt },
+          { ...remote, timestamp: remote.updatedAt },
+        );
+        if (
+          winner.postId === local.postId &&
+          winner.sequence === local.sequence
+        ) {
           return { ...stored!, value: storedValue };
         }
       }
       const canonical: VersionedValue<ConversationReadValue> = {
         value: { postId: remote.postId, sequence: remote.sequence },
+        purpose: "conversation-read",
         updatedAt: remote.updatedAt,
         syncedAt: remote.updatedAt,
       };
@@ -375,29 +392,16 @@ export const offlineRepository = {
   },
 
   async saveConversations(entries: Conversation[]) {
-    await resourceManager.putJson(key("conversations"), entries, "persisted");
+    await entities.replaceConversations(userScope, entries);
   },
   async getConversations() {
-    return (
-      (await resourceManager.getJson<Conversation[]>(key("conversations"))) ??
-      []
-    );
+    return entities.conversations(userScope);
   },
   async upsertConversation(entry: Conversation) {
-    const entries = await this.getConversations();
-    const index = entries.findIndex(
-      (item) => item.type === entry.type && item.id === entry.id,
-    );
-    if (index >= 0) entries[index] = entry;
-    else entries.push(entry);
-    await this.saveConversations(entries);
+    await entities.upsertConversation(userScope, entry);
   },
   async removeConversation(ref: Pick<Conversation, "type" | "id">) {
-    await this.saveConversations(
-      (await this.getConversations()).filter(
-        (item) => item.type !== ref.type || item.id !== ref.id,
-      ),
-    );
+    await entities.removeConversation(userScope, conversationId(ref));
   },
 
   async getConversationPolicy(ref: Pick<Conversation, "type" | "id">) {
@@ -405,12 +409,7 @@ export const offlineRepository = {
       "download-policy",
       conversationId(ref),
     );
-    if (version) return normalizeConversationPolicy(version.value);
-    return normalizeConversationPolicy(
-      (await resourceManager.getJson<ConversationDownloadPolicy>(
-        key("conversation-policy", conversationId(ref)),
-      )) ?? "auto",
-    );
+    return normalizeConversationPolicy(version?.value);
   },
   async setConversationPolicy(
     ref: Pick<Conversation, "type" | "id">,
@@ -426,14 +425,15 @@ export const offlineRepository = {
   async getConversationPolicies() {
     const prefix = key("version:download-policy");
     const result: Array<{
-      ref: { type: "group" | "dm"; id: string };
+      ref: { type: "group" | "dm"; id: string; conv_id: string };
       policy: ConversationDownloadPolicy;
     }> = [];
+    const conversations = await this.getConversations();
     for (const storageKey of await resourceManager.keys(prefix)) {
       const suffix = storageKey.slice(prefix.length + 1);
-      const separator = suffix.indexOf(":");
-      const type = suffix.slice(0, separator);
-      const id = suffix.slice(separator + 1);
+      const conversation = conversations.find(
+        (entry) => entry.conv_id === suffix,
+      );
       const policy = normalizeConversationPolicy(
         (
           await resourceManager.getJson<
@@ -441,22 +441,7 @@ export const offlineRepository = {
           >(storageKey)
         )?.value,
       );
-      if ((type === "group" || type === "dm") && id && policy)
-        result.push({ ref: { type, id }, policy });
-    }
-    const legacyPrefix = key("conversation-policy");
-    for (const storageKey of await resourceManager.keys(legacyPrefix)) {
-      const suffix = storageKey.slice(legacyPrefix.length + 1);
-      const separator = suffix.indexOf(":");
-      const type = suffix.slice(0, separator);
-      const id = suffix.slice(separator + 1);
-      if (result.some((item) => item.ref.type === type && item.ref.id === id))
-        continue;
-      const policy = normalizeConversationPolicy(
-        await resourceManager.getJson<ConversationDownloadPolicy>(storageKey),
-      );
-      if ((type === "group" || type === "dm") && id && policy)
-        result.push({ ref: { type, id }, policy });
+      if (conversation && policy) result.push({ ref: conversation, policy });
     }
     return result;
   },
@@ -466,66 +451,68 @@ export const offlineRepository = {
       "download-policy",
       id,
     );
-    const value =
-      current?.value ??
-      (await resourceManager.getJson<ConversationDownloadPolicy>(
-        key("conversation-policy", id),
-      ));
+    const value = current?.value;
     if (value)
       await this.setVersionedValue("download-policy", id, value, {
         updatedAt: current?.updatedAt ?? 0,
         synced: true,
       });
   },
-  async savePosts(ref: Pick<Conversation, "type" | "id">, incoming: Post[]) {
-    const storageKey = key("posts", conversationId(ref));
-    const old = (await resourceManager.getJson<Post[]>(storageKey)) ?? [];
-    const merged = new Map(old.map((post) => [post.id, post]));
-    for (const post of incoming) merged.set(post.id, post);
-    const policy = await this.getConversationPolicy(ref);
-    const cutoff = conversationRetentionCutoff(policy);
-    const posts = sortedPosts([...merged.values()]).filter(
-      (post) => cutoff === null || timestamp(post.created_at) >= cutoff,
-    );
-    await resourceManager.putJson(
-      storageKey,
-      policy === "auto" ? posts.slice(-200) : posts,
-      policy === "auto" ? "cache" : "persisted",
-    );
+  async savePosts(
+    ref: Pick<Conversation, "type" | "id"> &
+      Partial<Pick<Conversation, "conv_id">>,
+    incoming: Post[],
+  ) {
+    const storageKey = conversationId(ref);
+    await withKeyLock(key("entity:posts", storageKey), async () => {
+      const old = await entities.posts(userScope, storageKey);
+      const merged = new Map(old.map((post) => [post.id, post]));
+      for (const post of incoming) {
+        const previous = merged.get(post.id);
+        merged.set(post.id, choosePostVersion(previous ?? null, post));
+      }
+      const policy = await this.getConversationPolicy(ref);
+      const cutoff = conversationRetentionCutoff(policy);
+      const posts = sortedPosts([...merged.values()]).filter(
+        (post) => cutoff === null || timestamp(post.created_at) >= cutoff,
+      );
+      await entities.replacePosts(
+        userScope,
+        storageKey,
+        policy === "auto" ? posts.slice(-200) : posts,
+        policy === "auto" ? "cache" : "persisted",
+      );
+    });
+  },
+  async applyPostVersion(post: Post) {
+    const parsed = parseConvId(post.conv_id);
+    if (parsed?.type === "group") {
+      await this.savePosts(
+        { type: "group", id: parsed.groupId, conv_id: post.conv_id },
+        [post],
+      );
+      return;
+    }
+    if (parsed?.type === "dm") {
+      const peerId = peerIdFromDmConvId(post.conv_id, userScope);
+      if (!peerId) return;
+      await this.savePosts({ type: "dm", id: peerId, conv_id: post.conv_id }, [
+        post,
+      ]);
+    }
   },
   async reconcilePostPage(
     ref: Pick<Conversation, "type" | "id">,
     incoming: Post[],
   ) {
-    if (!incoming.length) return;
-    const sequenced = incoming.filter(
-      (post): post is Post & { sequence: number } =>
-        typeof post.sequence === "number",
-    );
-    if (!sequenced.length) {
-      await this.savePosts(ref, incoming);
-      return;
-    }
-    const minSequence = Math.min(...sequenced.map((post) => post.sequence));
-    const maxSequence = Math.max(...sequenced.map((post) => post.sequence));
-    const remoteIds = new Set(incoming.map((post) => post.id));
-    const tombstones = (await this.getPosts(ref))
-      .filter(
-        (post) =>
-          typeof post.sequence === "number" &&
-          post.sequence >= minSequence &&
-          post.sequence <= maxSequence &&
-          !remoteIds.has(post.id) &&
-          !post.is_deleted,
-      )
-      .map((post) => ({ ...post, is_deleted: 1 }));
-    await this.savePosts(ref, [...incoming, ...tombstones]);
+    if (incoming.length) await this.savePosts(ref, incoming);
   },
-  async getPosts(ref: Pick<Conversation, "type" | "id">) {
-    const posts =
-      (await resourceManager.getJson<Post[]>(
-        key("posts", conversationId(ref)),
-      )) ?? [];
+  async getPosts(
+    ref: Pick<Conversation, "type" | "id"> &
+      Partial<Pick<Conversation, "conv_id">>,
+  ) {
+    const convId = conversationId(ref);
+    const posts = await entities.posts(userScope, convId);
     const policy = await this.getConversationPolicy(ref);
     const cutoff = conversationRetentionCutoff(policy);
     if (cutoff === null) return posts;
@@ -533,22 +520,9 @@ export const offlineRepository = {
       (post) => timestamp(post.created_at) >= cutoff,
     );
     if (retained.length !== posts.length) {
-      await resourceManager.putJson(
-        key("posts", conversationId(ref)),
-        retained,
-        "persisted",
-      );
+      await entities.replacePosts(userScope, convId, retained, "persisted");
     }
     return retained;
-  },
-  async markPostDeleted(
-    ref: Pick<Conversation, "type" | "id">,
-    postId: string,
-  ) {
-    const posts = await this.getPosts(ref);
-    const post = posts.find((item) => item.id === postId);
-    if (!post) return;
-    await this.savePosts(ref, [{ ...post, is_deleted: 1 }]);
   },
   async trimConversationPosts(ref: Pick<Conversation, "type" | "id">) {
     const posts = await this.getPosts(ref);
@@ -559,16 +533,16 @@ export const offlineRepository = {
     entries: ArticleWithMeta[],
     retainedIds: string[] = [],
   ) {
-    const policyKeys = [
-      ...(await resourceManager.keys(key("version:article-policy"))),
-      ...(await resourceManager.keys(key("article-policy"))),
-    ];
+    const policyKeys = await resourceManager.keys(
+      key("version:article-policy"),
+    );
     const explicitIds: string[] = [];
     for (const policyKey of policyKeys) {
-      const stored = await resourceManager.getJson<
-        VersionedValue<ArticleDownloadPolicy> | ArticleDownloadPolicy
-      >(policyKey);
-      const policy = stored && "updatedAt" in stored ? stored.value : stored;
+      const stored =
+        await resourceManager.getJson<VersionedValue<ArticleDownloadPolicy>>(
+          policyKey,
+        );
+      const policy = stored?.value;
       if (normalizeArticlePolicy(policy).mode === "retained")
         explicitIds.push(policyKey.slice(policyKey.lastIndexOf(":") + 1));
     }
@@ -578,16 +552,10 @@ export const offlineRepository = {
     const retained = (await this.getArticleList()).filter(
       (item) => keep.has(item.id) && !firstIds.has(item.id),
     );
-    await resourceManager.putJson(
-      key("articles"),
-      [...first, ...retained],
-      "persisted",
-    );
+    await entities.replaceArticles(userScope, [...first, ...retained]);
   },
   async getArticleList() {
-    return (
-      (await resourceManager.getJson<ArticleWithMeta[]>(key("articles"))) ?? []
-    );
+    return entities.articles(userScope);
   },
   async getSavedArticleList() {
     const saved: ArticleWithMeta[] = [];
@@ -614,11 +582,10 @@ export const offlineRepository = {
     const old = await this.getArticleList();
     if (!entries.length) {
       if (page.offset === 0 && page.total === 0) {
-        await resourceManager.putJson(key("articles"), [], "persisted");
+        await entities.replaceArticles(userScope, []);
         await Promise.all(
           old.flatMap((article) => [
-            resourceManager.remove(key("article-meta", article.id)),
-            removeArticleSegments(article.id),
+            entities.removeArticle(userScope, article.id),
             resourceManager.remove(key("article-progress", article.id)),
           ]),
         );
@@ -648,12 +615,11 @@ export const offlineRepository = {
     const reconciled = [...kept, ...entries].sort((a, b) =>
       b.created_at.localeCompare(a.created_at),
     );
-    await resourceManager.putJson(key("articles"), reconciled, "persisted");
+    await entities.replaceArticles(userScope, reconciled);
     await Promise.all([
       ...entries.map((article) => this.saveArticleMeta(article)),
       ...removedIds.flatMap((articleId) => [
-        resourceManager.remove(key("article-meta", articleId)),
-        removeArticleSegments(articleId),
+        entities.removeArticle(userScope, articleId),
         resourceManager.remove(key("article-progress", articleId)),
       ]),
     ]);
@@ -666,23 +632,20 @@ export const offlineRepository = {
     const entries = (await this.getArticleList()).filter(
       (item) => item.id !== articleId,
     );
-    await resourceManager.putJson(key("articles"), entries, "persisted");
+    await entities.replaceArticles(userScope, entries);
     await Promise.all([
-      resourceManager.remove(key("article-meta", articleId)),
-      removeArticleSegments(articleId),
+      entities.removeArticle(userScope, articleId),
       resourceManager.remove(key("article-progress", articleId)),
     ]);
   },
   async saveArticleMeta(article: ArticleWithMeta) {
-    await resourceManager.putJson(
-      key("article-meta", article.id),
-      article,
-      "persisted",
-    );
+    await entities.upsertArticle(userScope, article);
   },
   async getArticleMeta(articleId: string) {
-    return resourceManager.getJson<ArticleWithMeta>(
-      key("article-meta", articleId),
+    return (
+      (await entities.articles(userScope)).find(
+        (article) => article.id === articleId,
+      ) ?? null
     );
   },
   async getArticleProgress(articleId: string) {
@@ -717,14 +680,25 @@ export const offlineRepository = {
       const localCandidate = current
         ? { value: current.offset, updatedAt: current.updatedAt }
         : null;
-      const winner = chooseLatestTimestamped(localCandidate, {
-        value: remote.offset,
-        updatedAt: remote.updatedAt,
-      });
-      if (winner === localCandidate) return current!;
+      const winner = chooseLww(
+        localCandidate
+          ? {
+              proposed: localCandidate.value,
+              purpose: "article-progress",
+              timestamp: localCandidate.updatedAt,
+            }
+          : null,
+        {
+          proposed: remote.offset,
+          purpose: "article-progress",
+          timestamp: remote.updatedAt,
+        },
+      );
+      if (localCandidate && localCandidate.updatedAt > remote.updatedAt)
+        return current!;
       const canonical: ReadingProgressVersion = {
-        offset: remote.offset,
-        updatedAt: remote.updatedAt,
+        offset: winner.proposed,
+        updatedAt: winner.timestamp,
         synced: true,
       };
       await resourceManager.putJson(storageKey, canonical, "persisted");
@@ -755,13 +729,7 @@ export const offlineRepository = {
       "article-policy",
       articleId,
     );
-    const policy = version
-      ? normalizeArticlePolicy(version.value)
-      : normalizeArticlePolicy(
-          await resourceManager.getJson<ArticleDownloadPolicy>(
-            key("article-policy", articleId),
-          ),
-        );
+    const policy = normalizeArticlePolicy(version?.value);
     if (policy.mode === "retained" && policy.expiresAt <= Date.now()) {
       await this.setArticlePolicy(articleId, { mode: "auto" });
       await removeArticleSegments(articleId);
@@ -772,23 +740,6 @@ export const offlineRepository = {
   async setArticlePolicy(articleId: string, policy: ArticleDownloadPolicy) {
     const normalized = normalizeArticlePolicy(policy);
     await this.setVersionedValue("article-policy", articleId, normalized);
-    const effective = await this.getArticlePolicy(articleId);
-    const resourceClass = effective.mode === "auto" ? "cache" : "persisted";
-    if (useSegmentedArticleStorage) {
-      const aggregateKey = articleSegmentsKey(articleId);
-      for (const storageKey of await articleSegmentKeys(articleId)) {
-        if (storageKey === aggregateKey) continue;
-        const segment = await resourceManager.getJson<unknown>(storageKey);
-        if (segment != null)
-          await resourceManager.putJson(storageKey, segment, resourceClass);
-      }
-    } else {
-      const storageKey = articleSegmentsKey(articleId);
-      const segments =
-        await resourceManager.getJson<Record<string, unknown>>(storageKey);
-      if (segments)
-        await resourceManager.putJson(storageKey, segments, resourceClass);
-    }
   },
   async getArticlePolicies() {
     const prefix = key("version:article-policy");
@@ -805,15 +756,6 @@ export const offlineRepository = {
       );
       if (articleId && policy) result.push({ articleId, policy });
     }
-    const legacyPrefix = key("article-policy");
-    for (const storageKey of await resourceManager.keys(legacyPrefix)) {
-      const articleId = storageKey.slice(legacyPrefix.length + 1);
-      if (result.some((item) => item.articleId === articleId)) continue;
-      const policy = normalizeArticlePolicy(
-        await resourceManager.getJson<ArticleDownloadPolicy>(storageKey),
-      );
-      if (articleId) result.push({ articleId, policy });
-    }
     return result;
   },
   async markArticlePolicySynced(articleId: string) {
@@ -821,11 +763,7 @@ export const offlineRepository = {
       "article-policy",
       articleId,
     );
-    const value =
-      current?.value ??
-      (await resourceManager.getJson<ArticleDownloadPolicy>(
-        key("article-policy", articleId),
-      ));
+    const value = current?.value;
     if (value)
       await this.setVersionedValue("article-policy", articleId, value, {
         updatedAt: current?.updatedAt ?? 0,
@@ -835,53 +773,29 @@ export const offlineRepository = {
   async saveArticleSegment(articleId: string, offset: number, data: unknown) {
     const policy = await this.getArticlePolicy(articleId);
     const resourceClass = policy.mode === "auto" ? "cache" : "persisted";
-    if (useSegmentedArticleStorage) {
-      await resourceManager.putJson(
-        articleSegmentKey(articleId, offset),
-        data,
-        resourceClass,
-      );
-      return;
-    }
-
-    const storageKey = articleSegmentsKey(articleId);
-    await withKeyLock(storageKey, async () => {
-      const segments =
-        (await resourceManager.getJson<Record<string, unknown>>(storageKey)) ??
-        {};
-      segments[String(offset)] = data;
-      await resourceManager.putJson(storageKey, segments, resourceClass);
-    });
+    const startOffset =
+      data &&
+      typeof data === "object" &&
+      typeof (data as { offset?: unknown }).offset === "number"
+        ? (data as { offset: number }).offset
+        : offset;
+    await entities.putSegment(
+      userScope,
+      articleId,
+      startOffset,
+      data,
+      resourceClass,
+    );
   },
   async getArticleSegment<T>(articleId: string, offset: number) {
-    if (useSegmentedArticleStorage) {
-      const exact = await resourceManager.getJson<StoredArticleSegment<T>>(
-        articleSegmentKey(articleId, offset),
-      );
-      if (exact) return exact;
-
-      const aggregateKey = articleSegmentsKey(articleId);
-      for (const storageKey of await articleSegmentKeys(articleId)) {
-        if (storageKey === aggregateKey) continue;
-        const segment =
-          await resourceManager.getJson<StoredArticleSegment<T>>(storageKey);
-        if (!segment) continue;
-        const sliced = sliceStoredArticleSegment(segment, offset);
-        if (sliced) return sliced;
-      }
-      return null;
-    }
-
-    const segments = await resourceManager.getJson<
-      Record<string, StoredArticleSegment<T>>
-    >(articleSegmentsKey(articleId));
-    if (!segments) return null;
-    if (segments[String(offset)]) return segments[String(offset)];
-    for (const segment of Object.values(segments)) {
-      const sliced = sliceStoredArticleSegment(segment, offset);
-      if (sliced) return sliced;
-    }
-    return null;
+    const segment = await entities.segment<StoredArticleSegment<T>>(
+      userScope,
+      articleId,
+      offset,
+    );
+    if (!segment) return null;
+    if (segment.offset === offset) return segment;
+    return sliceStoredArticleSegment(segment, offset);
   },
 
   async getDraft(ref: Pick<Conversation, "type" | "id">) {
@@ -928,6 +842,8 @@ export const offlineRepository = {
 export async function handleOfflineQuotaPressure(
   bytesToFree: number,
 ): Promise<number> {
+  let freed = await entities.evictCacheRows(bytesToFree);
+  if (freed >= bytesToFree) return freed;
   const candidates: Array<{
     priority: number;
     rank: number;
@@ -958,8 +874,9 @@ export async function handleOfflineQuotaPressure(
       priority: policy === "week" ? 1 : 2,
       rank: -count,
       evict: async () => {
-        const freed = await resourceManager.remove(
-          key("posts", conversationId(ref)),
+        const freed = await entities.removePosts(
+          userScope,
+          conversationId(ref),
         );
         await offlineRepository.setConversationPolicy(ref, "auto");
         return freed;
@@ -968,7 +885,6 @@ export async function handleOfflineQuotaPressure(
   }
 
   candidates.sort((a, b) => a.priority - b.priority || a.rank - b.rank);
-  let freed = 0;
   for (const candidate of candidates) {
     if (freed >= bytesToFree) break;
     freed += await candidate.evict();

@@ -1,51 +1,25 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# generated build output
-/out/
-/dist/
-
-# production
-/build
-
-# misc
 .DS_Store
-*.pem
 
-# debug
+# build
+/node_modules
+/dist
+/build
+**/target
+**/pkg
+
+# toolchain
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# DuckDNS token, ACME account key, and website private key/certificates
-/scripts/secrets/
-
-# vercel
-.vercel
-
-# typescript
 *.tsbuildinfo
-next-env.d.ts
 
-data.db*
-prod.db
+# resources
+scripts/google-chrome-stable_current_amd64.deb
+
+# deployment
+/scripts/secrets/
+*.db*
 build/
 backups/
 blobs/
-scripts/google-chrome-stable_current_amd64.deb

@@ -1,4 +1,3 @@
-import { parseOffset } from "@/server/validation/pagination";
 import { withActionSession, expectString } from "./_base";
 import { MalformedRequestError } from "@/shared/protocol/errors";
 import type { ActionInput } from "@/shared/protocol/actions";
@@ -8,10 +7,9 @@ export async function listArticlesAction(
 ) {
   return withActionSession(async (session) => {
     return (await (await session.asActor()).articles()).list({
-      bookmarkedOnly: input.bookmarked === true,
-      offset: parseOffset(
-        input.offset === undefined ? null : String(input.offset),
-      ),
+      view: input.view,
+      cursor: input.cursor,
+      direction: input.direction,
       groupId: input.group_id,
     });
   });

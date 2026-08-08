@@ -1,7 +1,7 @@
 import { fetchArticleSidebar } from "@/client/api/articles";
 import { fetchConversations } from "@/client/api/conversations";
 import { session } from "@/client/lib/remote/session";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 import { useAppStore } from "@/client/app/appStore";
 
 let conversationGeneration = 0;

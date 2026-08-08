@@ -10,7 +10,7 @@ import {
 import type { AppStatePayload } from "@/client/app/appReducer";
 import { session } from "@/client/lib/remote/session";
 import { transport } from "@/client/lib/remote/transport";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 import {
   offlineSession,
   type OfflineSession,

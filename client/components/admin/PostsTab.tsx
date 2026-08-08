@@ -59,7 +59,10 @@ export function PostsTab() {
           </TableHead>
           <TableBody>
             {(data?.posts || []).map((p) => (
-              <TableRow key={p.id} sx={{ opacity: p.is_deleted ? 0.4 : 1 }}>
+              <TableRow
+                key={p.id}
+                sx={{ opacity: p.type === "deleted" ? 0.4 : 1 }}
+              >
                 <TableCell sx={{ fontSize: 12 }}>{p.username || "—"}</TableCell>
                 <TableCell
                   sx={{
@@ -70,10 +73,10 @@ export function PostsTab() {
                     fontSize: 12,
                   }}
                 >
-                  {p.is_deleted ? "（已删除）" : postPreview(p)}
+                  {p.type === "deleted" ? "（已删除）" : postPreview(p)}
                 </TableCell>
                 <TableCell sx={{ fontSize: 12 }}>
-                  {p.group_name || (p.dm_to ? "私信" : "—")}
+                  {p.group_name || (p.conv_id.startsWith("dm:") ? "私信" : "—")}
                 </TableCell>
                 <TableCell sx={{ fontSize: 12 }}>
                   {p.created_at.slice(0, 16)}

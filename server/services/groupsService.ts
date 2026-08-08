@@ -30,6 +30,7 @@ import { MalformedRequestError, CheckedError } from "@/shared/protocol/errors";
 import { publishConversationUpdate } from "@/server/services/conversationsService";
 import { publishRemoteResubscribe } from "@/server/services/eventBus";
 import type { AdminGroup, Group, GroupMember } from "@/shared/types/api";
+import { groupConvId } from "@/shared/conversations/id";
 
 const HANDLE_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 
@@ -194,6 +195,7 @@ export class GroupService {
       }
       insertGroup(this.db, {
         id: groupId,
+        conv_id: groupConvId(groupId),
         handle,
         name,
         discoverable: input.discoverable ? 1 : 0,
@@ -245,11 +247,26 @@ export class GroupService {
     return listLinkedGroups(this.db, group.id, userId, query);
   }
 
-  join(userId: string, groupKey: string, password?: string): Group {
+  join(
+    userId: string,
+    groupKey: string,
+    source: { type: "search" } | { type: "group"; groupId: string },
+    password?: string,
+  ): Group {
     const group = this.requireGroup(groupKey);
     const joinInfo = findGroupJoinInfo(this.db, group.id);
     if (!joinInfo) {
       throw new CheckedError("NOT_FOUND", "群组不存在", 404);
+    }
+    if (source.type === "search") {
+      if (joinInfo.discoverable !== 1) {
+        throw new CheckedError("FORBIDDEN", "该群组未开启搜索加入", 403);
+      }
+    } else if (
+      joinInfo.parent_group_id !== source.groupId ||
+      !isGroupMember(this.db, userId, source.groupId)
+    ) {
+      throw new CheckedError("FORBIDDEN", "群组发现来源无效", 403);
     }
     if (joinInfo.password_hash) {
       if (!password) {

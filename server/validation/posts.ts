@@ -13,16 +13,14 @@ import { getStickerEntry } from "@/server/infra/stickerLoader";
 export interface CreatePostInput {
   /** 纯文本 string，或结构化 payload；brief 由服务端生成 */
   content?: CreatePostPayload | string;
-  group_id?: string;
-  dm_to?: string;
+  conv_id?: string;
   reply_to?: string;
 }
 
 export interface NormalizedCreatePost {
   brief: string;
   content_json: string;
-  group_id: string | null;
-  dm_to: string | null;
+  conv_id: string;
   reply_to: string | null;
 }
 
@@ -58,22 +56,14 @@ function normalizeBody(raw: CreatePostInput): {
 export function normalizeCreatePost(
   raw: CreatePostInput,
 ): NormalizedCreatePost {
-  const group_id = raw.group_id?.trim() || null;
-  const dm_to = raw.dm_to?.trim() || null;
-
-  if (group_id && dm_to) {
-    throw new ServiceError("不能同时指定群组和私信目标");
-  }
-  if (!group_id && !dm_to) {
-    throw new ServiceError("必须指定发送目标（群组或私信）");
-  }
+  const conv_id = raw.conv_id?.trim();
+  if (!conv_id) throw new ServiceError("必须指定会话");
 
   const body = normalizeBody(raw);
 
   return {
     ...body,
-    group_id,
-    dm_to,
+    conv_id,
     reply_to: raw.reply_to?.trim() || null,
   };
 }

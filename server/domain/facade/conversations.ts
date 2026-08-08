@@ -16,6 +16,11 @@ export class ConversationActorFacade {
     return this.conversations.list(user.id);
   }
 
+  async revisions(): Promise<Array<{ conv_id: string; revision: number }>> {
+    const user = await this.actor.requireUser();
+    return this.conversations.revisions(user.id);
+  }
+
   async markRead(
     input: ConversationRefInput & { postId: string; updatedAt: number },
   ): Promise<{ postId: string | null; sequence: number; updatedAt: number }> {

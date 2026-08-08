@@ -22,6 +22,7 @@ const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -164,6 +165,16 @@ export function createHttpHandler(
         res.setHeader("Content-Length", Buffer.byteLength(body));
         res.end(body);
         return;
+      }
+      if (url.pathname === "/manifest.webmanifest") {
+        if (
+          sendFile(
+            path.join(publicRoot, "manifest.webmanifest"),
+            res,
+            "no-cache, max-age=0, must-revalidate",
+          )
+        )
+          return;
       }
       if (url.pathname === "/app/manifest.json") {
         res.setHeader("Content-Type", "application/json; charset=utf-8");

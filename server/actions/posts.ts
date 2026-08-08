@@ -11,14 +11,15 @@ export async function fetchPostsAction(input: ActionInput<"fetchPostsAction">) {
         await (await session.asActor()).posts()
       ).list({
         type: input.type ?? "feed",
+        conv_id: input.conv_id,
         before_id: input.before_id ?? "",
         after_id: input.after_id ?? "",
         before_sequence: input.before_sequence,
         after_sequence: input.after_sequence,
+        changed_after_revision: input.changed_after_revision,
+        changed_through_revision: input.changed_through_revision,
         limit,
         offset,
-        with: input.with,
-        group: input.group,
       }),
     };
   });
@@ -43,8 +44,7 @@ export async function createPostAction(input: ActionInput<"createPostAction">) {
         await (await session.asActor()).posts()
       ).create({
         content,
-        group_id: input.group_id,
-        dm_to: input.dm_to,
+        conv_id: input.conv_id,
         reply_to: input.reply_to,
       }),
     };
@@ -68,9 +68,9 @@ export async function deletePostAction(
   postId: ActionInput<"deletePostAction">,
 ) {
   return withActionSession(async (session) => {
-    await (
+    const post = await (
       await (await session.asActor()).posts()
     ).softDelete(expectString(postId, "帖子不存在"));
-    return { ok: true as const };
+    return { post };
   });
 }

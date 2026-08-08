@@ -29,9 +29,13 @@ export class GroupActorFacade {
     return this.groups.discoverSubgroups(user.id, groupKey, query);
   }
 
-  async join(groupKey: string, password?: string): Promise<Group> {
+  async join(
+    groupKey: string,
+    source: { type: "search" } | { type: "group"; groupId: string },
+    password?: string,
+  ): Promise<Group> {
     const user = await this.actor.requireUser();
-    return this.groups.join(user.id, groupKey, password);
+    return this.groups.join(user.id, groupKey, source, password);
   }
 
   async leave(groupKey: string): Promise<void> {

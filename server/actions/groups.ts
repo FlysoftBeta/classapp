@@ -71,8 +71,16 @@ export async function joinGroupAction(input: ActionInput<"joinGroupAction">) {
   return withActionSession(async (session) => {
     const actor = await session.asActor();
     const groups = await actor.groups();
+    const source =
+      input.source.type === "search"
+        ? ({ type: "search" } as const)
+        : ({
+            type: "group",
+            groupId: expectString(input.source.groupId, "群组发现来源无效"),
+          } as const);
     const group = await groups.join(
       expectString(input.groupId, "群组不存在"),
+      source,
       typeof input.password === "string" ? input.password : undefined,
     );
     return { ok: true as const, group };

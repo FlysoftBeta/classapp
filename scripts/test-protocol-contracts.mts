@@ -8,6 +8,7 @@ import {
 import { eventContracts } from "@/shared/protocol/events";
 import { actionResultSchema, ResultTools } from "@/shared/protocol/result";
 import { PROTOCOL_VERSION, requestFrameSchema } from "@/shared/protocol/wire";
+import { rowToArticle } from "@/server/data/articles";
 
 const createGroup = actionContracts.createGroupAction;
 assert.equal(
@@ -21,14 +22,16 @@ const fetchPosts = actionContracts.fetchPostsAction;
 assert.equal(
   fetchPosts.args.safeParse([
     {
-      type: "group",
-      group: "group-1",
-      before_id: "hard-deleted-post",
+      type: "conversation",
+      conv_id: "group:group-1",
+      before_id: "cached-post",
       before_sequence: 42,
+      changed_after_revision: 7,
+      changed_through_revision: 10,
     },
   ]).success,
   true,
-  "Post cursors may carry a sequence fallback for hard-deleted rows",
+  "Post requests carry stable sequence cursors and revision awareness",
 );
 assert.equal(
   fetchPosts.args.safeParse([{ before_sequence: -1 }]).success,
@@ -81,15 +84,72 @@ assert.throws(
     (error as { code?: unknown }).code === "BAD_REQUEST",
 );
 
+const tombstone = {
+  id: "post-1",
+  user_id: "user-1",
+  conv_id: "group:group-1",
+  revision: 4,
+  brief: "",
+  reply_to: null,
+  deleted_at: "2026-01-01 00:00:00",
+  edited_at: null,
+  created_at: "2026-01-01 00:00:00",
+  type: "deleted" as const,
+};
 assert.equal(
-  eventContracts["post.deleted"].safeParse({ id: "post-1", extra: true })
+  eventContracts["post.deleted"].safeParse({ post: tombstone, extra: true })
     .success,
   false,
   "Event payloads must reject unknown fields",
 );
 assert.equal(
-  eventContracts["post.deleted"].safeParse({ id: "post-1" }).success,
+  eventContracts["post.deleted"].safeParse({ post: tombstone }).success,
   true,
+);
+
+const article = rowToArticle({
+  id: "article-1",
+  user_id: "user-1",
+  group_id: "group-1",
+  title: "Contract-safe article",
+  provider_json: JSON.stringify({ type: "text", words: 3, chunks: 1 }),
+  created_at: "2026-01-01 00:00:00",
+  username: "Test User",
+  handle: "test-user",
+  is_bookmarked: 0,
+  bookmark_updated_at_ms: null,
+  current_offset: null,
+  current_offset_updated_at: null,
+  current_locator: null,
+  total_read_seconds: null,
+  last_read_at: null,
+  future_internal_column: "must not cross the protocol boundary",
+});
+assert.equal(
+  "provider_json" in article || "future_internal_column" in article,
+  false,
+  "Article DTOs must expose only protocol fields, never raw SQL columns",
+);
+assert.equal(
+  actionContracts.fetchArticleSidebarAction.output.safeParse({
+    current_article_id: null,
+    articles: [article],
+  }).success,
+  true,
+  "Article sidebar output must satisfy its strict contract",
+);
+assert.equal(
+  actionContracts.listArticlesAction.output.safeParse({
+    articles: [article],
+    total: 1,
+  }).success,
+  true,
+  "Article list output must satisfy its strict contract",
+);
+assert.equal(
+  actionContracts.fetchArticleAction.output.safeParse({ article }).success,
+  true,
+  "Single-article output must satisfy its strict contract",
 );
 
 console.log("protocol contract tests passed");

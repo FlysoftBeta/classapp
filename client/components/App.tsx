@@ -41,7 +41,7 @@ import {
 } from "../api/announcement";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
 import { announcementEvents } from "@/client/app/events";
-import { offlineRepository } from "../resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 import type { AppRoute, ViewType } from "../app/appReducer";
 import { flexGap, vh, inset } from "@/client/lib/css";
 import { hasFeature } from "@/shared/features";

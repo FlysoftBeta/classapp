@@ -35,6 +35,8 @@ const [
   { canClientLogin },
   posts,
   conversations,
+  articles,
+  postService,
 ] = await Promise.all([
   import("@/server/infra/db"),
   import("@/server/services/usersService"),
@@ -42,6 +44,8 @@ const [
   import("@/server/data/clients"),
   import("@/server/data/posts"),
   import("@/server/data/conversations"),
+  import("@/server/data/articles"),
+  import("@/server/services/postsService"),
 ]);
 const db = getDb();
 
@@ -51,6 +55,131 @@ try {
       id: string;
     }
   ).id;
+  const text = `${"甲".repeat(9_999)}😀乙`;
+  articles.insertTextArticle(db, {
+    id: "segmented-article",
+    userId: adminId,
+    groupId: "wild",
+    title: "segmented",
+    content: text,
+  });
+  assert.deepEqual(
+    JSON.parse(
+      (
+        db
+          .prepare(
+            "SELECT provider_json FROM articles WHERE id = 'segmented-article'",
+          )
+          .get() as { provider_json: string }
+      ).provider_json,
+    ),
+    { type: "text", words: text.length, chunks: 2 },
+  );
+  assert.equal(
+    (
+      db
+        .prepare(
+          "SELECT content FROM text_article_segments WHERE article_id = 'segmented-article' ORDER BY segment_index",
+        )
+        .all() as Array<{ content: string }>
+    )
+      .map((row) => row.content)
+      .join(""),
+    text,
+  );
+  assert.throws(() =>
+    db
+      .prepare(
+        "UPDATE articles SET title = 'changed' WHERE id = 'segmented-article'",
+      )
+      .run(),
+  );
+  assert.throws(() =>
+    db
+      .prepare(
+        `INSERT INTO articles(id, user_id, group_id, title, provider_json)
+         VALUES ('invalid-provider', ?, 'wild', 'bad', '{"type":"text","words":1}')`,
+      )
+      .run(adminId),
+  );
+  for (const id of ["catchup-1", "catchup-2", "catchup-3"]) {
+    posts.insertPost(db, {
+      id,
+      userId: adminId,
+      convId: "group:wild",
+      brief: id,
+      contentJson: '{"type":"text","text_same_as_brief":true}',
+      replyTo: null,
+    });
+  }
+  const firstRevisionPage = postService.getGroupPosts(
+    db,
+    adminId,
+    "wild",
+    { changed_after_revision: 0, changed_through_revision: 3, limit: 2 },
+    true,
+  );
+  assert.deepEqual(
+    firstRevisionPage.map((post) => post.revision),
+    [1, 2],
+  );
+  posts.updatePostBody(
+    db,
+    "catchup-3",
+    "changed",
+    '{"type":"text","text_same_as_brief":true}',
+  );
+  assert.deepEqual(
+    postService
+      .getGroupPosts(
+        db,
+        adminId,
+        "wild",
+        {
+          changed_after_revision: 2,
+          changed_through_revision: 3,
+          limit: 2,
+        },
+        true,
+      )
+      .map((post) => post.id),
+    [],
+    "A row changed beyond the snapshot bound is deferred, not offset-shifted",
+  );
+  assert.deepEqual(
+    postService
+      .getGroupPosts(
+        db,
+        adminId,
+        "wild",
+        {
+          changed_after_revision: 3,
+          changed_through_revision: 4,
+          limit: 2,
+        },
+        true,
+      )
+      .map((post) => [post.id, post.revision]),
+    [["catchup-3", 4]],
+  );
+  assert.throws(() =>
+    db
+      .prepare(
+        `INSERT INTO posts(id, author_id, conv_id, brief, content_json)
+         VALUES ('invalid-conversation', ?, 'group:missing', '',
+           '{"type":"text","text_same_as_brief":true}')`,
+      )
+      .run(adminId),
+  );
+  assert.throws(() =>
+    db
+      .prepare(
+        `INSERT INTO posts(id, author_id, conv_id, brief, content_json, deleted_at)
+         VALUES ('invalid-tombstone', ?, 'group:wild', '',
+           '{"type":"deleted","reason":"must-not-persist"}', datetime('now'))`,
+      )
+      .run(adminId),
+  );
   const users = createUserService(db);
   const peer = users.create({
     handle: "peer",
@@ -62,15 +191,30 @@ try {
     username: "Retired Name",
     pin: "654321",
   });
+  const deactivatedConvId = conversations.insertDmConversation(
+    db,
+    deactivated.id,
+    peer.id,
+    "wild",
+  );
   posts.insertPost(db, {
     id: "dm-deactivated",
     userId: deactivated.id,
     brief: "hello",
     contentJson: JSON.stringify({ type: "text", text_same_as_brief: true }),
-    groupId: null,
-    dmTo: peer.id,
+    convId: deactivatedConvId,
     replyTo: null,
   });
+  assert.deepEqual(
+    db
+      .prepare("SELECT revision FROM dms WHERE conv_id = ?")
+      .get(deactivatedConvId),
+    { revision: 1 },
+  );
+  assert.deepEqual(
+    db.prepare("SELECT revision FROM posts WHERE id = 'dm-deactivated'").get(),
+    { revision: 1 },
+  );
   db.prepare(
     "INSERT INTO user_config(user_id, key, value) VALUES (?, 'kept', 'yes')",
   ).run(deactivated.id);
@@ -114,7 +258,7 @@ try {
   assert.equal(
     (
       db
-        .prepare("SELECT COUNT(*) n FROM user_groups WHERE user_id = ?")
+        .prepare("SELECT COUNT(*) n FROM group_members WHERE user_id = ?")
         .get(deactivated.id) as { n: number }
     ).n,
     0,
@@ -137,25 +281,31 @@ try {
     username: "Purged",
     pin: "654322",
   });
+  const purgedConvId = conversations.insertDmConversation(
+    db,
+    purged.id,
+    peer.id,
+    "wild",
+  );
   posts.insertPost(db, {
     id: "dm-purged",
     userId: purged.id,
     brief: "bye",
     contentJson: JSON.stringify({ type: "text", text_same_as_brief: true }),
-    groupId: null,
-    dmTo: peer.id,
+    convId: purgedConvId,
     replyTo: null,
   });
   db.prepare(
     "INSERT INTO user_config(user_id, key, value) VALUES (?, 'gone', 'yes')",
   ).run(purged.id);
   db.prepare(
-    "INSERT INTO articles(id, user_id, title, content) VALUES ('purged-article', ?, 't', 'c')",
+    `INSERT INTO articles(id, user_id, group_id, title, provider_json)
+     VALUES ('purged-article', ?, 'wild', 't', '{"type":"text","words":1,"chunks":1}')`,
   ).run(purged.id);
-  db.prepare(
-    `INSERT INTO conversation_user_state(user_id, conversation_type, conversation_id)
-     VALUES (?, 'dm', ?)`,
-  ).run(purged.id, peer.id);
+  db.prepare(`INSERT INTO convs_user(user_id, conv_id) VALUES (?, ?)`).run(
+    purged.id,
+    purgedConvId,
+  );
   const wordId = (
     db.prepare("SELECT id FROM words LIMIT 1").get() as { id: string }
   ).id;
@@ -183,9 +333,7 @@ try {
   assert.equal(
     (
       db
-        .prepare(
-          "SELECT COUNT(*) n FROM conversation_user_state WHERE user_id = ?",
-        )
+        .prepare("SELECT COUNT(*) n FROM convs_user WHERE user_id = ?")
         .get(purged.id) as { n: number }
     ).n,
     0,
@@ -209,10 +357,32 @@ try {
   assert.equal(
     (
       db
-        .prepare("SELECT COUNT(*) n FROM posts WHERE user_id = ? OR dm_to = ?")
-        .get(purged.id, purged.id) as { n: number }
+        .prepare(
+          `SELECT COUNT(*) n FROM posts
+           WHERE id = 'dm-purged'
+             AND json_extract(content_json, '$.type') = 'deleted'`,
+        )
+        .get() as { n: number }
     ).n,
-    0,
+    1,
+  );
+  assert.deepEqual(
+    db.prepare("SELECT revision FROM posts WHERE id = 'dm-purged'").get(),
+    { revision: 2 },
+  );
+  assert.deepEqual(
+    postService
+      .getDmPosts(db, peer.id, purged.id, {
+        changed_after_revision: 1,
+        changed_through_revision: 2,
+        limit: 10,
+      })
+      .map((post) => ({
+        id: post.id,
+        type: post.type,
+        revision: post.revision,
+      })),
+    [{ id: "dm-purged", type: "deleted", revision: 2 }],
   );
   assert.equal(
     (

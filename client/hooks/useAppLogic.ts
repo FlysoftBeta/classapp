@@ -13,7 +13,7 @@ import {
   type UserConfigChangedEvent,
 } from "../app/appReducer";
 import { useAppStore } from "@/client/app/appStore";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 import { offlineSession } from "@/client/resource/offlineSession";
 import { scheduleConversationRefresh } from "@/client/app/resources";
 import {

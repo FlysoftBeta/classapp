@@ -21,6 +21,14 @@ export async function fetchConversationsAction() {
   });
 }
 
+export async function fetchConversationRevisionsAction() {
+  return withActionSession(async (session) => ({
+    revisions: await (
+      await (await session.asActor()).conversations()
+    ).revisions(),
+  }));
+}
+
 export async function markConversationReadAction(
   input: ActionInput<"markConversationReadAction">,
 ) {

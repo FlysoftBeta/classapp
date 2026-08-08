@@ -7,11 +7,7 @@ import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
 import { flexGap } from "@/client/lib/css";
 
-import type {
-  InfiniController,
-  ItemId,
-  Snapshot,
-} from "@infini-scroll/core";
+import type { InfiniController, ItemId, Snapshot } from "@infini-scroll/core";
 import type { InfiniDomHost } from "@infini-scroll/dom-support";
 import { InfiniList } from "@infini-scroll/react";
 

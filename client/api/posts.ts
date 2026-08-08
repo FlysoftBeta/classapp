@@ -9,7 +9,7 @@ const {
   updatePostAction,
 } = client.actions;
 import { client } from "@/client/lib/remote/client";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
 
 export type PostMutationData = {
   post?: Post;
@@ -17,11 +17,12 @@ export type PostMutationData = {
 };
 
 export type PostDeleteData = {
+  post?: Post;
   error?: string;
 };
 
 export async function fetchCachedPosts(
-  conv: Pick<Conversation, "type" | "id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
   params: Record<string, string>,
 ) {
   const cached = await offlineRepository.getPosts(conv);
@@ -43,22 +44,17 @@ export async function fetchCachedPosts(
 }
 
 function buildPostsSearchParams(
-  conv: Pick<Conversation, "type" | "id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
   params: Record<string, string>,
 ) {
   const sp = new URLSearchParams(params);
-  if (conv.type === "group") {
-    sp.set("type", "group");
-    sp.set("group", conv.id);
-  } else {
-    sp.set("type", "dm");
-    sp.set("with", conv.id);
-  }
+  sp.set("type", "conversation");
+  sp.set("conv_id", conv.conv_id);
   return sp;
 }
 
 export async function fetchPosts(
-  conv: Pick<Conversation, "type" | "id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
   params: Record<string, string>,
 ) {
   if (!client.isConnected()) return fetchCachedPosts(conv, params);
@@ -67,13 +63,14 @@ export async function fetchPosts(
 
 /** Always reads the authoritative server; callers use this for revalidation. */
 export async function fetchRemotePosts(
-  conv: Pick<Conversation, "type" | "id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
   params: Record<string, string>,
 ) {
   const searchParams = buildPostsSearchParams(conv, params);
   const result = await fetchPostsAction({
     type:
-      (searchParams.get("type") as "feed" | "group" | "dm" | null) ?? undefined,
+      (searchParams.get("type") as "feed" | "conversation" | null) ?? undefined,
+    conv_id: searchParams.get("conv_id") ?? undefined,
     before_id: searchParams.get("before_id") ?? undefined,
     after_id: searchParams.get("after_id") ?? undefined,
     before_sequence: searchParams.has("before_sequence")
@@ -82,16 +79,25 @@ export async function fetchRemotePosts(
     after_sequence: searchParams.has("after_sequence")
       ? Number(searchParams.get("after_sequence"))
       : undefined,
+    changed_after_revision: searchParams.has("changed_after_revision")
+      ? Number(searchParams.get("changed_after_revision"))
+      : undefined,
+    changed_through_revision: searchParams.has("changed_through_revision")
+      ? Number(searchParams.get("changed_through_revision"))
+      : undefined,
     limit: searchParams.get("limit") ?? undefined,
     offset: searchParams.get("offset") ?? undefined,
-    with: searchParams.get("with") ?? undefined,
-    group: searchParams.get("group") ?? undefined,
   });
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  if (data.posts?.length)
-    await offlineRepository.reconcilePostPage(conv, data.posts);
+  if (data.posts?.length) {
+    if (params.changed_after_revision) {
+      await offlineRepository.savePosts(conv, data.posts);
+    } else {
+      await offlineRepository.reconcilePostPage(conv, data.posts);
+    }
+  }
   return data;
 }
 
@@ -106,8 +112,7 @@ export async function fetchPost(postId: string) {
 
 export type CreatePostBody = {
   content?: CreatePostPayload | string;
-  group_id?: string;
-  dm_to?: string;
+  conv_id: string;
   reply_to?: string;
 };
 
@@ -132,6 +137,8 @@ export async function updatePost(postId: string, text: string) {
 export async function deletePost(postId: string) {
   const result = await deletePostAction(postId);
   const res = observeActionResult(result);
-  const data: PostDeleteData = result.ok ? {} : { error: result.error.message };
+  const data: PostDeleteData = result.ok
+    ? result.data
+    : { error: result.error.message };
   return { res, data };
 }

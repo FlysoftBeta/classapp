@@ -2,6 +2,7 @@ import { observeActionResult } from "./runtime";
 import type { ConvEntry } from "@/client/app/appReducer";
 const {
   fetchConversationDraftAction,
+  fetchConversationRevisionsAction,
   fetchConversationsAction,
   markConversationReadAction,
   saveConversationDraftAction,
@@ -10,7 +11,44 @@ const {
 } = client.actions;
 import { client } from "@/client/lib/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
-import { offlineRepository } from "@/client/resource/offlineRepository";
+import { offlineRepository } from "@/client/data/repository";
+import {
+  changedConversationRevisions,
+  collectRevisionRange,
+} from "@/client/data/consistency";
+import { fetchRemotePosts } from "@/client/api/posts";
+
+async function syncConversationPostRevisions(): Promise<void> {
+  const cached = await offlineRepository.getConversations();
+  if (!cached.length) return;
+  const result = await fetchConversationRevisionsAction();
+  observeActionResult(result);
+  if (!result.ok) return;
+  const changed = changedConversationRevisions(cached, result.data.revisions);
+  for (const remote of changed) {
+    const conversation = cached.find(
+      (entry) => entry.conv_id === remote.conv_id,
+    );
+    if (!conversation) continue;
+    await collectRevisionRange(
+      conversation.revision,
+      remote.revision,
+      async (cursor, through, limit) => {
+        const page = await fetchRemotePosts(conversation, {
+          changed_after_revision: String(cursor),
+          changed_through_revision: String(through),
+          limit: String(limit),
+        });
+        if (!page) throw new Error(`Failed to synchronize ${remote.conv_id}`);
+        return page.posts;
+      },
+    );
+    await offlineRepository.upsertConversation({
+      ...conversation,
+      revision: remote.revision,
+    });
+  }
+}
 
 function sortConversations(entries: ConvEntry[]): ConvEntry[] {
   return entries.sort((a, b) => {
@@ -25,6 +63,7 @@ function sortConversations(entries: ConvEntry[]): ConvEntry[] {
 export async function fetchConversations(): Promise<ConvEntry[]> {
   if (!client.isConnected()) return offlineRepository.getConversations();
   try {
+    await syncConversationPostRevisions();
     const result = await fetchConversationsAction();
     observeActionResult(result);
     if (!result.ok) return offlineRepository.getConversations();

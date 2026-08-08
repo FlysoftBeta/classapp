@@ -23,5 +23,8 @@ export function chooseFurthestRead<
   L extends OrderedReadValue,
   R extends OrderedReadValue,
 >(local: L, incoming: R): L | R {
-  return local.sequence >= incoming.sequence ? local : incoming;
+  if (local.sequence !== incoming.sequence) {
+    return local.sequence > incoming.sequence ? local : incoming;
+  }
+  return local.updatedAt > incoming.updatedAt ? local : incoming;
 }

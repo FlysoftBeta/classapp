@@ -35,6 +35,7 @@ export function FindGroupDialog({
     handle: string;
     name: string;
     has_password: number;
+    source_group_id: string;
   } | null>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -68,6 +69,7 @@ export function FindGroupDialog({
     handle: string;
     name: string;
     has_password: number;
+    source_group_id: string;
   }) => {
     if (g.has_password && !password) {
       setJoinTarget(g);
@@ -76,7 +78,11 @@ export function FindGroupDialog({
     }
     setJoining(true);
     setError("");
-    const { res, data } = await joinGroup(g.id, password || undefined);
+    const { res, data } = await joinGroup(
+      g.id,
+      { type: "group", groupId: g.source_group_id },
+      password || undefined,
+    );
     setJoining(false);
     if (!res.ok) {
       if (data.needs_password) {
@@ -190,7 +196,9 @@ export function FindGroupDialog({
                   <Button
                     size="small"
                     variant="contained"
-                    onClick={() => handleJoin(g)}
+                    onClick={() =>
+                      handleJoin({ ...g, source_group_id: section.parent.id })
+                    }
                     disabled={joining}
                   >
                     加入

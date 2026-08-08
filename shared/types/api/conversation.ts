@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const conversationSchema = z
   .object({
+    /** Canonical storage/synchronization identity (`group:*` or `dm:*`). */
+    conv_id: z.string(),
+    /** Monotonic awareness revision for post appends/edits/tombstones. */
+    revision: z.number().int().nonnegative(),
     type: z.enum(["group", "dm"]),
     /** Group id (UUID) or peer user id. */
     id: z.string(),
