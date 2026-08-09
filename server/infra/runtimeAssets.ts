@@ -11,7 +11,7 @@ export interface RuntimeAssets {
 export function runtimeAssets(appDir: string): RuntimeAssets {
   return {
     shellFile: path.join(appDir, "shell.html"),
-    bundleFile: path.join(appDir, "client", "app", "app.js"),
+    bundleFile: path.join(appDir, "client", "app.js"),
   };
 }
 

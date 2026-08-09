@@ -42,7 +42,7 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     outDir: "dist/client",
-    emptyOutDir: true,
+    emptyOutDir: false,
     target: "chrome70",
     cssCodeSplit: false,
     assetsInlineLimit: Infinity,
@@ -50,10 +50,9 @@ export default defineConfig(({ command }) => ({
     rolldownOptions: {
       input: path.resolve(__dirname, "client/main.tsx"),
       output: {
-        entryFileNames: "app/app.js",
-        chunkFileNames: "app/[name].js",
-        assetFileNames: "app/[name][extname]",
+        entryFileNames: "app.js",
         codeSplitting: false,
+        minify: true,
       },
     },
   },

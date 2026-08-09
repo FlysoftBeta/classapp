@@ -30,12 +30,16 @@ export default defineConfig({
   build: {
     ssr: path.resolve(__dirname, "server/main.ts"),
     outDir: "dist/server",
-    emptyOutDir: true,
+    emptyOutDir: false,
     target: "node22",
     assetsInlineLimit: Infinity,
     chunkSizeWarningLimit: Infinity,
     rolldownOptions: {
-      output: { entryFileNames: "main.mjs", codeSplitting: false },
+      output: {
+        entryFileNames: "main.mjs",
+        codeSplitting: false,
+        minify: true,
+      },
     },
   },
 });

@@ -16,6 +16,7 @@ export default defineConfig({
         format: "cjs",
         entryFileNames: "launcher.js",
         codeSplitting: false,
+        minify: true,
       },
     },
   },

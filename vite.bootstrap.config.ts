@@ -16,6 +16,7 @@ export default defineConfig({
         format: "cjs",
         entryFileNames: "server.js",
         codeSplitting: false,
+        minify: true,
       },
     },
   },
