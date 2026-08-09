@@ -8,14 +8,17 @@ import {
 import { splitTextArticle } from "@/shared/articles/segments";
 
 type TextProvider = { type: "text"; words: number; chunks: number };
-type BlobProvider = {
-  type: "blob";
-  file_name: string;
-  mime_type?: string | null;
-  bytes?: number;
+export type BundleProvider = {
+  type: "bundle";
+  source_file: string;
+  archive_file: string;
+  source_mime: string;
+  source_bytes: number;
+  archive_bytes: number;
   original_name?: string | null;
+  items: number;
 };
-type ArticleProvider = TextProvider | BlobProvider;
+type ArticleProvider = TextProvider | BundleProvider;
 
 const META_COLUMNS = `
   a.id, a.user_id, a.group_id, a.title, a.provider_json, a.created_at,
@@ -46,8 +49,9 @@ export interface ArticleRecord {
   group_id: string;
   title: string;
   provider: ArticleProvider;
-  content_kind: "text" | "blob";
-  blob_path: string | null;
+  content_kind: "text" | "bundle";
+  source_path: string | null;
+  archive_path: string | null;
   mime_type: string | null;
   file_size: number;
   original_filename: string | null;
@@ -66,6 +70,13 @@ export interface ArticleListCursor {
   id: string;
 }
 
+function nonnegativeInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`Invalid article provider field: ${field}`);
+  }
+  return value as number;
+}
+
 function parseProvider(raw: unknown): ArticleProvider {
   const value =
     typeof raw === "string"
@@ -74,15 +85,19 @@ function parseProvider(raw: unknown): ArticleProvider {
   if (value?.type === "text") {
     return {
       type: "text",
-      words: Math.max(0, value.words | 0),
-      chunks: Math.max(0, value.chunks | 0),
+      words: nonnegativeInteger(value.words, "words"),
+      chunks: nonnegativeInteger(value.chunks, "chunks"),
     };
   }
-  if (value?.type === "blob") {
+  if (value?.type === "bundle") {
     return {
       ...value,
-      file_name: value.file_name || "",
-      bytes: typeof value.bytes === "number" ? Math.max(0, value.bytes | 0) : 0,
+      source_file: value.source_file || "",
+      archive_file: value.archive_file || "",
+      source_mime: value.source_mime || "application/octet-stream",
+      source_bytes: nonnegativeInteger(value.source_bytes, "source_bytes"),
+      archive_bytes: nonnegativeInteger(value.archive_bytes, "archive_bytes"),
+      items: nonnegativeInteger(value.items, "items"),
     };
   }
   throw new Error("Invalid article provider metadata");
@@ -92,19 +107,21 @@ function providerReadModel(provider: ArticleProvider) {
   return provider.type === "text"
     ? {
         content_kind: "text" as const,
-        blob_path: null,
+        source_path: null,
+        archive_path: null,
         mime_type: null,
         file_size: 0,
         original_filename: null,
         content_length: provider.words,
       }
     : {
-        content_kind: "blob" as const,
-        blob_path: provider.file_name,
-        mime_type: provider.mime_type ?? null,
-        file_size: provider.bytes ?? 0,
+        content_kind: "bundle" as const,
+        source_path: provider.source_file,
+        archive_path: provider.archive_file,
+        mime_type: provider.source_mime,
+        file_size: provider.source_bytes,
         original_filename: provider.original_name ?? null,
-        content_length: provider.bytes ?? 0,
+        content_length: provider.items,
       };
 }
 
@@ -138,16 +155,23 @@ export function rowToArticle(
   } as Article & ArticleWithMeta;
 }
 
-export function purgeArticlesForUser(db: Database, userId: string): string[] {
-  const paths = (
+export function purgeArticlesForUser(
+  db: Database,
+  userId: string,
+): Array<{ sourcePath: string; archivePath: string }> {
+  const artifacts = (
     db
       .prepare(
-        `SELECT provider_json FROM articles WHERE user_id = ? AND json_extract(provider_json, '$.type') = 'blob'`,
+        `SELECT provider_json FROM articles WHERE user_id = ? AND json_extract(provider_json, '$.type') = 'bundle'`,
       )
       .all(userId) as Array<{ provider_json: string }>
-  )
-    .map((row) => (parseProvider(row.provider_json) as BlobProvider).file_name)
-    .filter(Boolean);
+  ).map((row) => {
+    const provider = parseProvider(row.provider_json) as BundleProvider;
+    return {
+      sourcePath: provider.source_file,
+      archivePath: provider.archive_file,
+    };
+  });
   db.transaction(() => {
     db.prepare("DELETE FROM article_bookmarks WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM article_read_progress WHERE user_id = ?").run(
@@ -155,7 +179,7 @@ export function purgeArticlesForUser(db: Database, userId: string): string[] {
     );
     db.prepare("DELETE FROM articles WHERE user_id = ?").run(userId);
   })();
-  return paths;
+  return artifacts;
 }
 
 export function findArticleForUser(
@@ -185,7 +209,8 @@ export function findArticleRecord(
       ArticleRecord,
       | "provider"
       | "content_kind"
-      | "blob_path"
+      | "source_path"
+      | "archive_path"
       | "mime_type"
       | "file_size"
       | "original_filename"
@@ -248,17 +273,20 @@ export function insertTextArticle(
   })();
 }
 
-export function insertBlobArticle(
+export function insertBundleArticle(
   db: Database,
   input: {
     id: string;
     userId: string;
     groupId: string;
     title: string;
-    blobPath: string;
-    mimeType: string;
-    fileSize: number;
+    sourcePath: string;
+    archivePath: string;
+    sourceMime: string;
+    sourceSize: number;
+    archiveSize: number;
     originalFilename: string;
+    itemCount: number;
   },
 ): void {
   db.prepare(
@@ -269,11 +297,14 @@ export function insertBlobArticle(
     input.groupId,
     input.title,
     JSON.stringify({
-      type: "blob",
-      file_name: input.blobPath,
-      mime_type: input.mimeType,
-      bytes: input.fileSize,
+      type: "bundle",
+      source_file: input.sourcePath,
+      archive_file: input.archivePath,
+      source_mime: input.sourceMime,
+      source_bytes: input.sourceSize,
+      archive_bytes: input.archiveSize,
       original_name: input.originalFilename,
+      items: input.itemCount,
     }),
   );
 }
@@ -466,11 +497,11 @@ export function getArticleTextSegment(
     .get(articleId) as { provider_json: string } | undefined;
   if (!row) return null;
   const provider = parseProvider(row.provider_json);
-  if (provider.type === "blob") {
+  if (provider.type === "bundle") {
     return {
       content: "",
-      content_kind: "blob" as const,
-      content_length: provider.bytes ?? 0,
+      content_kind: "bundle" as const,
+      content_length: provider.items,
       clamped_offset: 0,
       has_more: false,
     };

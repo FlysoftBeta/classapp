@@ -1,8 +1,8 @@
 export const RUNTIME_DATABASE = "classapp-runtime";
 
-// Version 3 already existed in the deployed source tree. Reusing it would not
-// run onupgradeneeded for browsers that opened that schema once.
-export const RUNTIME_DATABASE_VERSION = 4;
+// Version 5 removes every pre-Bundle domain/cache row while preserving the
+// Shell's active application bundle across the hard data boundary.
+export const RUNTIME_DATABASE_VERSION = 5;
 
 export const GLOBAL_KEYS = {
   ACTIVE_ME: "active-me",
@@ -102,19 +102,28 @@ function createActorStores(db: IDBDatabase): void {
 }
 
 /** Schema upgrades are hard domain-cache boundaries; no old domain row moves. */
-export function upgradeRuntimeDatabase(request: IDBOpenDBRequest): void {
+export function upgradeRuntimeDatabase(
+  request: IDBOpenDBRequest,
+  oldVersion: number,
+): void {
   const db = request.result;
+  const runtimeStores = new Set<string>([STORES.GLOBALS, STORES.BUNDLES]);
   for (const name of Array.from(db.objectStoreNames)) {
-    db.deleteObjectStore(name);
+    if (oldVersion < 4 || !runtimeStores.has(name)) {
+      db.deleteObjectStore(name);
+    }
   }
 
   db.createObjectStore(STORES.FILES);
   const heads = db.createObjectStore(STORES.FILE_HEADS, { keyPath: "id" });
   heads.createIndex("by-state-created", ["state", "created_at"]);
 
-  db.createObjectStore(STORES.GLOBALS, { keyPath: "key" });
-  db.createObjectStore(STORES.BUNDLES, { keyPath: "build_id" });
+  if (!db.objectStoreNames.contains(STORES.GLOBALS)) {
+    db.createObjectStore(STORES.GLOBALS, { keyPath: "key" });
+  }
+  if (!db.objectStoreNames.contains(STORES.BUNDLES)) {
+    db.createObjectStore(STORES.BUNDLES, { keyPath: "build_id" });
+  }
   createObjectiveStores(db);
   createActorStores(db);
 }
-

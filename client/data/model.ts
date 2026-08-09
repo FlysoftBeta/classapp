@@ -111,9 +111,7 @@ export interface GroupMembersAccessRow {
 }
 
 export type AccessRow =
-  | ConversationAccessRow
-  | ArticleAccessRow
-  | GroupMembersAccessRow;
+  ConversationAccessRow | ArticleAccessRow | GroupMembersAccessRow;
 
 export interface AssignmentBase<T> {
   value: T;

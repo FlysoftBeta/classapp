@@ -4,6 +4,8 @@
 /node_modules
 /dist
 /build
+/.cache/
+/worktree/
 **/target
 **/pkg
 
@@ -14,19 +16,10 @@ yarn-error.log*
 .pnpm-debug.log*
 *.tsbuildinfo
 
-# resources
-scripts/google-chrome-stable_current_amd64.deb
-
-# deployment
-/scripts/secrets/
-*.db*
-build/
-backups/
-blobs/
-
 # generated
 package-lock.json
 
 # external
 /lib/infini
 /lib/poppler
+/lib/poppler-prebuilt

@@ -47,7 +47,9 @@ export async function bootstrapSession(
       const connection = transport.waitUntilConnected();
       const connectedQuickly = await Promise.race([
         connection.then(() => true),
-        new Promise<false>((resolve) => setTimeout(() => resolve(false), 5_000)),
+        new Promise<false>((resolve) =>
+          setTimeout(() => resolve(false), 5_000),
+        ),
       ]);
       if (!connectedQuickly) {
         if (!restored) useApplicationStore.getState().setAppState("login");

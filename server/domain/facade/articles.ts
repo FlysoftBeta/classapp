@@ -7,11 +7,11 @@ import type {
 import type {
   ArticleService,
   CreateArticleInput,
-  CreateBlobArticleInput,
+  CreateBundleArticleInput,
 } from "@/server/services/articlesService";
 import type { ArticleImportService } from "@/server/services/articleImportService";
 
-export type { CreateArticleInput, CreateBlobArticleInput };
+export type { CreateArticleInput, CreateBundleArticleInput };
 
 export class ArticleActorFacade {
   constructor(
@@ -43,12 +43,12 @@ export class ArticleActorFacade {
     return this.articles.createText(user, input);
   }
 
-  async createBlob(
-    input: CreateBlobArticleInput,
+  async createBundle(
+    input: CreateBundleArticleInput,
   ): Promise<{ article: Article & ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    return this.articles.createBlob(user, input);
+    return this.articles.createBundle(user, input);
   }
 
   async getMeta(
@@ -57,7 +57,7 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("articles");
     const result = this.articles.getMeta(user, articleId);
     await this.actor.requireFeature(
-      result.article.content_kind === "blob"
+      result.article.content_kind === "bundle"
         ? "ebook_reader"
         : "article_reader",
     );
@@ -73,6 +73,28 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
     return this.articles.segment(user, input);
+  }
+
+  async openBundle(input: {
+    articleId: string;
+    cursor: number | null;
+    before: number;
+    after: number;
+  }) {
+    const user = await this.actor.requireFeature("articles");
+    await this.actor.requireFeature("ebook_reader");
+    return this.articles.openBundle(user, input);
+  }
+
+  async fetchBundle(input: {
+    articleId: string;
+    cursor: number;
+    direction: "before" | "after";
+    limit: number;
+  }) {
+    const user = await this.actor.requireFeature("articles");
+    await this.actor.requireFeature("ebook_reader");
+    return this.articles.fetchBundle(user, input);
   }
 
   async setBookmark(
@@ -91,7 +113,13 @@ export class ArticleActorFacade {
     merge: "override" | "furthest",
   ): Promise<{ offset: number; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
-    return this.articles.saveProgress(user, articleId, offset, updatedAt, merge);
+    return this.articles.saveProgress(
+      user,
+      articleId,
+      offset,
+      updatedAt,
+      merge,
+    );
   }
 
   async recordReading(

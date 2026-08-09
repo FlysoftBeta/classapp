@@ -5,8 +5,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
 import { GET as endpoints } from "@/server/http/routes/endpoints";
 import { POST as uploadArticle } from "@/server/http/routes/articleUpload";
-import { GET as articleBlob } from "@/server/http/routes/articleBlob";
-import { GET as renderArticle } from "@/server/http/routes/articleRender";
+import { GET as articleSource } from "@/server/http/routes/articleSource";
+import { POST as articleBundleResources } from "@/server/http/routes/articleBundleResources";
 import { POST as deploy } from "@/server/http/routes/deploy";
 import { GET as downloadBackup } from "@/server/http/routes/backupDownload";
 import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocumentDownload";
@@ -200,23 +200,27 @@ export function createHttpHandler(
         await sendResponse(await uploadArticle(request()), res);
         return;
       }
-      const blobMatch = url.pathname.match(/^\/api\/articles\/([^/]+)\/blob$/);
-      if (req.method === "GET" && blobMatch) {
+      const sourceMatch = url.pathname.match(
+        /^\/api\/articles\/([^/]+)\/source$/,
+      );
+      if (req.method === "GET" && sourceMatch) {
         await sendResponse(
-          await articleBlob(request(), {
-            params: Promise.resolve({ id: decodeURIComponent(blobMatch[1]) }),
+          await articleSource(request(), {
+            params: Promise.resolve({ id: decodeURIComponent(sourceMatch[1]) }),
           }),
           res,
         );
         return;
       }
-      const renderMatch = url.pathname.match(
-        /^\/api\/articles\/([^/]+)\/render$/,
+      const bundleResourceMatch = url.pathname.match(
+        /^\/api\/articles\/([^/]+)\/bundle\/resources$/,
       );
-      if (req.method === "GET" && renderMatch) {
+      if (req.method === "POST" && bundleResourceMatch) {
         await sendResponse(
-          await renderArticle(request(), {
-            params: Promise.resolve({ id: decodeURIComponent(renderMatch[1]) }),
+          await articleBundleResources(request(), {
+            params: Promise.resolve({
+              id: decodeURIComponent(bundleResourceMatch[1]),
+            }),
           }),
           res,
         );

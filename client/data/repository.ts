@@ -2202,6 +2202,7 @@ export const offlineRepository = {
 export async function handleOfflineQuotaPressure(
   bytesToFree: number,
   allowProtected = false,
+  excludedArticles: ReadonlySet<string> = new Set(),
 ): Promise<number> {
   if (bytesToFree <= 0) return 0;
   let freed = 0;
@@ -2243,6 +2244,7 @@ export async function handleOfflineQuotaPressure(
   const segmentKeys: IDBValidKey[] = [];
   for (const row of segmentRows) {
     if (freed >= bytesToFree) break;
+    if (excludedArticles.has(row.article_id)) continue;
     const protectedByClaim = articleProtected(row.article_id);
     if (!allowProtected && protectedByClaim) continue;
     segmentKeys.push([row.article_id, row.start_offset]);
@@ -2251,20 +2253,30 @@ export async function handleOfflineQuotaPressure(
   }
   await deleteKeysBatched(STORES.ARTICLE_SEGMENTS, segmentKeys);
 
-  // Extent files are whole-object eviction units. Never inspect their payloads.
+  // A Bundle catalog and its resources form one offline readability unit. Do
+  // not leave a catalog pointing at individually evicted dependencies.
   if (freed < bytesToFree) {
-    const files = (await extentFiles.list("article:"))
-      .map((head) => ({ head, articleId: FileIds.articleId(head.id) }))
-      .filter(
-        (item): item is { head: typeof item.head; articleId: string } =>
-          !!item.articleId,
-      )
-      .sort((left, right) => left.head.created_at - right.head.created_at);
-    for (const { head, articleId } of files) {
+    const groups = new Map<string, { bytes: number; createdAt: number }>();
+    for (const head of await extentFiles.list("article:")) {
+      const articleId = FileIds.articleId(head.id);
+      if (!articleId) continue;
+      const current = groups.get(articleId) ?? {
+        bytes: 0,
+        createdAt: head.created_at,
+      };
+      current.bytes += head.size;
+      current.createdAt = Math.min(current.createdAt, head.created_at);
+      groups.set(articleId, current);
+    }
+    const bundles = [...groups].sort(
+      (left, right) => left[1].createdAt - right[1].createdAt,
+    );
+    for (const [articleId, bundle] of bundles) {
       if (freed >= bytesToFree) break;
+      if (excludedArticles.has(articleId)) continue;
       if (!allowProtected && articleProtected(articleId)) continue;
-      await extentFiles.delete(head.id);
-      freed += head.size;
+      await extentFiles.deletePrefix(FileIds.articlePrefix(articleId));
+      freed += bundle.bytes;
       evictedArticles.add(articleId);
     }
   }

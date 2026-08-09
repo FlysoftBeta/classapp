@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import type { User, ArticleSidebarPayload, Conversation } from "@/shared/types/api";
+import type {
+  User,
+  ArticleSidebarPayload,
+  Conversation,
+} from "@/shared/types/api";
 import type {
   AppStatePayload,
   ArticleSidebarUpdatedPayload,
@@ -52,7 +56,8 @@ interface ApplicationStore {
 function sortConversations(entries: Conversation[]): Conversation[] {
   return [...entries].sort((left, right) => {
     if (!!left.pinned !== !!right.pinned) return right.pinned - left.pinned;
-    if (left.last_at && right.last_at) return right.last_at.localeCompare(left.last_at);
+    if (left.last_at && right.last_at)
+      return right.last_at.localeCompare(left.last_at);
     if (left.last_at) return -1;
     if (right.last_at) return 1;
     return left.name.localeCompare(right.name);
@@ -175,12 +180,16 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
         conversations: state.conversations.filter(
           (entry) => !(entry.type === removed.type && entry.id === removed.id),
         ),
-        ...(selected ? { route: { view: "chat", conversation: null } as AppRoute } : {}),
+        ...(selected
+          ? { route: { view: "chat", conversation: null } as AppRoute }
+          : {}),
       });
       return;
     }
     if (payload.entry) {
-      set({ conversations: mergeConversation(state.conversations, payload.entry) });
+      set({
+        conversations: mergeConversation(state.conversations, payload.entry),
+      });
     }
   },
   startDm: (peerId, peerName, handle) => {
@@ -216,7 +225,9 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
     };
     set({
       route: { view: "chat", conversation: { type: "dm", id: peerId } },
-      conversations: exists ? state.conversations : [entry, ...state.conversations],
+      conversations: exists
+        ? state.conversations
+        : [entry, ...state.conversations],
     });
   },
   setArticleSidebar: (payload) => set({ articleSidebar: sortSidebar(payload) }),
@@ -226,22 +237,33 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
     let articles = state.articleSidebar.articles;
     let current = state.articleSidebar.current_article_id;
     if (payload.removed) {
-      articles = articles.filter((entry) => entry.id !== payload.removed!.article_id);
+      articles = articles.filter(
+        (entry) => entry.id !== payload.removed!.article_id,
+      );
     }
     if (payload.entry) {
-      const index = articles.findIndex((entry) => entry.id === payload.entry!.id);
+      const index = articles.findIndex(
+        (entry) => entry.id === payload.entry!.id,
+      );
       articles = [...articles];
       if (index < 0) articles.push(payload.entry);
       else articles[index] = payload.entry;
     }
-    if (payload.current_article_id !== undefined) current = payload.current_article_id;
+    if (payload.current_article_id !== undefined)
+      current = payload.current_article_id;
     const route =
       payload.removed &&
       state.route.view === "reader" &&
       state.route.articleId === payload.removed.article_id
-        ? ({ view: "articles", conversation: state.route.conversation } as AppRoute)
+        ? ({
+            view: "articles",
+            conversation: state.route.conversation,
+          } as AppRoute)
         : state.route;
-    set({ articleSidebar: sortSidebar({ current_article_id: current, articles }), route });
+    set({
+      articleSidebar: sortSidebar({ current_article_id: current, articles }),
+      route,
+    });
   },
   setCurrentArticle: (current_article_id) =>
     set((state) => ({

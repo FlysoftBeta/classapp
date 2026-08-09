@@ -7,7 +7,6 @@ import * as conversations from "@/server/actions/conversations";
 import * as groups from "@/server/actions/groups";
 import * as notificationConfig from "@/server/actions/notification-config";
 import * as posts from "@/server/actions/posts";
-import * as readerConfig from "@/server/actions/reader-config";
 import * as stickers from "@/server/actions/stickers";
 import * as userConfig from "@/server/actions/user-config";
 import * as words from "@/server/actions/words";
@@ -33,7 +32,6 @@ const handlers = {
   ...groups,
   ...notificationConfig,
   ...posts,
-  ...readerConfig,
   ...stickers,
   ...userConfig,
   ...words,

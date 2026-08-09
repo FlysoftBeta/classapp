@@ -25,7 +25,7 @@ export default defineConfig({
     // release. Playwright's CommonJS dependency graph uses __dirname, which
     // cannot run when Rollup flattens it into this ESM bundle.
     noExternal: true,
-    external: ["better-sqlite3", "@napi-rs/canvas", "ws", "playwright"],
+    external: ["better-sqlite3", "ws", "playwright"],
   },
   build: {
     ssr: path.resolve(__dirname, "server/main.ts"),

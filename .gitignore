@@ -4,6 +4,8 @@
 /node_modules
 /dist
 /build
+/.cache/
+/worktree/
 **/target
 **/pkg
 
@@ -13,13 +15,3 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 *.tsbuildinfo
-
-# resources
-scripts/google-chrome-stable_current_amd64.deb
-
-# deployment
-/scripts/secrets/
-*.db*
-build/
-backups/
-blobs/

@@ -102,7 +102,9 @@ ClassApp 的浏览器目标是 **Chrome 70 及以上版本**（为了适应老�
 npm run test:e2e
 ```
 
-这项测试需要本地准备对应的浏览器测试包和 HTTPS 证书，因此不是日常开发的必跑项。较新的 Chromium 浏览器通常可以直接使用；其他浏览器目前没有承诺同等程度的测试覆盖。
+这项测试需要在 `worktree/chrome.deb` 准备固定版本的浏览器测试包，并在
+`worktree/secrets/https/` 准备 HTTPS 证书，因此不是日常开发的必跑项。
+较新的 Chromium 浏览器通常可以直接使用；其他浏览器目前没有承诺同等程度的测试覆盖。
 
 ### HTTPS：让旧入口、证书和离线启动连成一条链
 
@@ -126,10 +128,12 @@ Node.js 同时提供 HTTP、HTTPS 与 WebSocket
 
 管理员确认 HTTPS 正常后，可以在应用内开启 HTTP 升级。此时只有启动入口会返回可长期缓存的 `301`，把旧地址指向新的 HTTPS 地址；浏览器随后在安全上下文中安装 Service Worker。这个设计还有一个额外效果：入口重定向、启动页面和应用包都缓存完成后，即使服务器暂时离线，从旧地址进入仍能抵达本地应用。
 
-HTTPS 状态页会检查证书域名、有效期、证书链和根证书兼容性。对应的运行时测试可以单独执行：
+HTTPS 状态页会检查证书域名、有效期、证书链和根证书兼容性。证书配置和
+签发结果统一保存在被忽略的 `worktree/secrets/` 中，可用以下命令检查或续期：
 
 ```bash
-npm run test:https
+npm run https:check
+npm run https:renew
 ```
 
 ### 应用自己更新自己
@@ -176,20 +180,33 @@ npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000) 即可进入开发环境。开发环境的初始管理员 PIN 为 `123456`。生产部署时得看控制台的初始密码。
 
-生成完整的生产部署包：
+生成指定平台的完整生产部署包：
 
 ```bash
-npm run build
+npm run build -- linux-redhat
+npm run build -- linux-debian
+npm run build -- windows
 ```
 
-在生产环境用 `start.sh`/`start.bat` 启动。目前仅支持 Linux/Windows amd64（只打了对应的 native addon）
+每次只会生成一个目标平台的 amd64 包，产物位于
+`build/bootstrap-<target>.zip` 和 `build/deploy-<target>.zip`。在生产环境用
+`start.sh`/`start.bat` 启动。不同 target 的产物会保留在 `build/` 中并存；
+Vite 和 deployment 中间产物默认放在 `.cache/`，可用
+`CLASSAPP_BUILD_CACHE` 指定其他缓存目录。构建主机目前要求 Linux x64。
+
+手动从 `FlysoftBeta/pdf-render` 最新一次成功的 Actions run 更新并校验三平台
+renderer：
+
+```bash
+npm run pdfrender:update
+```
 
 常用检查：
 
 ```bash
 npm run lint
-npm run test:protocol
-npm run test:infini:chrome70
+npm run test:e2e
+npm run test:manual
 ```
 
 ## License

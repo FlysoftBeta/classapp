@@ -24,7 +24,10 @@ import { ArticleImportFab } from "./ArticleImportFab";
 import InfiniView from "@/client/components/shared/InfiniView";
 import type { Provider } from "@infini-scroll/core";
 import { useInfini } from "@infini-scroll/react";
-import { listArticles, type ArticleListCursor } from "@/client/interact/articles";
+import {
+  listArticles,
+  type ArticleListCursor,
+} from "@/client/interact/articles";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import { InfiniId } from "@/client/components/debug/InfiniId";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
@@ -83,7 +86,7 @@ function formatDate(s: string) {
 }
 
 function formatArticleSize(a: ArticleWithMeta) {
-  if (a.content_kind === "blob") {
+  if (a.content_kind === "bundle") {
     return formatBytes(a.file_size || a.content_length || 0);
   }
   return `${(a.content_length ?? 0).toLocaleString()}字`;

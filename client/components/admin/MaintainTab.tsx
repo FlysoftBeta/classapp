@@ -290,8 +290,7 @@ export function MaintainTab({ token }: { token: string }) {
               路由器 / 内网 DNS 主机记录
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              请在实际负责内网解析的路由器或 DNS 服务器中配置。DuckDNS
-              公网记录不会反映这里的内网目标。
+              请在实际负责内网解析的路由器或 DNS 服务器中配置。
             </Typography>
             {httpsStatus.dns_records.length === 0 ? (
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

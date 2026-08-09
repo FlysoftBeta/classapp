@@ -6,8 +6,11 @@
 import { fork, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
-import { readBuildId } from "@/server/infra/buildIdentity";
+import {
+  createPlatformRuntimeConfig,
+  type ClassAppRuntimeConfig,
+} from "@/server/infra/runtimeConfig";
+import { readBuildId } from "@/server/infra/buildId";
 import { UPDATE_CONFIRM_TIMEOUT_MS } from "@/server/infra/updateContract";
 
 type PendingLifecycle = {
@@ -114,6 +117,7 @@ function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
     bindHost: "0.0.0.0",
     trustedProxyIps: [],
     nodeEnv: "production",
+    platform: createPlatformRuntimeConfig(appDir, "production"),
     https,
     update: {
       enabled: true,

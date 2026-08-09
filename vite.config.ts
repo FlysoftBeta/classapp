@@ -6,7 +6,7 @@ const buildId = process.env.CLASSAPP_BUILD_ID ?? "dev";
 
 export default defineConfig(({ command }) => ({
   // Development serves static resources directly. Production copies public/
-  // beside the server bundle in build.sh, so it must not be duplicated into
+  // beside the server bundle in the release build, so it must not be duplicated into
   // the monolithic client build.
   publicDir: command === "serve" ? path.resolve(__dirname, "public") : false,
   plugins: [react()],

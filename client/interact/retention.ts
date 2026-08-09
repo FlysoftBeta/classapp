@@ -5,8 +5,7 @@ import {
   type ArticleDownloadPolicy,
   type ConversationDownloadPolicy,
 } from "@/client/data/repository";
-import { extentFiles } from "@/client/data/files";
-import { FileIds } from "@/client/data/fileIds";
+import { bundleAvailable } from "@/client/interact/bundles";
 import { client } from "@/client/interact/remote/client";
 import {
   downloadArticleForOffline,
@@ -61,8 +60,8 @@ export async function saveArticleRetention(
 export async function articleContentAvailable(
   article: Pick<ArticleWithMeta, "id" | "content_kind" | "current_offset">,
 ): Promise<boolean> {
-  if (article.content_kind === "blob") {
-    return (await extentFiles.size(FileIds.articleBlob(article.id))) !== null;
+  if (article.content_kind === "bundle") {
+    return bundleAvailable(article.id, article.current_offset);
   }
   return !!(await offlineRepository.getArticleSegment(
     article.id,

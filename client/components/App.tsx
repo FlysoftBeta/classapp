@@ -490,7 +490,6 @@ function AppShell({
         {route.view === "reader" && articlesEnabled && (
           <ArticleReader
             articleId={route.articleId}
-            token={token}
             currentUserId={user!.id}
             isAdmin={adminEnabled}
             onBack={handleArticlesBack}
@@ -500,8 +499,6 @@ function AppShell({
                 conversation: route.conversation,
               });
             }}
-            themeMode={themeMode}
-            subscribeConfigEvents={subscribeConfigEvents}
             online={online}
             offlineEnabled={offlineEnabled}
           />

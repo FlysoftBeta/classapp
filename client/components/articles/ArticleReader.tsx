@@ -17,16 +17,14 @@ import DialogContent from "@mui/material/DialogContent";
 import Slider from "@mui/material/Slider";
 import Button from "@mui/material/Button";
 import type { ArticleWithMeta } from "@/shared/types/api";
-import { formatBytes } from "@/shared/bytes";
 import {
   loadArticleForReader,
   toggleArticleBookmark,
   deleteArticle,
 } from "@/client/interact/articles";
-import BlobArticleReader from "./BlobArticleReader";
+import BundleArticleReader from "./BundleArticleReader";
 import TextArticleReader from "./TextArticleReader";
 import { useArticleReading } from "@/client/hooks/useArticleReading";
-import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
 import { flexGap, vh } from "@/client/lib/css";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import {
@@ -40,15 +38,10 @@ import {
 
 interface ArticleReaderProps {
   articleId: string;
-  token: string;
   currentUserId: string;
   isAdmin: boolean;
   onBack: () => void;
   onDeleted?: (id: string) => void;
-  themeMode: "light" | "dark";
-  subscribeConfigEvents?: (
-    fn: (evt: UserConfigChangedEvent) => void,
-  ) => () => void;
   online: boolean;
   offlineEnabled: boolean;
 }
@@ -63,13 +56,10 @@ function formatDate(s: string) {
 
 export default function ArticleReader({
   articleId,
-  token,
   currentUserId,
   isAdmin,
   onBack,
   onDeleted,
-  themeMode,
-  subscribeConfigEvents,
   online,
   offlineEnabled,
 }: ArticleReaderProps) {
@@ -275,8 +265,8 @@ export default function ArticleReader({
                 fontSize: 11,
               }}
             >
-              {meta?.content_kind === "blob"
-                ? formatBytes(contentLength)
+              {meta?.content_kind === "bundle"
+                ? `${contentLength.toLocaleString()} 页`
                 : `${contentLength.toLocaleString()} 字`}
             </Typography>
           )}
@@ -361,15 +351,15 @@ export default function ArticleReader({
             文章正文未下载，恢复连接后可用
           </Typography>
         </Box>
-      ) : meta?.content_kind === "blob" ? (
-        <BlobArticleReader
+      ) : meta?.content_kind === "bundle" ? (
+        <BundleArticleReader
           key={articleId}
           articleId={articleId}
-          token={token}
-          title={meta.title}
-          initialPage={meta.current_offset ?? 0}
-          themeMode={themeMode}
-          subscribeConfigEvents={subscribeConfigEvents}
+          itemCount={meta.content_length}
+          initialItem={meta.current_offset ?? 0}
+          paddingStart={headerHeight}
+          online={online}
+          onProgressChange={handleReadingProgress}
         />
       ) : meta ? (
         <TextArticleReader

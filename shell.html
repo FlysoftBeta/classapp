@@ -51,14 +51,18 @@
             });
         }
         var DB = "classapp-runtime";
-        var DB_VERSION = 4;
+        var DB_VERSION = 5;
         var ACTIVE_BUILD_KEY = "active-bundle";
         function createSchema(db) {
           db.createObjectStore("files");
           var heads = db.createObjectStore("file_heads", { keyPath: "id" });
           heads.createIndex("by-state-created", ["state", "created_at"]);
-          db.createObjectStore("globals", { keyPath: "key" });
-          db.createObjectStore("bundles", { keyPath: "build_id" });
+          if (!db.objectStoreNames.contains("globals")) {
+            db.createObjectStore("globals", { keyPath: "key" });
+          }
+          if (!db.objectStoreNames.contains("bundles")) {
+            db.createObjectStore("bundles", { keyPath: "build_id" });
+          }
 
           var groups = db.createObjectStore("domain_groups", { keyPath: "id" });
           groups.createIndex("by-conv", "conv_id", { unique: true });
@@ -134,8 +138,14 @@
             request.onupgradeneeded = function (event) {
               var db = request.result;
               if (event.oldVersion > 0) {
-                while (db.objectStoreNames.length) {
-                  db.deleteObjectStore(db.objectStoreNames[0]);
+                var names = Array.prototype.slice.call(db.objectStoreNames);
+                for (var index = 0; index < names.length; index += 1) {
+                  if (
+                    event.oldVersion < 4 ||
+                    (names[index] !== "globals" && names[index] !== "bundles")
+                  ) {
+                    db.deleteObjectStore(names[index]);
+                  }
                 }
               }
               createSchema(db);

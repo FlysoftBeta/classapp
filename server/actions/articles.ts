@@ -48,6 +48,22 @@ export async function fetchArticleSegmentAction(
   });
 }
 
+export async function openArticleBundleAction(
+  input: ActionInput<"openArticleBundleAction">,
+) {
+  return withActionSession(async (session) => {
+    return (await (await session.asActor()).articles()).openBundle(input);
+  });
+}
+
+export async function fetchArticleBundleItemsAction(
+  input: ActionInput<"fetchArticleBundleItemsAction">,
+) {
+  return withActionSession(async (session) => {
+    return (await (await session.asActor()).articles()).fetchBundle(input);
+  });
+}
+
 export async function setArticleBookmarkAction(
   input: ActionInput<"setArticleBookmarkAction">,
 ) {

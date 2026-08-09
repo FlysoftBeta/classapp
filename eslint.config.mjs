@@ -8,7 +8,10 @@ export default defineConfig([
   globalIgnores([
     "dist/**",
     "build/**",
+    ".cache/**",
+    "worktree/**",
     "lib/infini/**",
+    "lib/zstd-web/pkg/**",
     "deploy_test/**",
     "vendor/**",
     "lib/**/rust/target/**",

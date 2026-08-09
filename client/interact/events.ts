@@ -1,7 +1,4 @@
-import type {
-  PostStreamEvent,
-  UserConfigChangedEvent,
-} from "./types";
+import type { PostStreamEvent, UserConfigChangedEvent } from "./types";
 
 type Listener<T> = (event: T) => void;
 
@@ -27,4 +24,3 @@ function createEventStream<T>() {
 export const postEvents = createEventStream<PostStreamEvent>();
 export const configEvents = createEventStream<UserConfigChangedEvent>();
 export const announcementEvents = createEventStream<{ revision: number }>();
-

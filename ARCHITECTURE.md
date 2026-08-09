@@ -89,17 +89,39 @@ npm run dev
 
 The development entrypoint starts the backend on port 3001 and Vite on port 3000. Vite serves `index.html` and `client/main.tsx` directly with React Fast
 Refresh, completely bypassing `shell.html` and IndexedDB bundle installation.
+Repository-local runtime state is kept below the ignored `worktree/` directory:
+development data uses `worktree/data/`, reset uses `worktree/prod.db`, and local
+HTTPS credentials use `worktree/secrets/`. Script paths are resolved from the
+repository location, so npm commands do not depend on the caller's working
+directory.
 
 ```sh
 npm run lint
-npm run build
+npm run build -- linux-redhat
 ```
 
-`npm run build` creates `build/bootstrap.zip` for a first install and
-`build/deploy.zip` for the existing update workflow.
+`npm run build -- <target>` requires one of `linux-redhat`, `linux-debian`, or
+`windows`. It creates `build/bootstrap-<target>.zip` for a first install and
+`build/deploy-<target>.zip` for the existing update workflow.
 
-Both archives are self-contained at runtime: each version includes its own
-production `node_modules` with native binaries for Linux x64 and Windows x64.
-The deployment host only needs Node.js 22 x64; it never runs npm or downloads
-dependencies. Native Windows artifacts are fetched and integrity-checked only
-while producing the release on Linux.
+Both archives are self-contained at runtime: each version includes only the
+selected platform's PDF renderer and native Node binaries. The deployment host
+only needs Node.js 22 x64; it never runs npm or downloads dependencies. Runtime
+intermediates (`dist`, unpacked deployment, native runtime and downloaded
+renderer artifacts) live under `.cache`. Set `CLASSAPP_BUILD_CACHE` to move that
+cache elsewhere. `build/` is not cleared and contains only final target archives,
+so builds for multiple targets can coexist.
+
+The committed PDF renderer binaries are refreshed manually from the newest
+successful `FlysoftBeta/pdf-render` Actions run:
+
+```sh
+npm run pdfrender:update
+# Reproduce a particular successful run:
+npm run pdfrender:update -- --run 31302506864
+```
+
+The updater uses authenticated `gh run download`, records GitHub's artifact
+digests, hashes and caches the extracted archives, validates all three platform
+archives, and atomically replaces `lib/poppler-prebuilt`. Release builds never
+contact GitHub.

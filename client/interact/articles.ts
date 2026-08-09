@@ -22,10 +22,7 @@ const {
 import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { offlineRepository } from "@/client/data/repository";
-import { renderCachedPdfPage } from "@/client/interact/cachedPdf";
-import { closeCachedPdf } from "@/client/interact/cachedPdf";
-import { extentFiles } from "@/client/data/files";
-import { FileIds } from "@/client/data/fileIds";
+import { purgeArticleBundle } from "@/client/interact/bundles";
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -369,7 +366,7 @@ export async function createArticle(body: {
   return { res, data };
 }
 
-export async function createBlobArticle(
+export async function createBundleArticle(
   token: string,
   body: {
     title: string;
@@ -517,40 +514,8 @@ export async function flushPendingArticleProgress(
   }
 }
 
-export async function fetchArticleRender(
-  token: string,
-  articleId: string,
-  params: {
-    page: number;
-    width: number;
-    height: number;
-  },
-) {
-  const local = await renderCachedPdfPage(articleId, params).catch(() => null);
-  if (local) {
-    return new Response(local.blob, {
-      headers: {
-        "Content-Type": "image/png",
-        "X-PDF-Num-Pages": String(local.pages),
-        "Cache-Control": "no-store",
-      },
-    });
-  }
-  if (!client.isConnected()) {
-    return Response.json({ error: "文章未保存在本机" }, { status: 503 });
-  }
-  const query = new URLSearchParams({
-    page: String(params.page),
-    width: String(params.width),
-    height: String(params.height),
-  });
-  return apiFetch(`/api/articles/${articleId}/render?${query.toString()}`, {
-    headers: authHeaders(token),
-  });
-}
-
-export function fetchArticleBlob(token: string, articleId: string) {
-  return apiFetch(`/api/articles/${articleId}/blob`, {
+export function fetchArticleSource(token: string, articleId: string) {
+  return apiFetch(`/api/articles/${articleId}/source`, {
     headers: authHeaders(token),
   });
 }
@@ -560,8 +525,7 @@ export async function deleteArticle(articleId: string) {
   const res = observeActionResult(result);
   const data = result.ok ? result.data : { error: result.error.message };
   if (result.ok) {
-    await closeCachedPdf(articleId).catch(() => undefined);
-    await extentFiles.delete(FileIds.articleBlob(articleId));
+    await purgeArticleBundle(articleId);
     await offlineRepository.purgeArticle(articleId);
   }
   return { res, data };

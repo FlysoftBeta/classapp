@@ -237,21 +237,12 @@ retained resources are considered separately. Losing any cache row is safe:
 server snapshots, immutable article reads, and post revision awareness rebuild
 authoritative state.
 
-## SQLite migration
+## SQLite schema baseline
 
-Schema v16 migrates from the deployed v14 baseline through v15, or directly
-from v15, in a single transaction:
-
-1. create v16 tables under temporary names;
-2. normalize groups and memberships;
-3. create one DM row per canonical legacy peer pair;
-4. copy posts in legacy `rowid` order, preserving that value as `sequence` and
-   converting deleted rows to tombstones;
-5. split every legacy text article and encode provider metadata;
-6. convert per-conversation state to `conv_id` (dropping states for DMs that
-   never had a valid conversation);
-7. validate counts, JSON, foreign keys, pair ordering, and segment bounds;
-8. swap tables, rebuild indexes/triggers, and set `schema_version = 16`.
-
-The application never dual-writes v15 and v16 shapes. A failed validation
-rolls the transaction back and leaves the previous database intact.
+Schema v17 is the server database baseline. The ordered migration registry is
+currently empty; startup creates a new v17 database when no version is present
+and rejects versions below the baseline. Future migrations are registered by
+source version and each advances the version ledger in the same transaction as
+its schema changes. There are no dual-write paths. The production v15 database
+was upgraded once before adopting this baseline, with its source copy retained
+outside the runtime database path.

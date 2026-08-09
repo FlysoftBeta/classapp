@@ -1,5 +1,13 @@
-import path from "path";
-import { readBuildId } from "./buildIdentity";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { readBuildId } from "./buildId";
+
+export interface PlatformRuntimeConfig {
+  pdfRender: {
+    rendererPath: string;
+    environment: Record<string, string>;
+  };
+}
 
 export interface ClassAppRuntimeConfig {
   appDir: string;
@@ -12,6 +20,7 @@ export interface ClassAppRuntimeConfig {
   trustedProxyIps: string[];
   nodeEnv: string;
   initialAdminPin?: string;
+  platform: PlatformRuntimeConfig;
   https: {
     domain: string | null;
     certificatePath: string | null;
@@ -22,6 +31,61 @@ export interface ClassAppRuntimeConfig {
     enabled: boolean;
     stagingDir: string;
     backupDir: string;
+  };
+}
+
+function linuxDevelopmentRendererDirectory(appDir: string): string {
+  let distribution = "linux-redhat";
+  try {
+    const release = readFileSync("/etc/os-release", "utf8");
+    const identity = release
+      .split("\n")
+      .filter((line) => /^(ID|ID_LIKE)=/.test(line))
+      .join(" ")
+      .toLowerCase();
+    if (/debian|ubuntu/.test(identity)) distribution = "linux-debian";
+  } catch {
+    // Red Hat-compatible is the development fallback used by release builds.
+  }
+  return path.join(appDir, "lib", "poppler-prebuilt", distribution);
+}
+
+export function createPlatformRuntimeConfig(
+  appDir: string,
+  nodeEnv: string,
+): PlatformRuntimeConfig {
+  const windows = process.platform === "win32";
+  const platformDirectory = windows ? "windows" : "linux";
+  const executable = windows ? "pdfrender.exe" : "pdfrender";
+  const packagedDirectory = path.join(
+    appDir,
+    "server",
+    "pdfrender",
+    platformDirectory,
+  );
+  const rendererDirectory =
+    nodeEnv === "production"
+      ? packagedDirectory
+      : windows
+        ? path.join(appDir, "lib", "poppler-prebuilt", "windows")
+        : linuxDevelopmentRendererDirectory(appDir);
+  const rendererPath =
+    process.env.CLASSAPP_PDFRENDER_PATH ??
+    path.join(rendererDirectory, executable);
+  return {
+    pdfRender: {
+      rendererPath,
+      environment: windows
+        ? {}
+        : {
+            LD_LIBRARY_PATH: [
+              path.dirname(rendererPath),
+              process.env.LD_LIBRARY_PATH,
+            ]
+              .filter(Boolean)
+              .join(path.delimiter),
+          },
+    },
   };
 }
 
@@ -56,6 +120,7 @@ function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
     trustedProxyIps: [],
     nodeEnv,
     initialAdminPin: nodeEnv === "production" ? undefined : "123456",
+    platform: createPlatformRuntimeConfig(appDir, nodeEnv),
     https: {
       domain: null,
       certificatePath: null,

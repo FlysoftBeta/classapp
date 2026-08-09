@@ -7,15 +7,11 @@ import { fetchPosts } from "@/client/interact/posts";
 import {
   fetchArticle,
   fetchArticleSegment,
-  fetchArticleBlob,
   primeOfflineArticleList,
   flushPendingArticleProgress,
   syncPendingArticleConfig,
 } from "@/client/interact/articles";
-import { session } from "@/client/interact/remote/session";
-import { extentFiles } from "@/client/data/files";
-import { FileIds } from "@/client/data/fileIds";
-import { recoverFromQuotaExceeded } from "@/client/interact/quota";
+import { downloadBundleForOffline } from "@/client/interact/bundles";
 import { SEGMENT_SIZE } from "@/shared/types/api/article";
 import {
   offlineRepository,
@@ -108,40 +104,16 @@ export async function downloadArticleForOffline(
   try {
     const result = await fetchArticle(articleId);
     const article = result?.article;
-    if (article && article.content_kind !== "text") {
-      const response = await fetchArticleBlob(session.getToken(), articleId);
-      if (!response.ok || !response.body) {
-        throw new Error(`文章文件下载失败 (${response.status})`);
-      }
-      const expectedSize = Number(response.headers.get("Content-Length"));
-      const size = Number.isSafeInteger(expectedSize) && expectedSize >= 0
-        ? expectedSize
-        : article.file_size;
-      let loaded = 0;
-      const reader = response.body.getReader();
-      const progress = new ReadableStream<Uint8Array>({
-        pull: async (controller) => {
-          const next = await reader.read();
-          if (next.done) {
-            controller.close();
-            return;
-          }
-          loaded += next.value.byteLength;
-          const percent = Math.min(100, Math.round((loaded / Math.max(1, size)) * 100));
-          taskStore.getState().patch(taskId, { progress: percent });
-          onProgress?.(percent);
-          controller.enqueue(next.value);
-        },
-        cancel: (reason) => reader.cancel(reason),
+    if (article?.content_kind === "bundle") {
+      const size = await downloadBundleForOffline(articleId, (percent) => {
+        taskStore.getState().patch(taskId, { progress: percent });
+        onProgress?.(percent);
       });
-      await recoverFromQuotaExceeded(() =>
-        extentFiles.replace(FileIds.articleBlob(articleId), size, progress),
-      );
       await offlineRepository.markArticlePolicySynced(articleId, size);
       taskStore.getState().patch(taskId, {
         status: "completed",
         progress: 100,
-        detail: "PDF 已保存到本机",
+        detail: "文档已保存到本机",
       });
       return;
     }

@@ -17,7 +17,7 @@ import {
   findArticleForUser,
   findArticleRecord,
   getArticleTextSegment,
-  insertBlobArticle,
+  insertBundleArticle,
   insertTextArticle,
   listArticleHistoryRows,
   listArticlesForUser,
@@ -40,21 +40,29 @@ import {
   assertCanCreateArticle,
   assertCanDeleteArticle,
 } from "@/server/domain/policy/articles";
-import { removeArticleBlob } from "@/server/infra/articleBlobs";
+import { removeArticleBundle } from "@/server/infra/articleArtifacts";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
 import { assertGroupMember } from "@/server/domain/policy/membership";
+import type { BundleSlice } from "@/shared/bundles/protocol";
+import {
+  loadRenderArchive,
+  type RenderArchiveIndex,
+} from "@/server/infra/renderArchive";
 
 export interface CreateArticleInput {
   title: string;
   content: string;
   group_id: string;
 }
-export interface CreateBlobArticleInput {
+export interface CreateBundleArticleInput {
   title: string;
-  blob_path: string;
-  mime_type: string;
-  file_size: number;
+  source_path: string;
+  archive_path: string;
+  source_mime: string;
+  source_size: number;
+  archive_size: number;
   original_filename: string;
+  item_count: number;
   group_id: string;
 }
 
@@ -118,23 +126,27 @@ export class ArticleService {
     return { article };
   }
 
-  createBlob(
+  createBundle(
     user: User,
-    input: CreateBlobArticleInput,
+    input: CreateBundleArticleInput,
   ): { article: Article & ArticleWithMeta } {
     assertCanCreateArticle(this.db, user, input.group_id);
-    if (!input.blob_path) throw new MalformedRequestError("文件保存失败");
-    if (input.mime_type !== "application/pdf")
+    if (!input.source_path || !input.archive_path)
+      throw new MalformedRequestError("文件保存失败");
+    if (input.source_mime !== "application/pdf")
       throw new MalformedRequestError("仅支持 PDF 文件");
     const id = crypto.randomUUID();
-    insertBlobArticle(this.db, {
+    insertBundleArticle(this.db, {
       id,
       userId: user.id,
       title: requireTrimmed(input.title, "标题不能为空"),
-      blobPath: input.blob_path,
-      mimeType: input.mime_type,
-      fileSize: input.file_size,
+      sourcePath: input.source_path,
+      archivePath: input.archive_path,
+      sourceMime: input.source_mime,
+      sourceSize: input.source_size,
+      archiveSize: input.archive_size,
       originalFilename: input.original_filename,
+      itemCount: input.item_count,
       groupId: input.group_id,
     });
     const article = this.requireOwned(id, user.id);
@@ -162,7 +174,7 @@ export class ArticleService {
       input.offset,
     );
     if (!segment) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
-    if (segment.content_kind === "blob")
+    if (segment.content_kind === "bundle")
       throw new MalformedRequestError("二进制文章不支持文本分段");
     return {
       content: segment.content,
@@ -170,6 +182,47 @@ export class ArticleService {
       has_more: segment.has_more,
       content_length: segment.content_length,
     };
+  }
+
+  async openBundle(
+    user: User,
+    input: {
+      articleId: string;
+      cursor: number | null;
+      before: number;
+      after: number;
+    },
+  ): Promise<BundleSlice> {
+    const index = await this.requireBundle(user, input.articleId);
+    if (!index.items.length) return this.sliceBundle(index, 0, 0);
+    const cursor = Math.min(input.cursor ?? 0, index.items.length - 1);
+    return this.sliceBundle(
+      index,
+      Math.max(0, cursor - input.before),
+      Math.min(index.items.length, cursor + input.after + 1),
+    );
+  }
+
+  async fetchBundle(
+    user: User,
+    input: {
+      articleId: string;
+      cursor: number;
+      direction: "before" | "after";
+      limit: number;
+    },
+  ): Promise<BundleSlice> {
+    const index = await this.requireBundle(user, input.articleId);
+    if (input.direction === "before") {
+      const end = Math.min(input.cursor, index.items.length);
+      return this.sliceBundle(index, Math.max(0, end - input.limit), end);
+    }
+    const start = Math.min(input.cursor + 1, index.items.length);
+    return this.sliceBundle(
+      index,
+      start,
+      Math.min(index.items.length, start + input.limit),
+    );
   }
 
   setBookmark(
@@ -202,8 +255,14 @@ export class ArticleService {
     const article = findArticleRecord(this.db, articleId);
     if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
     const safe =
-      article.content_kind === "blob"
-        ? Math.max(0, Math.floor(offset))
+      article.content_kind === "bundle"
+        ? Math.max(
+            0,
+            Math.min(
+              Math.floor(offset),
+              Math.max(0, article.content_length - 1),
+            ),
+          )
         : Math.max(0, Math.min(Math.floor(offset), article.content_length));
     const value = upsertArticleProgressOffset(
       this.db,
@@ -241,8 +300,8 @@ export class ArticleService {
     assertCanDeleteArticle(this.db, user, articleId);
     const record = findArticleRecord(this.db, articleId);
     deleteArticleById(this.db, articleId);
-    if (record?.content_kind === "blob" && record.blob_path)
-      await removeArticleBlob(record.blob_path);
+    if (record?.content_kind === "bundle")
+      await removeArticleBundle(record.source_path, record.archive_path);
     const affectedUsers = new Set(
       [user.id, record?.user_id].filter((id): id is string => !!id),
     );
@@ -278,8 +337,8 @@ export class ArticleService {
   }
 
   async purgeUser(userId: string): Promise<void> {
-    for (const blobPath of purgeArticlesForUser(this.db, userId)) {
-      await removeArticleBlob(blobPath);
+    for (const artifact of purgeArticlesForUser(this.db, userId)) {
+      await removeArticleBundle(artifact.sourcePath, artifact.archivePath);
     }
   }
 
@@ -292,6 +351,49 @@ export class ArticleService {
     const id = crypto.randomUUID();
     insertTextArticle(this.db, { id, userId, groupId, title, content });
     return this.requireOwned(id, userId);
+  }
+
+  private async requireBundle(
+    user: User,
+    articleId: string,
+  ): Promise<RenderArchiveIndex> {
+    assertCanAccessArticle(this.db, user, articleId);
+    const article = findArticleRecord(this.db, articleId);
+    if (
+      !article ||
+      article.content_kind !== "bundle" ||
+      !article.archive_path
+    ) {
+      throw new CheckedError("NOT_FOUND", "文档资源不存在", 404);
+    }
+    return loadRenderArchive(article.archive_path);
+  }
+
+  private sliceBundle(
+    index: RenderArchiveIndex,
+    start: number,
+    end: number,
+  ): BundleSlice {
+    const items = index.items.slice(start, end);
+    const ids = new Set(index.header.shared);
+    if (index.header.dictionary) ids.add(index.header.dictionary.content_id);
+    for (const item of items) {
+      ids.add(item.document);
+      for (const dependency of item.dependencies) ids.add(dependency);
+    }
+    return {
+      header: index.header,
+      items,
+      resources: [...ids].map((id) => {
+        const resource = index.resources.get(id);
+        if (!resource) throw new Error(`Bundle resource ${id} is not indexed`);
+        const { storedOffset: _storedOffset, ...publicResource } = resource;
+        void _storedOffset;
+        return publicResource;
+      }),
+      exhausted_before: start === 0,
+      exhausted_after: end >= index.items.length,
+    };
   }
   private requireOwned(id: string, userId: string) {
     const article = findArticleForUser(this.db, id, userId);

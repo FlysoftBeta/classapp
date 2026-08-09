@@ -160,8 +160,11 @@ export class ExtentFileStore {
 
   async list(prefix = ""): Promise<FileHead[]> {
     return runTransaction(STORES.FILE_HEADS, "readonly", async (tx) => {
+      const range = prefix
+        ? IDBKeyRange.bound(prefix, `${prefix}\uffff`, false, false)
+        : undefined;
       const rows = (await requestResult(
-        tx.objectStore(STORES.FILE_HEADS).getAll(),
+        tx.objectStore(STORES.FILE_HEADS).getAll(range),
       )) as FileHead[];
       return prefix ? rows.filter((row) => row.id.startsWith(prefix)) : rows;
     });
@@ -189,6 +192,15 @@ export class ExtentFileStore {
         written += amount;
       }
       return output.buffer;
+    });
+  }
+
+  /** Reads one complete, pinned generation without a separate size race. */
+  async readAll(id: string): Promise<ArrayBuffer | null> {
+    await this.ensureComplete(id);
+    return withFileLock(id, "shared", async () => {
+      const head = await readHead(id);
+      return head ? this.readUnlocked(head, 0, head.size) : null;
     });
   }
 
@@ -279,6 +291,20 @@ export class ExtentFileStore {
       });
       await deletePhysical(head.physical_id, extentCount(head.size));
     });
+  }
+
+  /** Deletes every logical file below one path-like prefix. */
+  async deletePrefix(
+    prefix: string,
+  ): Promise<{ files: number; bytes: number }> {
+    if (!prefix) throw new Error("deletePrefix requires a non-empty prefix");
+    const heads = await this.list(prefix);
+    let bytes = 0;
+    for (const head of heads) {
+      await this.delete(head.id);
+      bytes += head.size;
+    }
+    return { files: heads.length, bytes };
   }
 
   async replace(
@@ -607,8 +633,7 @@ export class ExtentFileCursor {
 class GenerationWriter {
   private extent = 0;
   private total = 0;
-  private buffered = new Uint8Array(EXTENT_SIZE);
-  private bufferedLength = 0;
+  private tail = new ArrayBuffer(0);
 
   constructor(
     private readonly physicalId: string,
@@ -621,19 +646,22 @@ class GenerationWriter {
     while (read < source.length) {
       const amount = Math.min(
         source.length - read,
-        EXTENT_SIZE - this.bufferedLength,
+        EXTENT_SIZE - this.tail.byteLength,
       );
-      this.buffered.set(
-        source.subarray(read, read + amount),
-        this.bufferedLength,
-      );
-      this.bufferedLength += amount;
+      const next = new Uint8Array(this.tail.byteLength + amount);
+      next.set(new Uint8Array(this.tail));
+      next.set(source.subarray(read, read + amount), this.tail.byteLength);
+      this.tail = next.buffer;
       this.total += amount;
       read += amount;
       if (this.total > this.expectedSize) {
         throw new RangeError("File source exceeded expected size");
       }
-      if (this.bufferedLength === EXTENT_SIZE) await this.flush();
+      await putPhysicalExtent(this.physicalId, this.extent, this.tail);
+      if (this.tail.byteLength === EXTENT_SIZE) {
+        this.extent += 1;
+        this.tail = new ArrayBuffer(0);
+      }
     }
   }
 
@@ -643,15 +671,6 @@ class GenerationWriter {
         `File source length ${this.total} did not match ${this.expectedSize}`,
       );
     }
-    if (this.bufferedLength) await this.flush();
-  }
-
-  private async flush(): Promise<void> {
-    const value = this.buffered.buffer.slice(0, this.bufferedLength);
-    await putPhysicalExtent(this.physicalId, this.extent, value);
-    this.extent += 1;
-    this.buffered = new Uint8Array(EXTENT_SIZE);
-    this.bufferedLength = 0;
   }
 }
 

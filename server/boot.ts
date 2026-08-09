@@ -2,8 +2,11 @@
 // contract over IPC; this file intentionally contains no application logic.
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
-import { readBuildId } from "@/server/infra/buildIdentity";
+import {
+  createPlatformRuntimeConfig,
+  type ClassAppRuntimeConfig,
+} from "@/server/infra/runtimeConfig";
+import { readBuildId } from "@/server/infra/buildId";
 
 interface BootMessage {
   type: "classapp:boot";
@@ -13,6 +16,7 @@ interface BootMessage {
 function standaloneConfig(): ClassAppRuntimeConfig {
   const dataRoot = path.resolve(process.cwd());
   const appDir = __dirname;
+  const nodeEnv = process.env.NODE_ENV ?? "production";
   return {
     appDir,
     dataRoot,
@@ -24,9 +28,10 @@ function standaloneConfig(): ClassAppRuntimeConfig {
     securePorts: [],
     bindHost: "0.0.0.0",
     trustedProxyIps: [],
-    nodeEnv: process.env.NODE_ENV ?? "production",
+    nodeEnv,
     initialAdminPin:
       process.env.NODE_ENV === "production" ? undefined : "123456",
+    platform: createPlatformRuntimeConfig(appDir, nodeEnv),
     https: {
       domain: null,
       certificatePath: null,
@@ -58,6 +63,12 @@ function isRuntimeConfig(value: unknown): value is ClassAppRuntimeConfig {
     ) &&
     Array.isArray(config.trustedProxyIps) &&
     config.trustedProxyIps.every((ip) => typeof ip === "string") &&
+    !!config.platform?.pdfRender &&
+    typeof config.platform.pdfRender.rendererPath === "string" &&
+    !!config.platform.pdfRender.environment &&
+    Object.values(config.platform.pdfRender.environment).every(
+      (value) => typeof value === "string",
+    ) &&
     !!config.https &&
     typeof config.https === "object"
   );

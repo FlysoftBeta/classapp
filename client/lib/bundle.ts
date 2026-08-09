@@ -85,16 +85,20 @@ async function stageBundle(buildId: string, body: ArrayBuffer): Promise<void> {
 }
 
 async function activateBundle(buildId: string): Promise<void> {
-  await runTransaction([STORES.BUNDLES, STORES.GLOBALS], "readwrite", async (tx) => {
-    const bundle = await requestResult(
-      tx.objectStore(STORES.BUNDLES).get(buildId),
-    );
-    if (!bundle) throw new Error(`Cannot activate missing bundle ${buildId}`);
-    tx.objectStore(STORES.GLOBALS).put({
-      key: GLOBAL_KEYS.ACTIVE_BUNDLE,
-      value: buildId,
-    });
-  });
+  await runTransaction(
+    [STORES.BUNDLES, STORES.GLOBALS],
+    "readwrite",
+    async (tx) => {
+      const bundle = await requestResult(
+        tx.objectStore(STORES.BUNDLES).get(buildId),
+      );
+      if (!bundle) throw new Error(`Cannot activate missing bundle ${buildId}`);
+      tx.objectStore(STORES.GLOBALS).put({
+        key: GLOBAL_KEYS.ACTIVE_BUNDLE,
+        value: buildId,
+      });
+    },
+  );
 }
 
 async function activeBundleBuildId(): Promise<string | null> {

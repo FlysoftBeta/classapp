@@ -47,7 +47,11 @@ export async function findCachedPost(
   conv: Pick<Conversation, "type" | "id" | "conv_id">,
   postId: string,
 ): Promise<Post | null> {
-  return (await offlineRepository.getPosts(conv)).find((post) => post.id === postId) ?? null;
+  return (
+    (await offlineRepository.getPosts(conv)).find(
+      (post) => post.id === postId,
+    ) ?? null
+  );
 }
 
 export async function locateCachedPost(

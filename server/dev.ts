@@ -1,11 +1,15 @@
-import path from "node:path";
+import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
-import { setRuntimeConfig } from "@/server/infra/runtimeConfig";
+import {
+  createPlatformRuntimeConfig,
+  setRuntimeConfig,
+} from "@/server/infra/runtimeConfig";
+import { projectRoot, worktreePath } from "@/scripts/paths.mjs";
 
 async function main(): Promise<void> {
-  const root = process.cwd();
-  const appDir = process.env.CLASSAPP_APP_DIR ?? root;
-  const dataRoot = process.env.CLASSAPP_DATA_ROOT ?? root;
+  const appDir = process.env.CLASSAPP_APP_DIR ?? projectRoot;
+  const dataRoot = process.env.CLASSAPP_DATA_ROOT ?? worktreePath("data");
+  mkdirSync(dataRoot, { recursive: true });
   const port = Number(process.env.CLASSAPP_PORT ?? "3001");
   const config = setRuntimeConfig({
     appDir,
@@ -17,6 +21,7 @@ async function main(): Promise<void> {
     trustedProxyIps: ["127.0.0.1", "::1"],
     nodeEnv: "development",
     initialAdminPin: "123456",
+    platform: createPlatformRuntimeConfig(appDir, "development"),
     https: {
       domain: null,
       certificatePath: null,
@@ -25,8 +30,8 @@ async function main(): Promise<void> {
     },
     update: {
       enabled: false,
-      stagingDir: path.join(root, "staging"),
-      backupDir: path.join(root, "backup"),
+      stagingDir: worktreePath("staging"),
+      backupDir: worktreePath("backup"),
     },
   });
 
@@ -43,10 +48,11 @@ async function main(): Promise<void> {
     import("@/server/services/maintenance"),
     import("@/server/services/officeDocumentMonitor"),
   ]);
+  const db = getDb();
   const backend = createServer(createHttpHandler(config));
   new WebSocketProtocol("dev").attach(backend);
-  const stopMaintenance = startPeriodicMaintenance(getDb());
-  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(getDb());
+  const stopMaintenance = startPeriodicMaintenance(db);
+  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );

@@ -82,7 +82,8 @@ class RuntimeDatabase {
         RUNTIME_DATABASE,
         RUNTIME_DATABASE_VERSION,
       );
-      request.onupgradeneeded = () => upgradeRuntimeDatabase(request);
+      request.onupgradeneeded = (event) =>
+        upgradeRuntimeDatabase(request, event.oldVersion);
       request.onblocked = () => {
         blockedTimer = window.setTimeout(() => {
           if (settled) return;

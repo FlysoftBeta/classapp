@@ -11,7 +11,7 @@ import AddIcon from "@mui/icons-material/Add";
 import AttachmentIcon from "@mui/icons-material/Attachment";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import type { Conversation } from "@/shared/types/api";
-import { createArticle, createBlobArticle } from "@/client/interact/articles";
+import { createArticle, createBundleArticle } from "@/client/interact/articles";
 import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
 import { decodeUploadedText } from "@/client/lib/textEncoding";
 import { NetworkArticleDialog } from "./NetworkArticleDialog";
@@ -101,7 +101,7 @@ export function ArticleImportFab({
           ? decodeUploadedText(await readFileBytes(attachment)).text.trim()
           : content.trim();
       const { res } = isPdf
-        ? await createBlobArticle(token, {
+        ? await createBundleArticle(token, {
             title: title.trim(),
             file: attachment,
             group_id: groupId,

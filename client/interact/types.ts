@@ -10,12 +10,7 @@ import type {
 } from "@/shared/types/events";
 
 export type AppState =
-  | "loading"
-  | "konami"
-  | "login"
-  | "oobe"
-  | "app_locked"
-  | "app";
+  "loading" | "konami" | "login" | "oobe" | "app_locked" | "app";
 
 export interface OobeState {
   oobe_token: string;
@@ -80,4 +75,3 @@ export type {
   PostStreamEvent,
   UserConfigChangedEvent,
 };
-

@@ -127,18 +127,6 @@ export class Actor {
     );
   }
 
-  async readerConfig() {
-    const [{ ReaderConfigActorFacade }, { createReaderConfigService }] =
-      await Promise.all([
-        import("@/server/domain/facade/readerConfig"),
-        import("@/server/services/readerConfigService"),
-      ]);
-    return new ReaderConfigActorFacade(
-      this,
-      createReaderConfigService(getDb()),
-    );
-  }
-
   async versionedUserConfig() {
     const [{ VersionedUserConfigActorFacade }, { VersionedUserConfigService }] =
       await Promise.all([

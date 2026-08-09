@@ -1,11 +1,12 @@
 import { getDb } from "@/server/infra/db";
 import { createArticleService } from "@/server/services/articlesService";
 import {
-  removeArticleBlob,
-  storeArticleBlob,
-} from "@/server/infra/articleBlobs";
+  removeArticleBundle,
+  storeArticleBundle,
+} from "@/server/infra/articleArtifacts";
 import { handleServiceError } from "@/server/services/errors";
 import { requireActiveAuth } from "@/server/domain/policy/auth";
+import { assertCanCreateArticle } from "@/server/domain/policy/articles";
 import { hasFeature } from "@/shared/features";
 
 export async function POST(req: Request) {
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "Deprecated JSON article creation route. Use a OneShot Action for text articles and multipart/form-data only for blob uploads.",
+            "Use a OneShot Action for text articles and multipart/form-data for document uploads.",
         },
         { status: 410 },
       );
@@ -41,20 +42,27 @@ export async function POST(req: Request) {
       return Response.json({ error: "文章必须归属群聊" }, { status: 400 });
     }
 
-    const stored = await storeArticleBlob(file);
+    // Reject an inaccessible target before consuming a bounded render slot.
+    assertCanCreateArticle(getDb(), auth.user, groupId);
+    const stored = await storeArticleBundle(file);
     try {
       const articles = createArticleService(getDb());
-      const result = articles.createBlob(auth.user, {
+      const result = articles.createBundle(auth.user, {
         title: title || stored.originalFilename.replace(/\.pdf$/i, ""),
-        blob_path: stored.relativePath,
-        mime_type: stored.mimeType,
-        file_size: stored.fileSize,
+        source_path: stored.sourcePath,
+        archive_path: stored.archivePath,
+        source_mime: stored.sourceMime,
+        source_size: stored.sourceSize,
+        archive_size: stored.archiveSize,
         original_filename: stored.originalFilename,
+        item_count: stored.itemCount,
         group_id: groupId,
       });
       return Response.json({ article: result.article }, { status: 201 });
     } catch (e) {
-      await removeArticleBlob(stored.relativePath).catch(() => {});
+      await removeArticleBundle(stored.sourcePath, stored.archivePath).catch(
+        () => {},
+      );
       throw e;
     }
   } catch (e) {

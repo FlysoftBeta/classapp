@@ -232,7 +232,12 @@ export function useChatPosts({
           direction === "after" ? !hasMore : cursor.kind === "latest",
       };
     },
-    [conversationConvId, conversationId, conversationRevision, conversationType],
+    [
+      conversationConvId,
+      conversationId,
+      conversationRevision,
+      conversationType,
+    ],
   );
 
   // ---- resolveItem: fetch a single post by ID for re-bootstrap ----

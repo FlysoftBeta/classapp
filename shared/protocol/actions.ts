@@ -17,8 +17,12 @@ import {
   wordWithLearnedCountSchema,
   wordWithWrongCountSchema,
 } from "@/shared/types/api";
+import {
+  bundleFetchInputSchema,
+  bundleOpenInputSchema,
+  bundleSliceSchema,
+} from "@/shared/bundles/protocol";
 import { appStatePayloadSchema } from "@/shared/types/events";
-import { blobReaderConfigSchema } from "@/shared/userConfig/reader";
 import {
   createPostPayloadSchema,
   createStickerPostPayloadSchema,
@@ -530,6 +534,14 @@ export const actionContracts = {
       content_length: z.number().int().nonnegative(),
     }),
   ),
+  openArticleBundleAction: contract(
+    one(bundleOpenInputSchema),
+    bundleSliceSchema,
+  ),
+  fetchArticleBundleItemsAction: contract(
+    one(bundleFetchInputSchema),
+    bundleSliceSchema,
+  ),
   setArticleBookmarkAction: contract(
     one(
       object({
@@ -702,17 +714,6 @@ export const actionContracts = {
     object({ post: postSchema }),
   ),
   deletePostAction: contract(one(nonEmptyString), object({ post: postSchema })),
-
-  fetchReaderConfigAction: contract(noArgs, blobReaderConfigSchema),
-  updateReaderConfigAction: contract(
-    one(
-      object({
-        grayscale: z.boolean().optional(),
-        zoom: z.number().finite().optional(),
-      }),
-    ),
-    blobReaderConfigSchema,
-  ),
 
   fetchStickerPacksAction: contract(
     noArgs,

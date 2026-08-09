@@ -26,9 +26,10 @@ export async function bootstrap(
       setTimeout(() => process.exit(exitCode), delayMs);
     },
   });
+  const db = getDb();
   const protocol = new WebSocketProtocol(config.buildId);
-  const stopMaintenance = startMaintenance(getDb());
-  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(getDb());
+  const stopMaintenance = startMaintenance(db);
+  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
   const servers: Server[] = [];
   const listen = async (
     server: Server,

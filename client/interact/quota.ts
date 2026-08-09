@@ -26,22 +26,23 @@ class QuotaController {
     }, 500);
   }
 
-  async enforce(force = false): Promise<void> {
+  async enforce(force = false, excludeArticleId?: string): Promise<void> {
     if (this.running) return this.running;
-    const run = this.run(force).finally(() => {
+    const run = this.run(force, excludeArticleId).finally(() => {
       if (this.running === run) this.running = null;
     });
     this.running = run;
     return run;
   }
 
-  private async run(force: boolean): Promise<void> {
+  private async run(force: boolean, excludeArticleId?: string): Promise<void> {
     await extentFiles.collectOrphans().catch(() => 0);
     let current = await estimate();
     if (
       !force &&
       (!current.quota || current.usage / current.quota < START_RATIO)
-    ) return;
+    )
+      return;
 
     let lastUsage = current.usage;
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
@@ -52,13 +53,25 @@ class QuotaController {
           )
         : 64 * 1024 * 1024;
       if (!targetBytes) return;
-      let freed = await handleOfflineQuotaPressure(targetBytes, false);
+      const excludedArticles = excludeArticleId
+        ? new Set([excludeArticleId])
+        : undefined;
+      let freed = await handleOfflineQuotaPressure(
+        targetBytes,
+        false,
+        excludedArticles,
+      );
       if (freed < targetBytes) {
-        freed += await handleOfflineQuotaPressure(targetBytes - freed, true);
+        freed += await handleOfflineQuotaPressure(
+          targetBytes - freed,
+          true,
+          excludedArticles,
+        );
       }
       if (!freed) return;
       current = await estimate();
-      if (!current.quota || current.usage / current.quota <= TARGET_RATIO) return;
+      if (!current.quota || current.usage / current.quota <= TARGET_RATIO)
+        return;
       // Browser usage is approximate and LevelDB compaction may lag. Stop when
       // another logical deletion round no longer changes the estimate.
       if (current.usage >= lastUsage) return;
@@ -69,8 +82,14 @@ class QuotaController {
 
 const quotaController = new QuotaController();
 
+function isQuotaExceeded(error: unknown): error is DOMException {
+  return error instanceof DOMException && error.name === "QuotaExceededError";
+}
+
 export function startQuotaController(): () => void {
-  const unsubscribe = runtimeDatabase.subscribe(() => quotaController.schedule());
+  const unsubscribe = runtimeDatabase.subscribe(() =>
+    quotaController.schedule(),
+  );
   quotaController.schedule();
   return unsubscribe;
 }
@@ -79,14 +98,25 @@ export async function requestPersistentStorage(): Promise<boolean> {
   return (await navigator.storage?.persist?.()) ?? false;
 }
 
-export async function recoverFromQuotaExceeded<T>(run: () => Promise<T>): Promise<T> {
+export async function recoverFromQuotaExceeded<T>(
+  run: () => Promise<T>,
+  excludeArticleId?: string,
+): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (!(error instanceof DOMException) || error.name !== "QuotaExceededError") {
+    if (!(await reclaimAfterQuotaExceeded(error, excludeArticleId)))
       throw error;
-    }
-    await quotaController.enforce(true);
     return run();
   }
+}
+
+/** Reclaim space without replaying a one-shot input such as a network stream. */
+export async function reclaimAfterQuotaExceeded(
+  error: unknown,
+  excludeArticleId?: string,
+): Promise<boolean> {
+  if (!isQuotaExceeded(error)) return false;
+  await quotaController.enforce(true, excludeArticleId);
+  return true;
 }

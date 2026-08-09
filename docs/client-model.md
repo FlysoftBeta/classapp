@@ -115,11 +115,13 @@ sidebar 这类可重建的展示投影，以及路由、弹窗、选择态；它
 数据库名为 `classapp-runtime`。目标 schema 是一个硬边界：旧领域数据不迁移，升级时
 直接删除旧 stores 并创建新 stores。
 
-版本号 3 已经出现在原代码中，浏览器可能打开过它；继续声明 3 不会再次触发
-`onupgradeneeded`。因此本次硬边界实际使用 version 4。升级事务删除包括旧 bundle 在内
-的全部 object stores，再按本文件创建空 schema；不读取旧 row、不改写旧 row，也没有
-兼容 fallback。首次切换到 version 4 必须在线，以便 Shell 在重建后立即安装当前 bundle。
-这是有意接受的一次性代价，换取没有迁移代码和旧格式分支的长期结构。
+版本号 3 和 4 已经出现在原代码中，浏览器可能打开过它们；继续声明旧版本不会再次触发
+`onupgradeneeded`。Bundle Reader 的硬边界使用 version 5。从 version 4 升级时，事务保留
+Shell 启动所需的 `globals` 和 `bundles`，删除旧领域 stores 与 Extent 文件，再按本文件
+创建空领域 schema；不读取或改写旧领域 row，也没有旧 Blob Reader 的兼容 fallback。
+version 3 的 runtime store 结构不同，仍执行全量硬重建并要求首次切换在线。这样既彻底
+移除旧文档缓存，又不会在正常的 version 4 → 5 升级瞬间破坏当前 application bundle
+的离线启动能力。
 
 TypeScript 入口以 `client/data/schema.ts` 为 schema 来源。`shell.html` 必须能在 application
 尚未启动时独立建库，所以无法 import 该模块，只有这一处机械重复；协议契约测试会逐项
