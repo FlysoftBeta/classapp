@@ -5,6 +5,13 @@ export const EXTENT_SIZE = 4 * 1024 * 1024;
 const MAX_EXTENTS_PER_TRANSACTION = 4;
 const STREAM_CHUNK_SIZE = 256 * 1024;
 
+// Grace period before an unreferenced physical_id is considered a true
+// orphan. publishGeneration() writes extents under a fresh physical_id
+// before the FileHead that references it is committed, so during that
+// window the id is legitimately "live" even though no head points to it
+// yet. Must exceed the longest realistic single write/replace duration.
+const ORPHAN_GRACE_MS = 5 * 60 * 1000;
+
 const localLockTails = new Map<string, Promise<void>>();
 
 async function withLocalFileLock<T>(
@@ -142,6 +149,19 @@ function physicalId(id: string): string {
   return `${id}@${Date.now().toString(36)}-${random[0]!.toString(36)}${random[1]!.toString(36)}`;
 }
 
+// physicalId() encodes its creation time as a base36 timestamp right after
+// "@". Used by collectOrphans() to avoid reclaiming extents belonging to a
+// generation that is still being written (see publishGeneration()).
+function physicalGenerationTimestamp(physId: string): number | null {
+  const at = physId.lastIndexOf("@");
+  if (at < 0) return null;
+  const rest = physId.slice(at + 1);
+  const dash = rest.indexOf("-");
+  const stamp = dash < 0 ? rest : rest.slice(0, dash);
+  const ms = parseInt(stamp, 36);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function copyView(view: ArrayBufferView): ArrayBuffer {
   const copy = new Uint8Array(view.byteLength);
   copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
@@ -151,10 +171,16 @@ function copyView(view: ArrayBufferView): ArrayBuffer {
 /** Extent-backed binary files with staged, atomic generation publication. */
 export class ExtentFileStore {
   async size(id: string): Promise<number | null> {
+    // Read-only: mirrors read()/readAll() by only taking the exclusive lock
+    // long enough to run crash recovery, then reading under a shared lock.
+    // Previously this held the exclusive lock for the whole call, which
+    // needlessly serialized against every concurrent read/write/stream on
+    // the file even when no recovery was needed.
+    await this.ensureComplete(id);
     return withFileLock(
       id,
-      "exclusive",
-      async () => (await this.recoverHead(await readHead(id)))?.size ?? null,
+      "shared",
+      async () => (await readHead(id))?.size ?? null,
     );
   }
 
@@ -282,14 +308,16 @@ export class ExtentFileStore {
     });
   }
 
-  async delete(id: string): Promise<void> {
-    await withFileLock(id, "exclusive", async () => {
+  /** Deletes one logical file. Returns the size (in bytes) that was freed. */
+  async delete(id: string): Promise<number> {
+    return withFileLock(id, "exclusive", async () => {
       const head = await this.recoverHead(await readHead(id));
-      if (!head) return;
+      if (!head) return 0;
       await runTransaction(STORES.FILE_HEADS, "readwrite", (tx) => {
         tx.objectStore(STORES.FILE_HEADS).delete(id);
       });
       await deletePhysical(head.physical_id, extentCount(head.size));
+      return head.size;
     });
   }
 
@@ -301,8 +329,11 @@ export class ExtentFileStore {
     const heads = await this.list(prefix);
     let bytes = 0;
     for (const head of heads) {
-      await this.delete(head.id);
-      bytes += head.size;
+      // Use delete()'s own return value (captured under its exclusive lock
+      // at the moment of deletion) rather than head.size from this stale
+      // list() snapshot, since a concurrent grow/shrink/replace between the
+      // snapshot and the delete could otherwise make the byte count wrong.
+      bytes += await this.delete(head.id);
     }
     return { files: heads.length, bytes };
   }
@@ -418,6 +449,15 @@ export class ExtentFileStore {
   async collectOrphans(limit = 32): Promise<number> {
     assertSize(limit, "limit");
     if (!limit) return 0;
+    // Generations younger than the grace period are skipped even if no
+    // FileHead references them yet: publishGeneration() writes extents
+    // under a brand new physical_id before committing the FileHead that
+    // makes it "live", so during that window an in-progress write looks
+    // identical to a genuine orphan. Without this cutoff, a concurrent
+    // collectOrphans() call could delete extents (including extent 0,
+    // which is written first and so is exposed the longest) out from
+    // under an in-flight replace()/grow()/shrink().
+    const cutoff = Date.now() - ORPHAN_GRACE_MS;
     const keys = await runTransaction(
       [STORES.FILE_HEADS, STORES.FILES],
       "readonly",
@@ -437,7 +477,13 @@ export class ExtentFileStore {
               return;
             }
             const key = cursor.key as [string, number];
-            if (!live.has(key[0])) orphaned.push(key);
+            const [physId] = key;
+            if (!live.has(physId)) {
+              const stamp = physicalGenerationTimestamp(physId);
+              // Unparseable timestamps are treated as reclaimable, since
+              // they can't belong to physicalId()'s current format.
+              if (stamp === null || stamp <= cutoff) orphaned.push(key);
+            }
             cursor.continue();
           };
         });
