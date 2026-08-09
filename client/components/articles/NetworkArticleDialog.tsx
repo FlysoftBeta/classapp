@@ -85,7 +85,9 @@ export function NetworkArticleDialog({
       setError("创建下载任务失败");
       return;
     }
-    taskStore.getState().upsert({
+
+    const taskState = taskStore.getState();
+    taskState.upsert({
       id: task.id,
       kind: "network-download",
       title: task.title,
@@ -102,6 +104,7 @@ export function NetworkArticleDialog({
       articleId: task.article_id,
       updatedAt: task.updated_at,
     });
+    taskState.setOpened(true);
   };
 
   const seconds = Math.max(0, Math.ceil((readyAt - now) / 1000));

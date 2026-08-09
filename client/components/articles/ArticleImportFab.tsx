@@ -51,7 +51,6 @@ export function ArticleImportFab({
   const [content, setContent] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [bodyFocused, setBodyFocused] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const groupId = conversation.type === "group" ? conversation.id : null;
 
@@ -64,7 +63,6 @@ export function ArticleImportFab({
   };
 
   const close = () => {
-    if (saving) return;
     setOpen(false);
     reset();
   };
@@ -78,9 +76,11 @@ export function ArticleImportFab({
 
   const save = async () => {
     if (!groupId || !title.trim() || (!content.trim() && !attachment)) return;
+    setOpen(false);
     const taskId = newTaskId("article-upload");
     const total = attachment?.size ?? content.length;
-    taskStore.getState().upsert({
+    const taskState = taskStore.getState();
+    taskState.upsert({
       id: taskId,
       kind: "article-upload",
       title: title.trim(),
@@ -89,7 +89,7 @@ export function ArticleImportFab({
       total,
       updatedAt: Date.now(),
     });
-    setSaving(true);
+    taskState.setOpened(true);
     try {
       const isPdf =
         attachment &&
@@ -115,7 +115,6 @@ export function ArticleImportFab({
       taskStore
         .getState()
         .patch(taskId, { status: "completed", progress: total });
-      setOpen(false);
       reset();
       onCreated();
     } catch (error) {
@@ -123,8 +122,6 @@ export function ArticleImportFab({
         status: "failed",
         detail: error instanceof Error ? error.message : "上传失败",
       });
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -210,14 +207,10 @@ export function ArticleImportFab({
             </Button>
           )}
           <Box sx={{ flex: 1 }} />
-          <Button onClick={close} disabled={saving}>
-            取消
-          </Button>
+          <Button onClick={close}>取消</Button>
           <Button
             variant="contained"
-            disabled={
-              saving || !title.trim() || (!content.trim() && !attachment)
-            }
+            disabled={!title.trim() || (!content.trim() && !attachment)}
             onClick={() => void save()}
           >
             上传

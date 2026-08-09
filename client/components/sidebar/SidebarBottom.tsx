@@ -7,16 +7,17 @@ import SettingsIcon from "@mui/icons-material/Settings";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import type { User } from "@/shared/types/api";
+import { useTaskStore } from "@/client/hooks/useTaskStore";
 
 interface SidebarBottomProps {
   currentUser: User;
   onSettings: () => void;
   onAdmin: () => void;
   onLearning: () => void;
+  onTasksAnchor: (anchorEl: HTMLElement | null) => void;
   online: boolean;
   adminEnabled: boolean;
   learningEnabled: boolean;
-  onTasks: (anchor: HTMLElement) => void;
 }
 
 export function SidebarBottom({
@@ -24,11 +25,13 @@ export function SidebarBottom({
   onSettings,
   onAdmin,
   onLearning,
+  onTasksAnchor,
   online,
   adminEnabled,
   learningEnabled,
-  onTasks,
 }: SidebarBottomProps) {
+  const setOpened = useTaskStore((state) => state.setOpened);
+
   return (
     <Box
       sx={{
@@ -68,8 +71,9 @@ export function SidebarBottom({
       )}
       <Tooltip title="任务管理">
         <IconButton
+          ref={onTasksAnchor}
           size="small"
-          onClick={(event) => onTasks(event.currentTarget)}
+          onClick={() => setOpened(true)}
         >
           <TaskAltIcon fontSize="small" />
         </IconButton>

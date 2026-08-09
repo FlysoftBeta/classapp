@@ -21,14 +21,18 @@ export interface AppTask {
 }
 
 interface TaskState {
+  opened: boolean;
   tasks: AppTask[];
+  setOpened: (opened: boolean) => void;
   upsert: (task: AppTask) => void;
   patch: (id: string, patch: Partial<AppTask>) => void;
-  clearFinished: () => void;
+  clear: () => void;
 }
 
 export const useTaskStore = create<TaskState>((set) => ({
+  opened: false,
   tasks: [],
+  setOpened: (opened) => set(() => ({ opened })),
   upsert: (task) =>
     set((state) => {
       const index = state.tasks.findIndex((item) => item.id === task.id);
@@ -46,7 +50,7 @@ export const useTaskStore = create<TaskState>((set) => ({
         task.id === id ? { ...task, ...patch, updatedAt: Date.now() } : task,
       ),
     })),
-  clearFinished: () =>
+  clear: () =>
     set((state) => ({
       tasks: state.tasks.filter(
         (task) => task.status === "queued" || task.status === "running",

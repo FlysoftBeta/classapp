@@ -174,12 +174,11 @@ export default function ConversationList({
         online={online}
         adminEnabled={adminEnabled}
         learningEnabled={learningEnabled}
-        onTasks={setTasksAnchor}
+        onTasksAnchor={setTasksAnchor}
       />
 
       <TaskManagerPopover
         anchorEl={tasksAnchor}
-        onClose={() => setTasksAnchor(null)}
         downloadEnabled={hasFeature(currentUser, "article_download")}
       />
 

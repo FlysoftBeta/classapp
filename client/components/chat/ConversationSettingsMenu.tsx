@@ -28,6 +28,7 @@ import {
 } from "@/client/interact/retention";
 import { flexGap } from "@/client/lib/css";
 import Tooltip from "@mui/material/Tooltip";
+import { taskStore } from "@/client/hooks/useTaskStore";
 
 const DOWNLOAD_POLICIES = ["auto", "week", "half-year"] as const;
 
@@ -53,7 +54,6 @@ export function ConversationSettingsMenu({
       : !!conversation.muted;
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [policy, setPolicy] = useState<ConversationDownloadPolicy>("auto");
-  const [downloaded, setDownloaded] = useState<number | null>(null);
 
   useEffect(() => {
     void getConversationRetention(conversation).then((value) => {
@@ -62,13 +62,9 @@ export function ConversationSettingsMenu({
   }, [conversation]);
 
   const saveDownloadPolicy = async () => {
-    setLoading(true);
-    setDownloaded(0);
-    setPolicy(
-      await saveConversationRetention(conversation, policy, setDownloaded),
-    );
-    setLoading(false);
     setDownloadOpen(false);
+    taskStore.getState().setOpened(true);
+    setPolicy(await saveConversationRetention(conversation, policy, () => {}));
   };
 
   const handleTogglePin = async () => {
@@ -166,15 +162,6 @@ export function ConversationSettingsMenu({
               }
             />
           </Box>
-          {downloaded !== null && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: "block", mt: 1 }}
-            >
-              已缓存 {downloaded} 条
-            </Typography>
-          )}
           {!online && policy !== "auto" && (
             <Typography
               variant="caption"

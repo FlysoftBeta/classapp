@@ -14,11 +14,7 @@ type WorkerReply = {
 };
 
 async function fetchManifest(): Promise<RuntimeManifest> {
-  await ensureEndpointsReady();
-  console.log(lbAssetUrl("/app/manifest.json"));
-  const response = await fetch(lbAssetUrl("/app/manifest.json"), {
-    cache: "no-store",
-  });
+  const response = await fetch("/app/manifest.json", { cache: "no-store" });
   if (!response.ok) throw new Error(`manifest ${response.status}`);
   return (await response.json()) as RuntimeManifest;
 }

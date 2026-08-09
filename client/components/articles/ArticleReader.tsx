@@ -35,6 +35,7 @@ import {
   saveArticleRetention,
   type ArticleDownloadPolicy,
 } from "@/client/interact/retention";
+import { taskStore } from "@/client/hooks/useTaskStore";
 
 interface ArticleReaderProps {
   articleId: string;
@@ -72,7 +73,6 @@ export default function ArticleReader({
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [retentionDays, setRetentionDays] = useState<0 | 1 | 7 | 180>(0);
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const [offlineContentAvailable, setOfflineContentAvailable] = useState(true);
   const meta = loadedMeta?.id === articleId ? loadedMeta : null;
   const effectiveMetaLoading =
@@ -162,15 +162,11 @@ export default function ArticleReader({
             expiresAt: Date.now() + retentionDays * 86_400_000,
           };
     if (meta) {
-      setDownloadProgress(0);
-      const effective = await saveArticleRetention(
-        meta,
-        policy,
-        setDownloadProgress,
-      );
+      setDownloadOpen(false);
+      taskStore.getState().setOpened(true);
+      const effective = await saveArticleRetention(meta, policy, () => {});
       setRetentionDays(effective.mode === "retained" ? effective.days : 0);
     }
-    setDownloadOpen(false);
   };
 
   const handleReadingProgress = useCallback((offset: number) => {
@@ -402,15 +398,6 @@ export default function ArticleReader({
               }
             />
           </Box>
-          {downloadProgress > 0 && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: "block", mt: 1 }}
-            >
-              下载 {downloadProgress}%
-            </Typography>
-          )}
           {!online && retentionDays !== 0 && (
             <Typography
               variant="caption"

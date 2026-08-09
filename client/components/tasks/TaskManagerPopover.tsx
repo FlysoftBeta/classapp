@@ -18,20 +18,27 @@ const KIND_LABEL = {
   "conversation-offline": "对话离线保存",
 } as const;
 
+const STATUS_LABEL = {
+  queued: "排队中",
+  running: "进行中",
+  completed: "已完成",
+  failed: "出错",
+} as const;
+
 export function TaskManagerPopover({
   anchorEl,
-  onClose,
   downloadEnabled,
 }: {
   anchorEl: HTMLElement | null;
-  onClose: () => void;
   downloadEnabled: boolean;
 }) {
-  const open = Boolean(anchorEl);
   const tasks = useTaskStore((state) => state.tasks);
+  const opened = useTaskStore((state) => state.opened);
+  const clear = useTaskStore((state) => state.clear);
+  const setOpened = useTaskStore((state) => state.setOpened);
 
   useEffect(() => {
-    if (!open || !downloadEnabled) return;
+    if (!opened || !downloadEnabled) return;
     let stopped = false;
     const refresh = async () => {
       const remote = await listNetworkArticleDownloads().catch(() => []);
@@ -64,13 +71,13 @@ export function TaskManagerPopover({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [open, downloadEnabled]);
+  }, [opened, downloadEnabled]);
 
   return (
     <Popover
-      open={open}
+      open={opened}
+      onClose={() => setOpened(false)}
       anchorEl={anchorEl}
-      onClose={onClose}
       anchorOrigin={{ vertical: "top", horizontal: "right" }}
       transformOrigin={{ vertical: "bottom", horizontal: "right" }}
       slotProps={{
@@ -93,12 +100,17 @@ export function TaskManagerPopover({
         <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 600 }}>
           任务管理
         </Typography>
-        <Button
-          size="small"
-          onClick={() => taskStore.getState().clearFinished()}
-        >
-          清除已完成
-        </Button>
+        {tasks.length !== 0 ? (
+          <Button
+            size="small"
+            onClick={() => {
+              setOpened(false);
+              clear();
+            }}
+          >
+            清除已完成
+          </Button>
+        ) : null}
       </Box>
       <Box sx={{ overflowY: "auto", px: 1, pb: 1 }}>
         {tasks.length === 0 ? (
@@ -126,7 +138,7 @@ export function TaskManagerPopover({
                   >
                     <ListItemText
                       primary={task.title}
-                      secondary={`${KIND_LABEL[task.kind]} · ${task.status}${task.etaMs ? ` · 预计 ${Math.ceil(task.etaMs / 1000)} 秒` : ""}${task.detail ? ` · ${task.detail}` : ""}`}
+                      secondary={`${KIND_LABEL[task.kind]} · ${STATUS_LABEL[task.status]}${task.etaMs ? ` · 预计 ${Math.ceil(task.etaMs / 1000)} 秒` : ""}${task.detail ? ` · ${task.detail}` : ""}`}
                     />
                     {task.total > 0 && (
                       <Typography variant="caption">{percent}%</Typography>

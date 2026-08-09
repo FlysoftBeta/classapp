@@ -1,6 +1,7 @@
 import type { Conversation } from "@/shared/types/api";
 import {
   fetchConversationDraft,
+  fetchConversations,
   syncPendingConversationConfig,
 } from "@/client/interact/conversations";
 import { fetchPosts } from "@/client/interact/posts";
@@ -41,6 +42,11 @@ export async function downloadConversationForOffline(
     updatedAt: Date.now(),
   });
   try {
+    const convName = (await fetchConversations()).find(
+      ({ id }) => id === ref.id,
+    )?.name;
+    if (convName)
+      taskStore.getState().patch(taskId, { title: `对话 ${convName}` });
     while (true) {
       const limit = 200;
       const data = await fetchPosts(ref, {
@@ -56,7 +62,6 @@ export async function downloadConversationForOffline(
         );
         return createdAt >= cutoff;
       }).length;
-      taskStore.getState().patch(taskId, { progress: count });
       onProgress?.(count);
       if (page.length < limit) break;
       const oldest = page[page.length - 1];
@@ -104,6 +109,8 @@ export async function downloadArticleForOffline(
   try {
     const result = await fetchArticle(articleId);
     const article = result?.article;
+    if (article?.title)
+      taskStore.getState().patch(taskId, { title: `文章 ${article.title}` });
     if (article?.content_kind === "bundle") {
       const size = await downloadBundleForOffline(articleId, (percent) => {
         taskStore.getState().patch(taskId, { progress: percent });
