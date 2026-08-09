@@ -26,6 +26,7 @@ type StartProductionLauncherOptions = {
   deployment: string;
   httpPort: number;
   securePort?: number;
+  httpsRedirectOverride?: boolean;
   stdio?: StdioOptions;
 };
 
@@ -106,6 +107,10 @@ export function startProductionLauncher(
       CLASSAPP_PORTS: String(options.httpPort),
       CLASSAPP_SECURE_PORTS:
         options.securePort === undefined ? "" : String(options.securePort),
+      CLASSAPP_HTTPS_REDIRECT_OVERRIDE:
+        options.httpsRedirectOverride === undefined
+          ? ""
+          : String(options.httpsRedirectOverride),
     },
   });
 }

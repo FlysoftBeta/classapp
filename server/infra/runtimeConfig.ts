@@ -9,6 +9,15 @@ export interface PlatformRuntimeConfig {
   };
 }
 
+export interface HTTPSRuntimeConfig {
+  domain: string;
+  certificatePath: string;
+  privateKeyPath: string;
+  rootCertificatePath: string;
+  /** Overrides the persisted HTTPS redirect setting when non-null. */
+  redirectOverride: boolean | null;
+}
+
 export interface ClassAppRuntimeConfig {
   appDir: string;
   dataRoot: string;
@@ -21,12 +30,7 @@ export interface ClassAppRuntimeConfig {
   nodeEnv: string;
   initialAdminPin?: string;
   platform: PlatformRuntimeConfig;
-  https: {
-    domain: string | null;
-    certificatePath: string | null;
-    privateKeyPath: string | null;
-    rootCertificatePath: string | null;
-  };
+  https: HTTPSRuntimeConfig | null;
   update: {
     enabled: boolean;
     stagingDir: string;
@@ -121,12 +125,7 @@ function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
     nodeEnv,
     initialAdminPin: nodeEnv === "production" ? undefined : "123456",
     platform: createPlatformRuntimeConfig(appDir, nodeEnv),
-    https: {
-      domain: null,
-      certificatePath: null,
-      privateKeyPath: null,
-      rootCertificatePath: null,
-    },
+    https: null,
     update: {
       enabled: false,
       stagingDir: path.join(dataRoot, "staging"),

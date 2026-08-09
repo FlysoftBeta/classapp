@@ -4,6 +4,7 @@ import { worktreePath } from "../paths.mjs";
 import {
   createProductionTestRuntime,
   freePort,
+  readDeploymentHttpsDomain,
   removeProductionTestRuntime,
   startProductionLauncher,
   stopProcesses,
@@ -55,14 +56,21 @@ async function main(): Promise<void> {
 
   try {
     const httpPort = await freePort();
+    const httpsDomain = await readDeploymentHttpsDomain(runtime.deployment);
+    const securePort = httpsDomain ? await freePort() : null;
     launcher = startProductionLauncher({
       deployment: runtime.deployment,
       httpPort,
+      securePort: securePort ?? undefined,
+      httpsRedirectOverride: false,
     });
     const url = `http://127.0.0.1:${httpPort}/`;
     await waitForLauncher(
       launcher,
-      async () => (await fetch(url)).status === 200,
+      async () => {
+        const response = await fetch(url, { redirect: "manual" });
+        return response.status === 200 || response.status === 301;
+      },
       "the production server",
     );
 

@@ -48,6 +48,14 @@ const DEFAULT_PORTS = [80, 81, 82, 83, 84, 85, 86, 88];
 const DEFAULT_SECURE_PORTS = [443];
 const PORTS = parsePorts("CLASSAPP_PORTS", DEFAULT_PORTS);
 
+function parseBooleanOverride(name: string): boolean | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return null;
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  throw new Error(`${name} must be one of: 1, true, 0, false`);
+}
+
 function parsePorts(name: string, fallback: number[]) {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -62,17 +70,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readHttpsConfig(appDir: string): ClassAppRuntimeConfig["https"] {
+function readHttpsConfig(
+  appDir: string,
+  redirectOverride: boolean | null,
+): ClassAppRuntimeConfig["https"] {
   const httpsDir = path.join(appDir, "https");
   const configPath = path.join(httpsDir, "config.json");
-  if (!fs.existsSync(configPath)) {
-    return {
-      domain: null,
-      certificatePath: null,
-      privateKeyPath: null,
-      rootCertificatePath: null,
-    };
-  }
+  if (!fs.existsSync(configPath)) return null;
   try {
     const value = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       domain?: unknown;
@@ -86,26 +90,36 @@ function readHttpsConfig(appDir: string): ClassAppRuntimeConfig["https"] {
       typeof value.domain === "string" && value.domain.trim()
         ? value.domain.trim().toLowerCase()
         : null;
+    const certificatePath = resolveFile(value.certificate);
+    const privateKeyPath = resolveFile(value.privateKey);
+    const rootCertificatePath = resolveFile(value.rootCertificate);
+    if (
+      !domain ||
+      !certificatePath ||
+      !privateKeyPath ||
+      !rootCertificatePath
+    ) {
+      throw new Error("config.json 缺少必要的 HTTPS 配置");
+    }
     return {
       domain,
-      certificatePath: resolveFile(value.certificate),
-      privateKeyPath: resolveFile(value.privateKey),
-      rootCertificatePath: resolveFile(value.rootCertificate),
+      certificatePath,
+      privateKeyPath,
+      rootCertificatePath,
+      redirectOverride,
     };
   } catch (error: unknown) {
     console.error("[Launcher] HTTPS 配置无效:", errorMessage(error));
-    return {
-      domain: null,
-      certificatePath: null,
-      privateKeyPath: null,
-      rootCertificatePath: null,
-    };
+    return null;
   }
 }
 
 function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
-  const https = readHttpsConfig(appDir);
-  const securePorts = https.domain
+  const https = readHttpsConfig(
+    appDir,
+    parseBooleanOverride("CLASSAPP_HTTPS_REDIRECT_OVERRIDE"),
+  );
+  const securePorts = https
     ? parsePorts("CLASSAPP_SECURE_PORTS", DEFAULT_SECURE_PORTS)
     : parsePorts("CLASSAPP_SECURE_PORTS", []);
   return {

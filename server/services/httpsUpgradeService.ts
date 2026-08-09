@@ -63,7 +63,7 @@ function chainMatchesRoot(
 
 function certificateStatus(): HttpsCertificateStatus {
   const { https } = getRuntimeConfig();
-  if (!https.certificatePath || !fs.existsSync(https.certificatePath)) {
+  if (!https || !fs.existsSync(https.certificatePath)) {
     return emptyCertificate("未找到网站证书");
   }
   try {
@@ -72,11 +72,9 @@ function certificateStatus(): HttpsCertificateStatus {
     const now = Date.now();
     const notBefore = new Date(leaf.validFrom);
     const notAfter = new Date(leaf.validTo);
-    const hostnameValid = https.domain
-      ? leaf.checkHost(https.domain) !== undefined
-      : false;
+    const hostnameValid = leaf.checkHost(https.domain) !== undefined;
     let root: X509Certificate | null = null;
-    if (https.rootCertificatePath && fs.existsSync(https.rootCertificatePath)) {
+    if (fs.existsSync(https.rootCertificatePath)) {
       root = new X509Certificate(
         fs.readFileSync(https.rootCertificatePath, "utf8"),
       );
@@ -156,7 +154,10 @@ export class HttpsUpgradeService {
   constructor(private readonly db: BetterSqlite3.Database) {}
 
   isRedirectEnabled(): boolean {
-    return getHttpsRedirectEnabled(this.db);
+    return (
+      getRuntimeConfig().https?.redirectOverride ??
+      getHttpsRedirectEnabled(this.db)
+    );
   }
 
   setRedirectEnabled(enabled: boolean): void {
@@ -166,15 +167,11 @@ export class HttpsUpgradeService {
   getStatus(): HttpsUpgradeStatus {
     const runtime = getRuntimeConfig();
     return {
-      configured:
-        !!runtime.https.domain &&
-        !!runtime.https.certificatePath &&
-        !!runtime.https.privateKeyPath &&
-        runtime.securePorts.length > 0,
-      domain: runtime.https.domain,
+      configured: runtime.https !== null && runtime.securePorts.length > 0,
+      domain: runtime.https?.domain ?? null,
       secure_ports: runtime.securePorts,
       redirect_enabled: this.isRedirectEnabled(),
-      dns_records: localDnsRecords(runtime.https.domain),
+      dns_records: localDnsRecords(runtime.https?.domain ?? null),
       certificate: certificateStatus(),
     };
   }

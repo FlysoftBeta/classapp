@@ -22,12 +22,7 @@ async function main(): Promise<void> {
     nodeEnv: "development",
     initialAdminPin: "123456",
     platform: createPlatformRuntimeConfig(appDir, "development"),
-    https: {
-      domain: null,
-      certificatePath: null,
-      privateKeyPath: null,
-      rootCertificatePath: null,
-    },
+    https: null,
     update: {
       enabled: false,
       stagingDir: worktreePath("staging"),

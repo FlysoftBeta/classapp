@@ -55,7 +55,7 @@ export async function bootstrap(
     );
   }
   if (config.securePorts.length > 0) {
-    if (!config.https.certificatePath || !config.https.privateKeyPath) {
+    if (!config.https) {
       throw new Error("已配置 SECURE_PORTS，但部署包中缺少 HTTPS 证书或私钥");
     }
     const tls = {

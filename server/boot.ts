@@ -32,12 +32,7 @@ function standaloneConfig(): ClassAppRuntimeConfig {
     initialAdminPin:
       process.env.NODE_ENV === "production" ? undefined : "123456",
     platform: createPlatformRuntimeConfig(appDir, nodeEnv),
-    https: {
-      domain: null,
-      certificatePath: null,
-      privateKeyPath: null,
-      rootCertificatePath: null,
-    },
+    https: null,
     update: {
       enabled: false,
       stagingDir: path.join(dataRoot, "staging"),
@@ -69,8 +64,15 @@ function isRuntimeConfig(value: unknown): value is ClassAppRuntimeConfig {
     Object.values(config.platform.pdfRender.environment).every(
       (value) => typeof value === "string",
     ) &&
-    !!config.https &&
-    typeof config.https === "object"
+    (config.https === null ||
+      (!!config.https &&
+        typeof config.https === "object" &&
+        typeof config.https.domain === "string" &&
+        typeof config.https.certificatePath === "string" &&
+        typeof config.https.privateKeyPath === "string" &&
+        typeof config.https.rootCertificatePath === "string" &&
+        (config.https.redirectOverride === null ||
+          typeof config.https.redirectOverride === "boolean")))
   );
 }
 

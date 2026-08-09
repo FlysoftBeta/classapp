@@ -137,7 +137,7 @@ export function createHttpHandler(
         !secure &&
         (req.method === "GET" || req.method === "HEAD") &&
         url.pathname === "/" &&
-        config.https.domain &&
+        config.https &&
         config.securePorts.length > 0 &&
         createHttpsUpgradeService(getDb()).isRedirectEnabled()
       ) {
