@@ -220,6 +220,9 @@ function extractArtifact(definition, archive, destination) {
     "pdfrender.md",
     "COPYING",
     "COPYING3",
+    path.join("share", "poppler", "cidToUnicode", "Adobe-GB1"),
+    path.join("share", "poppler", "cMap", "Adobe-GB1", "Adobe-GB1-UCS2"),
+    path.join("licenses", "poppler-data"),
   ]) {
     if (!fs.existsSync(path.join(extracted, required))) {
       throw new Error(`${definition.name} is missing ${required}`);

@@ -24,7 +24,8 @@ sudo apt-get update
 sudo apt-get install -y \
   cmake ninja-build g++ \
   libcairo2-dev libfontconfig1-dev libfreetype-dev \
-  libjpeg-dev libwebp-dev libzstd-dev zlib1g-dev
+  libjpeg-turbo8-dev libopenjp2-7-dev libwebp-dev libzstd-dev zlib1g-dev \
+  poppler-data
 ```
 
 RHEL/Fedora:
@@ -33,8 +34,8 @@ RHEL/Fedora:
 sudo dnf install -y \
   cmake ninja-build gcc-c++ \
   cairo-devel fontconfig-devel freetype-devel \
-  libjpeg-turbo-devel libwebp-devel libzstd-devel \
-  zlib-ng-compat-devel
+  libjpeg-turbo-devel openjpeg-devel libwebp-devel libzstd-devel \
+  zlib-ng-compat-devel poppler-data
 ```
 
 On RHEL-compatible distributions where classic zlib is still the system
@@ -44,11 +45,20 @@ implementation, use `zlib-devel` instead of `zlib-ng-compat-devel`.
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DENABLE_CPP=OFF -DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF \
-  -DENABLE_BOOST=OFF -DENABLE_LIBOPENJPEG=OFF -DENABLE_LIBJPEG=OFF \
+  -DENABLE_BOOST=OFF -DENABLE_LIBOPENJPEG=ON -DENABLE_LIBJPEG=ON \
   -DENABLE_LCMS=OFF -DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF \
   -DENABLE_NSS3=OFF -DENABLE_GPGME=OFF -DBUILD_SHARED_LIBS=OFF \
   -DBUILD_CPP_TESTS=OFF -DBUILD_MANUAL_TESTS=OFF
 cmake --build build --target pdfrender
+```
+
+For a local Linux package, copy the executable and data tree together:
+
+```sh
+package=dist/pdfrender-local
+mkdir -p "$package/share"
+install -m 0755 build/utils/pdfrender "$package/"
+cp -a /usr/share/poppler "$package/share/"
 ```
 
 ## Dependencies
@@ -59,7 +69,7 @@ Debian/Ubuntu:
 sudo apt-get update
 sudo apt-get install -y \
   libcairo2 libfontconfig1 libfreetype6 \
-  libjpeg-turbo8 libwebp7 libzstd1 zlib1g \
+  libjpeg-turbo8 libopenjp2-7 libwebp7 libzstd1 zlib1g \
   libpng16-16t64 libstdc++6 libc6
 ```
 
@@ -68,7 +78,7 @@ RHEL/Fedora:
 ```sh
 sudo dnf install -y \
   cairo fontconfig freetype \
-  libjpeg-turbo libwebp libzstd zlib-ng-compat \
+  libjpeg-turbo openjpeg2 libwebp libzstd zlib-ng-compat \
   libpng libstdc++ glibc
 ```
 
@@ -81,7 +91,16 @@ or fallback fonts.
 
 A page is HTML positioned text over a Cairo SVG background; PNG/JPEG assets
 are converted to WebP. Ordinary PDF text is excluded from the SVG and
-represented as selectable HTML. Type 3 glyph programs remain in SVG.
+represented as selectable HTML. Type 3 glyph programs and heuristically
+recognized math-font glyphs remain in SVG so extensible symbols and script
+geometry retain their PDF appearance. Math also has a transparent positioned
+HTML copy for selection, search, and accessibility. The renderer heuristically
+groups words into visual lines, then grows nearby horizontally aligned lines
+into semantic HTML `p` elements. Line boxes extend halfway into the surrounding
+line spacing, while headers, columns, captions, and display labels remain
+separate paragraphs. Because paragraph and line DOM order now follows the
+recovered reading order, browser-native selection can resolve endpoints in
+blank page space without `pointer-events` or `user-select` overrides.
 
 The container is a standard ZIP64 archive. Every entry uses ZIP method 0
 (STORED): binary objects are already compressed formats such as WebP, while

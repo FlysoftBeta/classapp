@@ -3,32 +3,32 @@
   "repository": "FlysoftBeta/pdf-render",
   "workflow": "pdfrender.yml",
   "run": {
-    "id": 31302506864,
-    "headSha": "14863a2b70a11afc930f2cfc9c8b72fae708b1b6",
-    "createdAt": "2026-08-09T08:01:08Z",
-    "url": "https://github.com/FlysoftBeta/pdf-render/actions/runs/31302506864"
+    "id": 31309289423,
+    "headSha": "ae0a0dad5da9aec296bb99c401f8930b48695272",
+    "createdAt": "2026-08-09T10:49:58Z",
+    "url": "https://github.com/FlysoftBeta/pdf-render/actions/runs/31309289423"
   },
   "artifacts": {
     "linux-debian": {
-      "id": 9034932160,
+      "id": 9036902991,
       "name": "pdfrender-linux-debian-x86_64",
-      "size": 1296293,
-      "githubDigest": "sha256:c5a11c1ff01400084a0f28dd20fc85715e852c1b9d57fb1071c2e4c68ef50abb",
-      "archiveDigest": "sha256:80516d71d09b234b9653f04b68cd0e4e600bb2cf03fe044adb61d162e09cac9b"
+      "size": 5751969,
+      "githubDigest": "sha256:44ec294e48d88fa25eb216c48ef1c839360a09b8e6b1935c287eaae33fcd1ff7",
+      "archiveDigest": "sha256:636d19624d5d71ee692b400a0d81201a388857341cfc9dd00d226be0ecab34c0"
     },
     "linux-redhat": {
-      "id": 9034935631,
+      "id": 9036907290,
       "name": "pdfrender-linux-redhat-x86_64",
-      "size": 1310416,
-      "githubDigest": "sha256:59c83e248f0c3a632240ba04044c33007242160f92c82e012ecdc636edd2c7c6",
-      "archiveDigest": "sha256:71d11a26ec9c047de4ee74a3ed04a955b4a511cafd0b592f5e7c31940131a465"
+      "size": 5760497,
+      "githubDigest": "sha256:369e0c523d0523074c60373df347970e86408a9fcc184b0baa6661682a1be7f8",
+      "archiveDigest": "sha256:5cf416fd918a39454d6383fd3e1e589cddfe606caea30b568c908c6213f7446a"
     },
     "windows": {
-      "id": 9034968099,
+      "id": 9036941747,
       "name": "pdfrender-windows-x86_64",
-      "size": 8032232,
-      "githubDigest": "sha256:f628fcbb3649f37dbcc831db33086e31f1afc5d27c1c498fa6e75556a9b6b7a5",
-      "archiveDigest": "sha256:f84ac7054114efec5f3cbc8127cd9f14497194f83bffdef14c410119a0bac752"
+      "size": 12883797,
+      "githubDigest": "sha256:c16cbe1466d00d7bbf44f70fe063fe519e3f3508e0d0d41dd57ae8eb68ea5c6f",
+      "archiveDigest": "sha256:3846b94d2efacd1654edcb95ebde68e973f29eaf0cc8254fbdf05c02b37c43ee"
     }
   }
 }
