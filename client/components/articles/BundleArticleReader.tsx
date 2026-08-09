@@ -279,8 +279,8 @@ export default function BundleArticleReader({
     targetToCursor: (ordinal) => ({ ordinal }),
     locateTarget: (items, ordinal) =>
       items.find((item) => item.ordinal === ordinal)?.id ?? null,
-    residentBefore: 2,
-    residentAfter: 2,
+    layoutBefore: 300,
+    layoutAfter: 300,
     defaultItemEstimate: estimatePageHeight({
       id: "estimate",
       ordinal: 0,
