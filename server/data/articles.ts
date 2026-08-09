@@ -396,12 +396,15 @@ export function upsertArticleProgressOffset(
   articleId: string,
   offset: number,
   updatedAt: number,
+  merge: "override" | "furthest",
 ) {
+  const current = getArticleProgressOffset(db, userId, articleId);
+  if (merge === "furthest" && current.offset >= offset) return current;
+  if (merge === "override" && current.updatedAt > updatedAt) return current;
   db.prepare(
     `INSERT INTO article_read_progress (user_id, article_id, offset, updated_at, updated_at_ms)
      VALUES (?, ?, ?, datetime('now'), ?) ON CONFLICT(user_id, article_id) DO UPDATE SET
-       offset = excluded.offset, updated_at = excluded.updated_at, updated_at_ms = excluded.updated_at_ms
-     WHERE excluded.updated_at_ms >= article_read_progress.updated_at_ms`,
+       offset = excluded.offset, updated_at = excluded.updated_at, updated_at_ms = excluded.updated_at_ms`,
   ).run(userId, articleId, offset, updatedAt);
   return getArticleProgressOffset(db, userId, articleId);
 }

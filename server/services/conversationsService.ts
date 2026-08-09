@@ -120,6 +120,7 @@ export function markConversationRead(
     id: string;
     postId: string;
     updatedAt: number;
+    merge: "override" | "furthest";
   },
 ): { postId: string | null; sequence: number; updatedAt: number } {
   let targetPost: { id: string; rowid: number };
@@ -153,7 +154,11 @@ export function markConversationRead(
     sequence: targetPost.rowid,
     updatedAt: input.updatedAt,
   };
-  if (chooseFurthestRead(current, incoming) === current) {
+  const keepCurrent =
+    input.merge === "furthest"
+      ? chooseFurthestRead(current, incoming) === current
+      : current.updatedAt > incoming.updatedAt;
+  if (keepCurrent) {
     return current;
   }
 
@@ -327,7 +332,11 @@ export class ConversationService {
 
   markRead(
     userId: string,
-    input: ConversationRefInput & { postId: string; updatedAt: number },
+    input: ConversationRefInput & {
+      postId: string;
+      updatedAt: number;
+      merge: "override" | "furthest";
+    },
   ): { postId: string | null; sequence: number; updatedAt: number } {
     return markConversationRead(this.db, userId, input);
   }

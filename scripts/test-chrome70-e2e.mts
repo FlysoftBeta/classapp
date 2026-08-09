@@ -376,7 +376,7 @@ async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
 
 async function indexedBundleCount(cdp: CdpClient): Promise<number> {
   return cdp.evaluate<number>(`new Promise(function (resolve, reject) {
-    var request = indexedDB.open("classapp-runtime", 2);
+    var request = indexedDB.open("classapp-runtime", 4);
     request.onerror = function () { reject(request.error); };
     request.onsuccess = function () {
       var count = request.result
@@ -499,8 +499,9 @@ async function main(): Promise<void> {
       const diagnostics = await cdp.evaluate(`JSON.stringify({
         href: location.href,
         title: document.title,
-        body: (document.body && document.body.innerText) || "",
-        html: (document.documentElement && document.documentElement.outerHTML) || "",
+        body: ((document.body && document.body.innerText) || "").slice(0, 2000),
+        scripts: document.scripts.length,
+        styles: document.querySelectorAll("style, link[rel=stylesheet]").length,
         controlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller)
       })`);
       throw new Error(
@@ -538,13 +539,28 @@ async function main(): Promise<void> {
       "cached 301 to be usable while the origin is down",
       30_000,
     );
-    await waitForText(cdp, "登录", 35_000);
+    try {
+      await waitForText(cdp, "离线", 35_000);
+      await waitForText(cdp, "大别野", 5_000);
+    } catch (error) {
+      const diagnostics = await cdp.evaluate(`JSON.stringify({
+        href: location.href,
+        title: document.title,
+        body: ((document.body && document.body.innerText) || "").slice(0, 2000),
+        scripts: document.scripts.length,
+        styles: document.querySelectorAll("style, link[rel=stylesheet]").length,
+        controlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller)
+      })`);
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\n${onlineFailures.join("\n")}\npage: ${String(diagnostics)}`,
+      );
+    }
     const offlineState = await cdp.evaluate<{
       controlled: boolean;
       bundleCount: number;
       body: string;
     }>(`(async function () {
-      var request = indexedDB.open("classapp-runtime", 2);
+      var request = indexedDB.open("classapp-runtime", 4);
       var bundleCount = await new Promise(function (resolve, reject) {
         request.onerror = function () { reject(request.error); };
         request.onsuccess = function () {
@@ -579,6 +595,9 @@ async function main(): Promise<void> {
   } finally {
     if (cdp) await cdp.send("Browser.close").catch(() => undefined);
     await stopProcesses([browser, ...launchers]);
+    // The launcher can exit just before its server child finishes handling
+    // SIGTERM. Keep the temporary deployment alive for that final drain.
+    await new Promise((resolve) => setTimeout(resolve, 300));
     await removeProductionTestRuntime(runtime);
   }
 }

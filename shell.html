@@ -51,19 +51,82 @@
             });
         }
         var DB = "classapp-runtime";
-        var DB_VERSION = 3;
-        var ACTIVE_BUILD_KEY = "classapp-active-build";
-        function legacyActiveBuild() {
-          try {
-            return localStorage.getItem(ACTIVE_BUILD_KEY);
-          } catch (_) {
-            return null;
-          }
-        }
-        function clearLegacyActiveBuild() {
-          try {
-            localStorage.removeItem(ACTIVE_BUILD_KEY);
-          } catch (_) {}
+        var DB_VERSION = 4;
+        var ACTIVE_BUILD_KEY = "active-bundle";
+        function createSchema(db) {
+          db.createObjectStore("files");
+          var heads = db.createObjectStore("file_heads", { keyPath: "id" });
+          heads.createIndex("by-state-created", ["state", "created_at"]);
+          db.createObjectStore("globals", { keyPath: "key" });
+          db.createObjectStore("bundles", { keyPath: "build_id" });
+
+          var groups = db.createObjectStore("domain_groups", { keyPath: "id" });
+          groups.createIndex("by-conv", "conv_id", { unique: true });
+          groups.createIndex("by-handle", "handle", { unique: true });
+          var dms = db.createObjectStore("domain_dms", { keyPath: "conv_id" });
+          dms.createIndex("by-peer-a", "peer_a");
+          dms.createIndex("by-peer-b", "peer_b");
+          var posts = db.createObjectStore("domain_posts", { keyPath: "id" });
+          posts.createIndex(
+            "by-conversation-sequence",
+            ["conv_id", "sequence"],
+            { unique: true },
+          );
+          posts.createIndex("by-conversation-revision", [
+            "conv_id",
+            "revision",
+          ]);
+          posts.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
+          var articles = db.createObjectStore("domain_articles", {
+            keyPath: "id",
+          });
+          articles.createIndex("by-group-created", [
+            "group_id",
+            "created_at",
+            "id",
+          ]);
+          articles.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
+          var segments = db.createObjectStore("domain_article_segments", {
+            keyPath: ["article_id", "start_offset"],
+          });
+          segments.createIndex("by-article", "article_id");
+          segments.createIndex(
+            "by-article-start",
+            ["article_id", "start_offset"],
+            { unique: true },
+          );
+          segments.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
+          var users = db.createObjectStore("domain_users", { keyPath: "id" });
+          users.createIndex("by-handle", "handle", { unique: true });
+
+          db.createObjectStore("domain_me", { keyPath: "me_id" });
+          var access = db.createObjectStore("domain_me_access", {
+            keyPath: ["me_id", "kind", "object_id"],
+          });
+          access.createIndex("by-me-kind", ["me_id", "kind"]);
+          access.createIndex("by-object", ["kind", "object_id"]);
+          var convState = db.createObjectStore("domain_me_conv_state", {
+            keyPath: ["me_id", "conv_id"],
+          });
+          convState.createIndex("by-me", "me_id");
+          convState.createIndex("by-pending", ["me_id", "pending"]);
+          var articleState = db.createObjectStore("domain_me_article_state", {
+            keyPath: ["me_id", "article_id"],
+          });
+          articleState.createIndex("by-me", "me_id");
+          articleState.createIndex("by-pending", ["me_id", "pending"]);
+          var meState = db.createObjectStore("domain_me_state", {
+            keyPath: ["me_id", "key"],
+          });
+          meState.createIndex("by-me", "me_id");
+          meState.createIndex("by-pending", ["me_id", "pending"]);
+          var save = db.createObjectStore("domain_save", {
+            keyPath: ["claimant", "kind", "object_id"],
+          });
+          save.createIndex("by-resource", ["kind", "object_id"]);
+          save.createIndex("by-expiry", ["kind", "protected_until"]);
+          var sync = db.createObjectStore("domain_sync", { keyPath: "scope" });
+          sync.createIndex("by-kind", "kind");
         }
         function open() {
           return new Promise(function (resolve, reject) {
@@ -75,43 +138,7 @@
                   db.deleteObjectStore(db.objectStoreNames[0]);
                 }
               }
-              db.createObjectStore("bundles", { keyPath: "buildId" });
-              var store = db.createObjectStore("resources", { keyPath: "key" });
-              store.createIndex("by-class-and-touch", [
-                "resourceClass",
-                "touchedAt",
-              ]);
-              var kv = db.createObjectStore("kv", { keyPath: "key" });
-              var conversations = db.createObjectStore("domain_conversations", {
-                keyPath: ["userScope", "convId"],
-              });
-              conversations.createIndex("by-user", "userScope");
-              var posts = db.createObjectStore("domain_posts", {
-                keyPath: ["userScope", "id"],
-              });
-              posts.createIndex("by-conversation", ["userScope", "convId"]);
-              posts.createIndex("by-conversation-sequence", [
-                "userScope",
-                "convId",
-                "sequence",
-              ]);
-              var articles = db.createObjectStore("domain_articles", {
-                keyPath: ["userScope", "id"],
-              });
-              articles.createIndex("by-user", "userScope");
-              var articleState = db.createObjectStore("domain_article_state", {
-                keyPath: ["userScope", "articleId"],
-              });
-              articleState.createIndex("by-user", "userScope");
-              var segments = db.createObjectStore("domain_article_segments", {
-                keyPath: ["userScope", "articleId", "startOffset"],
-              });
-              segments.createIndex("by-article", ["userScope", "articleId"]);
-              segments.createIndex("by-article-start", [
-                "userScope",
-                "articleId",
-                "startOffset",
-              ]);
+              createSchema(db);
             };
             request.onsuccess = function () {
               request.result.onversionchange = function () {
@@ -134,21 +161,22 @@
             };
           });
         }
-        function storeBundle(db, manifest, body) {
+        function storeBundle(db, buildId, body) {
           return new Promise(function (resolve, reject) {
-            var transaction = db.transaction(["bundles", "kv"], "readwrite");
+            var transaction = db.transaction(
+              ["bundles", "globals"],
+              "readwrite",
+            );
             transaction.objectStore("bundles").put({
-              buildId: manifest.buildId,
-              body: body,
-              installedAt: Date.now(),
-              active: true,
+              build_id: buildId,
+              entrypoint_code: body,
+              installed_at: Date.now(),
             });
-            transaction.objectStore("kv").put({
+            transaction.objectStore("globals").put({
               key: ACTIVE_BUILD_KEY,
-              value: manifest.buildId,
+              value: buildId,
             });
             transaction.oncomplete = function () {
-              clearLegacyActiveBuild();
               resolve();
             };
             transaction.onerror = function () {
@@ -193,12 +221,14 @@
             .then(function (opened) {
               db = opened;
               return idb(
-                db.transaction("kv").objectStore("kv").get(ACTIVE_BUILD_KEY),
+                db
+                  .transaction("globals")
+                  .objectStore("globals")
+                  .get(ACTIVE_BUILD_KEY),
               );
             })
             .then(function (activeRecord) {
               if (!activeRecord || !activeRecord.value) return null;
-              clearLegacyActiveBuild();
               return idb(
                 db
                   .transaction("bundles")
@@ -228,15 +258,20 @@
                     })
                     .then(function (body) {
                       record = {
-                        buildId: manifest.buildId,
-                        body: body,
+                        build_id: manifest.buildId,
+                        entrypoint_code: body,
                       };
-                      return storeBundle(db, manifest, body);
+                      return storeBundle(db, manifest.buildId, body);
                     });
                 });
             })
             .then(function () {
-              return loadBundle(record.body);
+              db.close();
+              return loadBundle(record.entrypoint_code);
+            })
+            .catch(function (error) {
+              if (db) db.close();
+              throw error;
             });
         }
         boot().catch(function (error) {

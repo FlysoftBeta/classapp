@@ -19,11 +19,10 @@ import Button from "@mui/material/Button";
 import type { ArticleWithMeta } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
 import {
-  fetchCachedArticle,
-  fetchArticle,
+  loadArticleForReader,
   toggleArticleBookmark,
   deleteArticle,
-} from "@/client/api/articles";
+} from "@/client/interact/articles";
 import BlobArticleReader from "./BlobArticleReader";
 import TextArticleReader from "./TextArticleReader";
 import { useArticleReading } from "@/client/hooks/useArticleReading";
@@ -32,10 +31,12 @@ import { flexGap, vh } from "@/client/lib/css";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import {
   ARTICLE_RETENTION_DAYS,
-  offlineRepository,
+  canReadArticle,
+  forgetArticle,
+  getArticleRetention,
+  saveArticleRetention,
   type ArticleDownloadPolicy,
-} from "@/client/data/repository";
-import { downloadArticleForOffline } from "@/client/data/sync";
+} from "@/client/interact/retention";
 
 interface ArticleReaderProps {
   articleId: string;
@@ -88,7 +89,7 @@ export default function ArticleReader({
     metaLoading || (loadedMeta !== null && meta === null);
 
   useEffect(() => {
-    void offlineRepository.getArticlePolicy(articleId).then((policy) => {
+    void getArticleRetention(articleId).then((policy) => {
       setRetentionDays(policy.mode === "retained" ? policy.days : 0);
     });
   }, [articleId]);
@@ -102,32 +103,16 @@ export default function ArticleReader({
       setMeta(article);
       setIsBookmarked(article.is_bookmarked);
       setContentLength(article.content_length);
-      if (!online && article.content_kind === "text") {
-        const segment = await offlineRepository.getArticleSegment(
-          articleId,
-          article.current_offset ?? 0,
-        );
-        if (!cancelled) setOfflineContentAvailable(!!segment);
-      } else {
-        setOfflineContentAvailable(true);
-      }
+      const available = await canReadArticle(article);
+      if (!cancelled) setOfflineContentAvailable(available);
       setMetaLoading(false);
     };
     void (async () => {
       try {
-        const cached = await fetchCachedArticle(articleId);
-        if (cached?.article) await applyArticle(cached.article);
-        if (!online) {
-          if (!cached?.article && !cancelled) {
-            setOfflineContentAvailable(false);
-            setMetaLoading(false);
-          }
-          return;
-        }
-        const data = await fetchArticle(articleId);
-        if (!data?.article) {
+        const loaded = await loadArticleForReader(articleId, applyArticle);
+        if (!loaded.article && loaded.source === "remote") {
           if (!cancelled) {
-            await offlineRepository.removeArticle(articleId);
+            await forgetArticle(articleId);
             setMeta(null);
             setOfflineContentAvailable(false);
             setMetaLoading(false);
@@ -135,7 +120,8 @@ export default function ArticleReader({
           }
           return;
         }
-        await applyArticle(data.article);
+        if (loaded.article) await applyArticle(loaded.article);
+        else if (!cancelled) setOfflineContentAvailable(false);
       } finally {
         if (!cancelled) setMetaLoading(false);
       }
@@ -185,17 +171,15 @@ export default function ArticleReader({
             days: retentionDays,
             expiresAt: Date.now() + retentionDays * 86_400_000,
           };
-    await offlineRepository.setArticlePolicy(articleId, policy);
-    if (meta?.content_kind === "text" && online && retentionDays !== 0) {
+    if (meta) {
       setDownloadProgress(0);
-      await downloadArticleForOffline(
-        articleId,
+      const effective = await saveArticleRetention(
+        meta,
+        policy,
         setDownloadProgress,
-        meta.content_length,
       );
+      setRetentionDays(effective.mode === "retained" ? effective.days : 0);
     }
-    const effective = await offlineRepository.getArticlePolicy(articleId);
-    setRetentionDays(effective.mode === "retained" ? effective.days : 0);
     setDownloadOpen(false);
   };
 
@@ -318,7 +302,7 @@ export default function ArticleReader({
                 <IconButton
                   size="small"
                   onClick={() => setDownloadOpen(true)}
-                  disabled={!meta || meta.content_kind !== "text"}
+                  disabled={!meta}
                 >
                   <DownloadIcon fontSize="small" />
                 </IconButton>

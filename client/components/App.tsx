@@ -33,16 +33,18 @@ import DebugMenu from "./debug/DebugMenu";
 import { useAppLogic, type ConvEntry } from "../hooks/useAppLogic";
 import { useMessageBanner } from "../hooks/useMessageBanner";
 import MessageBanner from "./notifications/MessageBanner";
-import { readUserSetting, writeUserSetting } from "../api/versionedSettings";
-import { fetchNotificationConfig } from "../api/notificationConfig";
+import {
+  readUserSetting,
+  writeUserSetting,
+} from "@/client/interact/versionedSettings";
+import { fetchNotificationConfig } from "@/client/interact/notificationConfig";
 import {
   acknowledgeAnnouncement,
   fetchAnnouncement,
-} from "../api/announcement";
+} from "@/client/interact/announcements";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
-import { announcementEvents } from "@/client/app/events";
-import { offlineRepository } from "@/client/data/repository";
-import type { AppRoute, ViewType } from "../app/appReducer";
+import { announcementEvents } from "@/client/interact/events";
+import type { AppRoute, ViewType } from "@/client/interact/types";
 import { flexGap, vh, inset } from "@/client/lib/css";
 import { hasFeature } from "@/shared/features";
 
@@ -688,17 +690,8 @@ export default function App() {
   useEffect(
     () =>
       subscribeConfigEvents((event) => {
-        if (event.updatedAt !== undefined && event.value !== null) {
-          void offlineRepository
-            .reconcileVersionedValue("user-config", event.key, {
-              value: event.value,
-              updatedAt: event.updatedAt,
-            })
-            .then((winner) => {
-              if (event.key === USER_CONFIG.THEME_MODE) {
-                setThemeMode(winner.value === "dark" ? "dark" : "light");
-              }
-            });
+        if (event.key === USER_CONFIG.THEME_MODE && event.value !== null) {
+          setThemeMode(event.value === "dark" ? "dark" : "light");
         }
       }),
     [subscribeConfigEvents],

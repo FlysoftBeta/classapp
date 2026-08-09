@@ -5,10 +5,11 @@ import App from "@/client/components/App";
 import AppInteractionGuard from "@/client/components/AppInteractionGuard";
 import globalCss from "@/client/global.css?inline";
 import { configureClientRuntime } from "@/client/api/runtime";
-import { transport } from "@/client/lib/remote/transport";
+import { transport } from "@/client/interact/remote/transport";
 import { startBundleManager } from "@/client/lib/bundle";
 import { ensureEndpointsReady } from "@/client/lib/loadBalancer";
 import { initializeInfini } from "@infini-scroll/core";
+import { startQuotaController } from "@/client/interact/quota";
 
 declare const __BUILD_ID__: string;
 
@@ -35,6 +36,7 @@ async function bootstrap(): Promise<void> {
   }
 
   transport.start();
+  startQuotaController();
   void ensureEndpointsReady();
 
   createRoot(root).render(

@@ -1,5 +1,7 @@
 import crypto from "crypto";
-import { mkdir, readFile, unlink, writeFile } from "fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile, stat, unlink, writeFile } from "fs/promises";
+import { Readable } from "node:stream";
 import path from "path";
 import { bytes, formatBytes } from "@/shared/bytes";
 import { ServiceError } from "@/server/services/errors";
@@ -75,6 +77,24 @@ export async function removeArticleBlob(
   }
 }
 
+export async function streamArticleBlob(
+  relativePath: string,
+  range?: { start: number; end: number },
+): Promise<{ size: number; body: ReadableStream<Uint8Array> }> {
+  const absolutePath = resolveArticleBlobPath(relativePath);
+  const info = await stat(absolutePath);
+  const body = createReadStream(absolutePath, range);
+  return {
+    size: info.size,
+    body: Readable.toWeb(body) as ReadableStream<Uint8Array>,
+  };
+}
+
+export async function articleBlobSize(relativePath: string): Promise<number> {
+  return (await stat(resolveArticleBlobPath(relativePath))).size;
+}
+
+/** Server-side renderer compatibility; HTTP downloads use streamArticleBlob. */
 export async function readArticleBlob(relativePath: string): Promise<Buffer> {
   return readFile(resolveArticleBlobPath(relativePath));
 }

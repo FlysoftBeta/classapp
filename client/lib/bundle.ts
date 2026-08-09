@@ -1,10 +1,6 @@
-import { client } from "@/client/lib/remote/client";
-import {
-  ACTIVE_BUILD_KEY,
-  clearLegacyActiveBuild,
-  openRuntimeDatabase,
-  transactionDone,
-} from "@/client/resource/runtimeDatabase";
+import { client } from "@/client/interact/remote/client";
+import { requestResult, runTransaction } from "@/client/data/idb";
+import { GLOBAL_KEYS, STORES } from "@/client/data/schema";
 import {
   parseRuntimeManifest,
   type RuntimeAsset,
@@ -23,12 +19,17 @@ async function fetchManifest(): Promise<RuntimeManifest> {
   return parseRuntimeManifest(await response.json());
 }
 
-async function fetchAsset(asset: RuntimeAsset, label: string): Promise<Blob> {
+async function fetchAsset(
+  asset: RuntimeAsset,
+  label: string,
+): Promise<ArrayBuffer> {
   const response = await fetch(asset.url, { cache: "no-store" });
   if (!response.ok) throw new Error(`${label} ${response.status}`);
-  const body = await response.blob();
-  if (body.size !== asset.size) {
-    throw new Error(`${label} size mismatch: ${body.size} != ${asset.size}`);
+  const body = await response.arrayBuffer();
+  if (body.byteLength !== asset.size) {
+    throw new Error(
+      `${label} size mismatch: ${body.byteLength} != ${asset.size}`,
+    );
   }
   return body;
 }
@@ -73,52 +74,36 @@ async function sendWorkerMessage(
   });
 }
 
-async function stageBundle(buildId: string, body: Blob): Promise<void> {
-  const db = await openRuntimeDatabase();
-  try {
-    const tx = db.transaction("bundles", "readwrite");
-    const done = transactionDone(tx);
-    tx.objectStore("bundles").put({
-      buildId,
-      body: await body.arrayBuffer(),
-      installedAt: Date.now(),
+async function stageBundle(buildId: string, body: ArrayBuffer): Promise<void> {
+  await runTransaction(STORES.BUNDLES, "readwrite", (tx) => {
+    tx.objectStore(STORES.BUNDLES).put({
+      build_id: buildId,
+      entrypoint_code: body,
+      installed_at: Date.now(),
     });
-    await done;
-  } finally {
-    db.close();
-  }
+  });
 }
 
 async function activateBundle(buildId: string): Promise<void> {
-  const db = await openRuntimeDatabase();
-  try {
-    const tx = db.transaction("kv", "readwrite");
-    const done = transactionDone(tx);
-    tx.objectStore("kv").put({ key: ACTIVE_BUILD_KEY, value: buildId });
-    await done;
-  } finally {
-    db.close();
-  }
-  clearLegacyActiveBuild();
+  await runTransaction([STORES.BUNDLES, STORES.GLOBALS], "readwrite", async (tx) => {
+    const bundle = await requestResult(
+      tx.objectStore(STORES.BUNDLES).get(buildId),
+    );
+    if (!bundle) throw new Error(`Cannot activate missing bundle ${buildId}`);
+    tx.objectStore(STORES.GLOBALS).put({
+      key: GLOBAL_KEYS.ACTIVE_BUNDLE,
+      value: buildId,
+    });
+  });
 }
 
 async function activeBundleBuildId(): Promise<string | null> {
-  const db = await openRuntimeDatabase();
-  try {
-    const record = await new Promise<{ value?: unknown } | undefined>(
-      (resolve, reject) => {
-        const request = db
-          .transaction("kv", "readonly")
-          .objectStore("kv")
-          .get(ACTIVE_BUILD_KEY);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      },
-    );
+  return runTransaction(STORES.GLOBALS, "readonly", async (tx) => {
+    const record = (await requestResult(
+      tx.objectStore(STORES.GLOBALS).get(GLOBAL_KEYS.ACTIVE_BUNDLE),
+    )) as { value?: unknown } | undefined;
     return typeof record?.value === "string" ? record.value : null;
-  } finally {
-    db.close();
-  }
+  });
 }
 
 async function stageShell(
@@ -204,7 +189,7 @@ export class BundleManager {
         fetchAsset(manifest.bundle, "bundle"),
         fetchAsset(manifest.shell, "shell"),
       ]);
-      const shellBody = await shellBlob.text();
+      const shellBody = new TextDecoder().decode(shellBlob);
 
       await stageBundle(manifest.buildId, bundleBody);
       await stageShell(worker, manifest.buildId, shellBody);
@@ -242,7 +227,9 @@ export class BundleManager {
     manifest: RuntimeManifest,
   ): Promise<void> {
     if (!worker || (await shellBuildId(worker)) === manifest.buildId) return;
-    const body = await (await fetchAsset(manifest.shell, "shell")).text();
+    const body = new TextDecoder().decode(
+      await fetchAsset(manifest.shell, "shell"),
+    );
     await stageShell(worker, manifest.buildId, body);
     await activateShell(worker, manifest.buildId);
   }

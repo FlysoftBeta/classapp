@@ -3,10 +3,13 @@ import { PROTOCOL_VERSION } from "@/shared/protocol/wire";
 import { transport, type TransportState } from "./transport";
 
 type InvalidHandler = () => void;
+type TokenListener = (epoch: number) => void;
 
 class RemoteSession {
   private token = "";
+  private epoch = 0;
   private invalidHandler: InvalidHandler | null = null;
+  private tokenListeners = new Set<TokenListener>();
 
   constructor() {
     transport.onStateChange((state) => this.handleTransportState(state));
@@ -16,9 +19,20 @@ class RemoteSession {
     return this.token;
   }
 
+  getEpoch(): number {
+    return this.epoch;
+  }
+
+  onTokenChange(listener: TokenListener): () => void {
+    this.tokenListeners.add(listener);
+    return () => this.tokenListeners.delete(listener);
+  }
+
   setToken(token: string): void {
     if (this.token === token) return;
     this.token = token;
+    this.epoch += 1;
+    for (const listener of this.tokenListeners) listener(this.epoch);
     this.authenticate();
   }
 

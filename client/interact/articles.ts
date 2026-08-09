@@ -4,7 +4,7 @@ import {
   apiFetch,
   authHeaders,
   parseJson,
-} from "./runtime";
+} from "@/client/api/runtime";
 const {
   createArticleAction,
   deleteArticleAction,
@@ -19,9 +19,13 @@ const {
   startNetworkArticleDownloadAction,
   listNetworkArticleDownloadsAction,
 } = client.actions;
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { offlineRepository } from "@/client/data/repository";
+import { renderCachedPdfPage } from "@/client/interact/cachedPdf";
+import { closeCachedPdf } from "@/client/interact/cachedPdf";
+import { extentFiles } from "@/client/data/files";
+import { FileIds } from "@/client/data/fileIds";
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -47,10 +51,14 @@ const remoteArticlePageRequests = new Map<
 
 async function reconcileArticleProgressMeta(
   article: ArticleWithMeta,
+  membership: {
+    view: "all" | "bookmarked" | "sidebar" | "direct";
+    group_id: string | null;
+  } = { view: "direct", group_id: null },
 ): Promise<ArticleWithMeta> {
-  const bookmark = await offlineRepository.reconcileVersionedValue(
-    "article-config",
-    `${article.id}:bookmarked`,
+  await offlineRepository.saveArticleMeta(article, membership);
+  const bookmark = await offlineRepository.reconcileArticleBookmark(
+    article.id,
     {
       value: article.is_bookmarked,
       updatedAt: article.bookmark_updated_at_ms,
@@ -74,8 +82,16 @@ async function reconcileArticleProgressMeta(
 
 async function reconcileArticleList(
   articles: ArticleWithMeta[],
+  membership: {
+    view: "all" | "bookmarked" | "sidebar";
+    group_id: string | null;
+  },
 ): Promise<ArticleWithMeta[]> {
-  return Promise.all(articles.map(reconcileArticleProgressMeta));
+  return Promise.all(
+    articles.map((article) =>
+      reconcileArticleProgressMeta(article, membership),
+    ),
+  );
 }
 
 async function fetchRemoteArticlePage(
@@ -96,10 +112,18 @@ async function fetchRemoteArticlePage(
     });
     observeActionResult(result);
     if (!result.ok) return null;
-    return {
-      articles: await reconcileArticleList(result.data.articles ?? []),
+    const articles = await reconcileArticleList(result.data.articles ?? [], {
+      view: "all",
+      group_id: groupId ?? null,
+    });
+    await offlineRepository.reconcileArticlePage(articles, {
+      view: "all",
+      groupId: groupId ?? null,
+      direction,
+      cursor: cursor ?? null,
       hasMore: result.data.hasMore,
-    };
+    });
+    return { articles, hasMore: result.data.hasMore };
   })().finally(() => {
     if (remoteArticlePageRequests.get(key) === request) {
       remoteArticlePageRequests.delete(key);
@@ -123,10 +147,10 @@ export async function listArticles(
       ? explicitGroupId
       : directionOrGroup;
   if (!client.isConnected()) {
-    const saved = await offlineRepository.getSavedArticleList();
+    const cached = await offlineRepository.getArticleList();
     const articles = groupId
-      ? saved.filter((article) => article.group_id === groupId)
-      : saved;
+      ? cached.filter((article) => article.group_id === groupId)
+      : cached;
     return {
       articles: articles.slice(0, 50),
       hasMore: articles.length > 50,
@@ -153,20 +177,6 @@ export async function listArticles(
       articles: data.articles.slice(skipped),
     };
   }
-  if (data) {
-    if (groupId) {
-      // A group-filtered page is only a partial view of the global cache. It
-      // may add/update entries, but must never evict articles from other groups.
-      await offlineRepository.mergeArticleListEntries(data.articles);
-      for (const article of data.articles)
-        await offlineRepository.saveArticleMeta(article);
-    } else {
-      await offlineRepository.reconcileArticlePage(data.articles, {
-        offset: 0,
-        total: data.articles.length,
-      });
-    }
-  }
   return data
     ? {
         ...data,
@@ -182,20 +192,25 @@ export async function listArticles(
 
 export async function listBookmarkedArticles() {
   if (!client.isConnected()) {
-    const articles = await offlineRepository.getSavedArticleList();
+    const articles = await offlineRepository.getArticleList();
     return { articles: articles.filter((article) => article.is_bookmarked) };
   }
   const result = await listArticlesAction({ view: "bookmarked" });
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  if (data.articles) data.articles = await reconcileArticleList(data.articles);
+  if (data.articles) {
+    data.articles = await reconcileArticleList(data.articles, {
+      view: "bookmarked",
+      group_id: null,
+    });
+  }
   return data;
 }
 
 export async function fetchArticleSidebar() {
   if (!client.isConnected()) {
-    const articles = await offlineRepository.getSavedArticleList();
+    const articles = await offlineRepository.getArticleList();
     return {
       current_article_id: null,
       articles: articles.filter(
@@ -207,10 +222,10 @@ export async function fetchArticleSidebar() {
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  data.articles = await reconcileArticleList(data.articles);
-  await offlineRepository.mergeArticleListEntries(data.articles);
-  for (const article of data.articles)
-    await offlineRepository.saveArticleMeta(article);
+  data.articles = await reconcileArticleList(data.articles, {
+    view: "sidebar",
+    group_id: null,
+  });
   return data;
 }
 
@@ -227,7 +242,10 @@ export async function primeOfflineArticleList(): Promise<void> {
     if (!page.hasMore || !last?.list_sort_at) break;
     cursor = { sortAt: last.list_sort_at, id: last.id };
   }
-  await offlineRepository.saveArticleList(pages.slice(0, 200));
+  await offlineRepository.saveArticleList(pages.slice(0, 200), {
+    view: "all",
+    group_id: null,
+  });
 }
 
 export async function reportArticleReading(
@@ -266,11 +284,9 @@ export async function fetchArticle(articleId: string) {
   const data = result.data;
   if (data.article) {
     data.article = await reconcileArticleProgressMeta(data.article);
-    await offlineRepository.saveArticleMeta(data.article);
     const progress = await offlineRepository.getArticleProgress(articleId);
     if (progress && !progress.synced) {
       data.article = { ...data.article, current_offset: progress.offset };
-      void saveArticleProgress(articleId, progress.offset);
     }
   }
   return data;
@@ -290,6 +306,22 @@ export async function fetchCachedArticle(articleId: string) {
       ? { ...article, current_offset: progress.offset }
       : article,
   };
+}
+
+export async function loadArticleForReader(
+  articleId: string,
+  onCached?: (article: ArticleWithMeta) => void | Promise<void>,
+): Promise<{
+  source: "remote" | "offline";
+  article: ArticleWithMeta | null;
+}> {
+  const cached = await fetchCachedArticle(articleId);
+  if (cached?.article) await onCached?.(cached.article);
+  if (!client.isConnected()) {
+    return { source: "offline", article: cached?.article ?? null };
+  }
+  const remote = await fetchArticle(articleId);
+  return { source: "remote", article: remote?.article ?? null };
 }
 
 export async function fetchArticleSegment(
@@ -387,37 +419,14 @@ export async function listNetworkArticleDownloads() {
   return result.ok ? result.data.tasks : [];
 }
 
-async function updateCachedArticleBookmark(
-  articleId: string,
-  value: boolean,
-  updatedAt: number,
-) {
-  const listEntry = (await offlineRepository.getArticleList()).find(
-    (article) => article.id === articleId,
-  );
-  const meta = await offlineRepository.getArticleMeta(articleId);
-  const source = meta ?? listEntry;
-  if (!source) return;
-  const updated = {
-    ...source,
-    is_bookmarked: value,
-    bookmark_updated_at_ms: updatedAt,
-  };
-  await offlineRepository.saveArticleMeta(updated);
-  if (listEntry) await offlineRepository.upsertArticleListEntry(updated);
-}
-
 export async function toggleArticleBookmark(
   articleId: string,
   bookmarked: boolean,
 ) {
-  const id = `${articleId}:bookmarked`;
-  const local = await offlineRepository.setVersionedValue(
-    "article-config",
-    id,
+  const local = await offlineRepository.setArticleBookmark(
+    articleId,
     bookmarked,
   );
-  await updateCachedArticleBookmark(articleId, local.value, local.updatedAt);
   if (!client.isConnected()) return { bookmarked: local.value };
   try {
     const result = await setArticleBookmarkAction({
@@ -427,15 +436,9 @@ export async function toggleArticleBookmark(
     });
     observeActionResult(result);
     if (!result.ok) return null;
-    const winner = await offlineRepository.reconcileVersionedValue(
-      "article-config",
-      id,
-      result.data,
-    );
-    await updateCachedArticleBookmark(
+    const winner = await offlineRepository.reconcileArticleBookmark(
       articleId,
-      winner.value,
-      winner.updatedAt,
+      result.data,
     );
     return { bookmarked: winner.value };
   } catch {
@@ -445,34 +448,17 @@ export async function toggleArticleBookmark(
 
 export async function syncPendingArticleConfig() {
   if (!client.isConnected()) return;
-  for (const {
-    id,
-    version,
-  } of await offlineRepository.getPendingVersionedValues<boolean>(
-    "article-config",
-  )) {
-    const separator = id.lastIndexOf(":");
-    const articleId = id.slice(0, separator);
-    const field = id.slice(separator + 1);
-    if (!articleId || field !== "bookmarked") continue;
+  for (const pending of await offlineRepository.getPendingArticleBookmarks()) {
+    const { articleId, value, updatedAt } = pending;
     try {
       const result = await setArticleBookmarkAction({
         articleId,
-        bookmarked: version.value,
-        updatedAt: version.updatedAt,
+        bookmarked: value,
+        updatedAt,
       });
       observeActionResult(result);
       if (!result.ok) continue;
-      const winner = await offlineRepository.reconcileVersionedValue(
-        "article-config",
-        id,
-        result.data,
-      );
-      await updateCachedArticleBookmark(
-        articleId,
-        winner.value,
-        winner.updatedAt,
-      );
+      await offlineRepository.reconcileArticleBookmark(articleId, result.data);
     } catch {
       /* retry on the next recovery */
     }
@@ -480,9 +466,11 @@ export async function syncPendingArticleConfig() {
 }
 
 export async function saveArticleProgress(articleId: string, offset: number) {
+  const offline = !client.isConnected();
   const local = await offlineRepository.setPendingArticleProgress(
     articleId,
     offset,
+    offline,
   );
   const localResult = () => ResultTools.ok(local, { buildId: client.buildId });
   if (!client.isConnected()) return localResult();
@@ -491,14 +479,41 @@ export async function saveArticleProgress(articleId: string, offset: number) {
       articleId,
       offset: local.offset,
       updatedAt: local.updatedAt,
+      merge: "override",
     });
     const response = observeActionResult(result);
     if (result.ok) {
-      await offlineRepository.reconcileArticleProgress(articleId, result.data);
+      await offlineRepository.reconcileArticleProgress(
+        articleId,
+        result.data,
+        "override",
+      );
     }
     return response;
   } catch {
     return localResult();
+  }
+}
+
+export async function flushPendingArticleProgress(
+  articleId: string,
+  offset: number,
+  updatedAt: number,
+): Promise<void> {
+  if (!client.isConnected()) return;
+  const result = await saveArticleProgressAction({
+    articleId,
+    offset,
+    updatedAt,
+    merge: "furthest",
+  });
+  observeActionResult(result);
+  if (result.ok) {
+    await offlineRepository.reconcileArticleProgress(
+      articleId,
+      result.data,
+      "furthest",
+    );
   }
 }
 
@@ -511,6 +526,19 @@ export async function fetchArticleRender(
     height: number;
   },
 ) {
+  const local = await renderCachedPdfPage(articleId, params).catch(() => null);
+  if (local) {
+    return new Response(local.blob, {
+      headers: {
+        "Content-Type": "image/png",
+        "X-PDF-Num-Pages": String(local.pages),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+  if (!client.isConnected()) {
+    return Response.json({ error: "文章未保存在本机" }, { status: 503 });
+  }
   const query = new URLSearchParams({
     page: String(params.page),
     width: String(params.width),
@@ -521,9 +549,20 @@ export async function fetchArticleRender(
   });
 }
 
+export function fetchArticleBlob(token: string, articleId: string) {
+  return apiFetch(`/api/articles/${articleId}/blob`, {
+    headers: authHeaders(token),
+  });
+}
+
 export async function deleteArticle(articleId: string) {
   const result = await deleteArticleAction(articleId);
   const res = observeActionResult(result);
   const data = result.ok ? result.data : { error: result.error.message };
+  if (result.ok) {
+    await closeCachedPdf(articleId).catch(() => undefined);
+    await extentFiles.delete(FileIds.articleBlob(articleId));
+    await offlineRepository.purgeArticle(articleId);
+  }
   return { res, data };
 }

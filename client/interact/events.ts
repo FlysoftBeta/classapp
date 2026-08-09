@@ -1,7 +1,7 @@
 import type {
   PostStreamEvent,
   UserConfigChangedEvent,
-} from "@/client/app/appReducer";
+} from "./types";
 
 type Listener<T> = (event: T) => void;
 
@@ -13,7 +13,7 @@ function createEventStream<T>() {
         try {
           listener(event);
         } catch {
-          // Isolate consumers from one another.
+          // One rendering consumer cannot break the global data subscriber.
         }
       }
     },
@@ -27,3 +27,4 @@ function createEventStream<T>() {
 export const postEvents = createEventStream<PostStreamEvent>();
 export const configEvents = createEventStream<UserConfigChangedEvent>();
 export const announcementEvents = createEventStream<{ revision: number }>();
+

@@ -1,7 +1,7 @@
 import type { Post } from "@/shared/types/api";
 import type { ActionArgs, ActionData } from "@/shared/protocol/actions";
 import { observeActionResult, apiFetch, authHeaders } from "./runtime";
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 
 const {
   adminConfirmUpdateAction,

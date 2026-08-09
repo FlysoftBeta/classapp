@@ -15,7 +15,7 @@ import { flexGap } from "@/client/lib/css";
 import {
   searchNetworkArticles,
   startNetworkArticleDownload,
-} from "@/client/api/articles";
+} from "@/client/interact/articles";
 import { taskStore } from "@/client/hooks/useTaskStore";
 import type { Conversation } from "@/shared/types/api";
 

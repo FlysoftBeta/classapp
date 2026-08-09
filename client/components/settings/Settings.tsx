@@ -17,7 +17,7 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import NumPad from "@/client/components/shared/NumPad";
 import type { User } from "@/shared/types/api";
 import { getClientMe, updateMe } from "@/client/api/auth";
-import { updateDoNotDisturb } from "@/client/api/notificationConfig";
+import { updateDoNotDisturb } from "@/client/interact/notificationConfig";
 import EndfieldLogo from "../EndfieldLogo";
 import { useTheme } from "@mui/material/styles";
 

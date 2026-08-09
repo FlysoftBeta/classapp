@@ -1,4 +1,4 @@
-import type { ArticleSegmentPayload } from "@/client/api/articles";
+import type { ArticleSegmentPayload } from "@/client/interact/articles";
 import { SEGMENT_SIZE } from "@/shared/types/api/article";
 
 /** Upper bound when scanning for a `\n` split point. */

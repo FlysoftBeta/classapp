@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { RUNTIME_DATABASE_VERSION, STORES } from "@/client/data/schema";
 import { actionContracts } from "@/shared/protocol/actions";
 import {
   CheckedError,
@@ -15,6 +17,25 @@ assert.equal(
   createGroup.args.safeParse([{ name: "Test", unexpected: true }]).success,
   false,
   "Action inputs must reject unknown fields",
+);
+
+const shell = await readFile(new URL("../shell.html", import.meta.url), "utf8");
+assert.equal(
+  Number(shell.match(/var DB_VERSION = (\d+);/)?.[1]),
+  RUNTIME_DATABASE_VERSION,
+  "Shell and application must open the same runtime database version",
+);
+for (const store of Object.values(STORES)) {
+  assert.match(
+    shell,
+    new RegExp(`createObjectStore\\(["']${store}["']`),
+    `Shell bootstrap schema is missing ${store}`,
+  );
+}
+assert.doesNotMatch(
+  shell,
+  /classapp-active-build|entrypoint_code\s*\|\||objectStore\(["']kv["']\)/,
+  "The hard schema boundary must not retain legacy bundle/data shims",
 );
 assert.equal(createGroup.args.safeParse([{ name: "Test" }]).success, true);
 
@@ -37,6 +58,19 @@ assert.equal(
   fetchPosts.args.safeParse([{ before_sequence: -1 }]).success,
   false,
   "Post sequence fallbacks must be non-negative",
+);
+assert.equal(
+  actionContracts.markConversationReadAction.args.safeParse([
+    {
+      type: "group",
+      id: "group-1",
+      post_id: "post-1",
+      updatedAt: 1,
+      merge: "furthest",
+    },
+  ]).success,
+  true,
+  "Offline read watermarks use an explicit furthest merge operation",
 );
 
 assert.equal(
@@ -88,6 +122,7 @@ const tombstone = {
   id: "post-1",
   user_id: "user-1",
   conv_id: "group:group-1",
+  sequence: 1,
   revision: 4,
   brief: "",
   reply_to: null,
@@ -141,7 +176,7 @@ assert.equal(
 assert.equal(
   actionContracts.listArticlesAction.output.safeParse({
     articles: [article],
-    total: 1,
+    hasMore: false,
   }).success,
   true,
   "Article list output must satisfy its strict contract",

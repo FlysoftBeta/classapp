@@ -30,7 +30,7 @@ Update ownership is deliberately singular:
 | -------------------------------------------------------- | -------------------------------- |
 | release build id and runtime asset paths                 | runtime config / `runtimeAssets` |
 | post-bootstrap browser checks and asset download         | `BundleManager`                  |
-| active bundle pointer                                    | IndexedDB `kv`                   |
+| active bundle pointer                                    | IndexedDB `globals`              |
 | active Shell pointer and cached Shell                    | Service Worker Cache Storage     |
 | deployment validation and staging                        | server `UpdateManager`           |
 | directory swap, confirmation timeout and app/DB rollback | launcher                         |
@@ -45,18 +45,24 @@ as text and injected by the entrypoint, so there is no separate CSS artifact.
 
 ## Client runtime
 
-- `RemoteManager` is the concrete WebSocket protocol implementation.
-- OneShot calls are statically typed from the Action contract and correlated by
-  request id.
-- EventBus notifications share the same socket and trigger a full refresh after
-  a disconnect, preserving the existing incremental/full-refresh model.
-- `ResourceManager` separates evictable cache resources from resources a user
-  explicitly persists. It requests persistent browser storage for the latter
-  and evicts least-recently-used cache entries before quota pressure becomes
-  critical.
+- `client/data` is the mechanism layer: short-lived IndexedDB leases, normalized
+  objective/actor stores, extent files, and atomic transaction primitives.
+- `client/interact` is the policy layer: typed remote calls, local-first reads,
+  proposal arbitration, reconnect recovery, coverage tracking and quota eviction.
+- React consumes `interact` use cases and presentation state. It does not choose
+  between online and offline sources or write IndexedDB directly.
+- WebSocket events are queued during reconnect. Recovery refreshes access,
+  flushes proposals, catches up revisions, publishes snapshots, and only then
+  replays the queued events.
+- Binary articles use 4 MiB `ArrayBuffer` extents. Published downloads are
+  generation-based; PDF.js reads saved files through range requests without
+  loading the entire document.
 
-The authoritative entity schema, consistency protocols, reconnect flow, and
-migration invariants are maintained in [DATA_MODEL_V16.md](./DATA_MODEL_V16.md).
+The complete client model and its invariants are maintained in
+[docs/client-model.md](./docs/client-model.md).
+
+The authoritative server entity schema is maintained in
+[DATA_MODEL_V16.md](./DATA_MODEL_V16.md).
 
 ## Server runtime
 

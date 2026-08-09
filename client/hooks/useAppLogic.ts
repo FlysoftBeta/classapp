@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
-import { session } from "@/client/lib/remote/session";
 import {
-  deriveSelected,
+  selectedConversation,
   type AppState,
   type AppRoute,
   type ViewType,
@@ -11,16 +10,14 @@ import {
   type AppDisableState,
   type AppDisableReason,
   type UserConfigChangedEvent,
-} from "../app/appReducer";
-import { useAppStore } from "@/client/app/appStore";
-import { offlineRepository } from "@/client/data/repository";
-import { offlineSession } from "@/client/resource/offlineSession";
-import { scheduleConversationRefresh } from "@/client/app/resources";
+} from "@/client/interact/types";
+import { useApplicationStore } from "@/client/interact/appStore";
+import { resourceQueries } from "@/client/interact/resources";
 import {
   bindRemoteLifecycle,
-  recoverInvalidSession,
+  bindInvalidSessionHandler,
   startHeartbeat,
-} from "@/client/app/remoteLifecycle";
+} from "@/client/interact/remoteLifecycle";
 import {
   acceptOobePin,
   bootstrapSession,
@@ -29,8 +26,8 @@ import {
   logoutSession,
   submitOobe,
   unlockSession,
-} from "@/client/app/sessionController";
-import { configEvents, postEvents } from "@/client/app/events";
+} from "@/client/interact/sessionController";
+import { configEvents, postEvents } from "@/client/interact/events";
 
 export type {
   AppState,
@@ -45,25 +42,15 @@ export type {
 };
 
 export function useAppLogic() {
-  const store = useAppStore();
-  const dispatch = useAppStore((state) => state.dispatch);
+  const store = useApplicationStore();
   const [clientId, setClientId] = useState("");
   const [articleListRevision, setArticleListRevision] = useState(0);
 
   const appStateRef = useRef<AppState>("loading");
   const selected = useMemo(
-    () => deriveSelected(store.conversations, store.route),
+    () => selectedConversation(store.conversations, store.route),
     [store.conversations, store.route],
   );
-
-  useEffect(() => {
-    offlineRepository.setUserScope(store.user?.id ?? null);
-  }, [store.user?.id]);
-
-  useEffect(() => {
-    if (!store.token || !store.user) return;
-    void offlineSession.save({ token: store.token, user: store.user });
-  }, [store.token, store.user]);
 
   useEffect(() => {
     appStateRef.current = store.appState;
@@ -71,8 +58,7 @@ export function useAppLogic() {
 
   // ── Client-invalid global handler ─────────────────────────────────────────
   useEffect(() => {
-    session.setInvalidHandler(recoverInvalidSession);
-    return () => session.setInvalidHandler(null);
+    return bindInvalidSessionHandler();
   }, []);
 
   // ── Anti-exit history stuffing ───────────────────────────────────────────
@@ -128,24 +114,20 @@ export function useAppLogic() {
 
   const handleNewDm = useCallback(
     (peerId: string, peerName: string) => {
-      dispatch({ type: "NEW_DM", peerId, peerName });
+      store.startDm(peerId, peerName);
     },
-    [dispatch],
+    [store],
   );
 
   const handleConversationUpdate = useCallback(() => {
-    scheduleConversationRefresh();
-    dispatch({ type: "REMOTE_RESUBSCRIBE" });
-  }, [dispatch]);
+    resourceQueries.scheduleConversations();
+  }, []);
 
   const handleLeftGroup = useCallback(
     (groupId: string) => {
-      dispatch({
-        type: "CONV_PAYLOAD",
-        payload: { removed: { type: "group", id: groupId } },
-      });
+      store.applyConversation({ removed: { type: "group", id: groupId } });
     },
-    [dispatch],
+    [store],
   );
 
   const convGroups = store.conversations.filter((c) => c.type === "group");
@@ -153,19 +135,17 @@ export function useAppLogic() {
 
   return {
     appState: store.appState,
-    setAppState: (s: AppState) =>
-      dispatch({ type: "SET_APP_STATE", appState: s }),
+    setAppState: store.setAppState,
     appDisable: store.appDisable,
     online: store.online,
 
     user: store.user,
-    setUser: (u: NonNullable<typeof store.user>) =>
-      dispatch({ type: "PATCH_USER", user: u }),
+    setUser: store.patchUser,
     token: store.token,
     clientId,
 
     route: store.route,
-    navigate: (route: AppRoute) => dispatch({ type: "NAVIGATE", route }),
+    navigate: store.navigate,
     selected,
     conversations: store.conversations,
     convGroups,
@@ -176,13 +156,11 @@ export function useAppLogic() {
     loginLoading: store.loginLoading,
     loginError: store.loginError,
     oobe: store.oobe,
-    setOobe: (o: OobeState | null) => dispatch({ type: "SET_OOBE", oobe: o }),
+    setOobe: store.setOobe,
     oobeHandle: store.oobeHandle,
-    setOobeHandle: (h: string) =>
-      dispatch({ type: "SET_OOBE_FIELDS", handle: h }),
+    setOobeHandle: (h: string) => store.patchOobeFields({ handle: h }),
     oobeUsername: store.oobeUsername,
-    setOobeUsername: (n: string) =>
-      dispatch({ type: "SET_OOBE_FIELDS", username: n }),
+    setOobeUsername: (n: string) => store.patchOobeFields({ username: n }),
 
     handleLoginPin,
     handleOobePin,

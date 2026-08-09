@@ -70,7 +70,7 @@ export async function saveArticleProgressAction(
     }
     return await (
       await (await session.asActor()).articles()
-    ).saveProgress(input.articleId, input.offset, input.updatedAt);
+    ).saveProgress(input.articleId, input.offset, input.updatedAt, input.merge);
   });
 }
 

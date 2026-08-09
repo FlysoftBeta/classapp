@@ -22,7 +22,7 @@ import {
   leaveGroup,
   patchMyGroupMembership,
   type GroupMember,
-} from "@/client/api/groups";
+} from "@/client/interact/groups";
 export function MembersDialog({
   groupId,
   currentUserId,

@@ -1,6 +1,6 @@
 import type { Conversation, Post } from "@/shared/types/api";
 import type { CreatePostPayload } from "@/shared/validation/posts";
-import { observeActionResult } from "./runtime";
+import { observeActionResult } from "@/client/api/runtime";
 const {
   createPostAction,
   deletePostAction,
@@ -8,7 +8,7 @@ const {
   fetchPostsAction,
   updatePostAction,
 } = client.actions;
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 import { offlineRepository } from "@/client/data/repository";
 
 export type PostMutationData = {
@@ -43,6 +43,54 @@ export async function fetchCachedPosts(
   return { posts: posts.slice(-limit).reverse() };
 }
 
+export async function findCachedPost(
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  postId: string,
+): Promise<Post | null> {
+  return (await offlineRepository.getPosts(conv)).find((post) => post.id === postId) ?? null;
+}
+
+export async function locateCachedPost(
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  sequence: number,
+): Promise<Post | null> {
+  return (await offlineRepository.getPosts(conv)).reduce<Post | null>(
+    (nearest, post) => {
+      if (!nearest) return post;
+      return Math.abs(post.sequence - sequence) <
+        Math.abs(nearest.sequence - sequence)
+        ? post
+        : nearest;
+    },
+    null,
+  );
+}
+
+export async function resolvePost(
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  postId: string,
+  authoritative = false,
+): Promise<Post | null> {
+  const cached = await findCachedPost(conv, postId);
+  if (!authoritative && cached) return cached;
+  if (!client.isConnected()) return cached;
+  const { data } = await fetchPost(postId);
+  return "post" in data && data.post ? data.post : null;
+}
+
+export async function locatePost(
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  sequence: number,
+): Promise<Post | null> {
+  if (!client.isConnected()) return locateCachedPost(conv, sequence);
+  const data = await fetchPosts(conv, {
+    limit: "1",
+    before_id: "__infini_sequence_cursor__",
+    before_sequence: String(sequence + 1),
+  });
+  return data?.posts?.[0] ?? null;
+}
+
 function buildPostsSearchParams(
   conv: Pick<Conversation, "type" | "id" | "conv_id">,
   params: Record<string, string>,
@@ -54,7 +102,8 @@ function buildPostsSearchParams(
 }
 
 export async function fetchPosts(
-  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id"> &
+    Partial<Pick<Conversation, "revision">>,
   params: Record<string, string>,
 ) {
   if (!client.isConnected()) return fetchCachedPosts(conv, params);
@@ -63,7 +112,8 @@ export async function fetchPosts(
 
 /** Always reads the authoritative server; callers use this for revalidation. */
 export async function fetchRemotePosts(
-  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  conv: Pick<Conversation, "type" | "id" | "conv_id"> &
+    Partial<Pick<Conversation, "revision">>,
   params: Record<string, string>,
 ) {
   const searchParams = buildPostsSearchParams(conv, params);
@@ -93,12 +143,31 @@ export async function fetchRemotePosts(
   const data = result.data;
   if (data.posts?.length) {
     if (params.changed_after_revision) {
-      await offlineRepository.savePosts(conv, data.posts);
+      // Revision pages contain changed rows, not a contiguous history page.
+      await offlineRepository.savePosts(conv, data.posts, {
+        extendCoverage: false,
+      });
     } else {
-      await offlineRepository.reconcilePostPage(conv, data.posts);
+      const limit = Math.max(1, Number(params.limit) || 50);
+      await offlineRepository.reconcilePostPage(conv, data.posts, {
+        ...(params.before_id ? { beforeId: params.before_id } : {}),
+        ...(params.after_id ? { afterId: params.after_id } : {}),
+        exhausted: data.posts.length < limit,
+      });
     }
   }
+  if (!params.changed_after_revision && conv.revision !== undefined) {
+    await offlineRepository.advancePostRevision(conv.conv_id, conv.revision);
+  }
   return data;
+}
+
+export function commitPostRevisionRange(
+  conv: Pick<Conversation, "type" | "id" | "conv_id">,
+  posts: Post[],
+  revision: number,
+) {
+  return offlineRepository.reconcilePostRevisions(conv, posts, revision);
 }
 
 export async function fetchPost(postId: string) {

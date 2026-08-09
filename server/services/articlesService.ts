@@ -196,6 +196,7 @@ export class ArticleService {
     articleId: string,
     offset: number,
     updatedAt: number,
+    merge: "override" | "furthest",
   ) {
     assertCanAccessArticle(this.db, user, articleId);
     const article = findArticleRecord(this.db, articleId);
@@ -210,6 +211,7 @@ export class ArticleService {
       articleId,
       safe,
       updatedAt,
+      merge,
     );
     this.publishReading(user.id, articleId);
     return value;

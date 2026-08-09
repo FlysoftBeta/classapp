@@ -1,5 +1,5 @@
 import { observeActionResult } from "./runtime";
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 
 const { fetchAnnouncementAction, acknowledgeAnnouncementAction } =
   client.actions;

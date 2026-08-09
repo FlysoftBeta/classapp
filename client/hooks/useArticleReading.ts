@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { reportArticleReading } from "@/client/api/articles";
+import { reportArticleReading } from "@/client/interact/articles";
 import { READING_HEARTBEAT_SECONDS } from "@/shared/types/api/article";
 
 export function useArticleReading(articleId: string, online = true) {

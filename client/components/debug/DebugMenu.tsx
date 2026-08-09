@@ -6,7 +6,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Popover from "@mui/material/Popover";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
-import { transport } from "@/client/lib/remote/transport";
+import { isForcedOffline, setForcedOffline } from "@/client/interact/debug";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export default function DebugMenu() {
@@ -16,17 +16,15 @@ export default function DebugMenu() {
 
 function DebugMenuContents() {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [forcedOffline, setForcedOffline] = useState(() =>
-    transport.isForcedOffline(),
-  );
+  const [forcedOffline, setForcedOfflineState] = useState(isForcedOffline);
   const showInfiniIds = useDebugStore((state) => state.showInfiniIds);
   const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
   const setShowInfiniIds = useDebugStore((state) => state.setShowInfiniIds);
   const setShowInfiniLogs = useDebugStore((state) => state.setShowInfiniLogs);
 
   const handleForcedOffline = (enabled: boolean) => {
-    transport.setForcedOffline(enabled);
     setForcedOffline(enabled);
+    setForcedOfflineState(enabled);
   };
 
   return (

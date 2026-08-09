@@ -3,7 +3,7 @@ import { z } from "zod";
 const postCommonShape = {
   id: z.string(),
   /** Stable server ordering key within the post stream. */
-  sequence: z.number().int().optional(),
+  sequence: z.number().int().positive(),
   user_id: z.string().nullable(),
   /** Canonical conversation identity; the only post target field. */
   conv_id: z.string(),

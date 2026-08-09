@@ -8,10 +8,10 @@ ClassApp is a React SPA with a custom Node.js runtime. It does not use Next.js.
 client/                 Browser-only React application
   api/                  Typed OneShot facade and raw HTTP helpers
   components/           React UI
-  hooks/                Client orchestration
+  hooks/                React presentation adapters
+  data/                 Raw IndexedDB mechanisms and normalized stores
+  interact/             Client business logic, sync and remote orchestration
   lib/                  Browser-side pure logic and virtualization
-  remote/               Concrete WebSocket RemoteManager
-  resource/             IndexedDB/quota ResourceManager
   runtime/              Application update manager
   store/                Zustand state
 server/                 Node.js runtime and business backend
@@ -69,13 +69,14 @@ failures remain unchecked exceptions. Do not flatten these categories.
 
 ## Client boundaries
 
-`client/api/*` is the single browser call surface. Business requests use typed
-OneShot calls through `RemoteManager`; EventBus notifications use the same
-WebSocket. After a disconnect, the client performs a full refresh before relying
-on incremental events again.
+`client/data/*` owns raw IndexedDB mechanisms only. `client/interact/*` owns
+remote/local selection, synchronization, proposal arbitration, reconnect
+recovery and quota policy. React must not import `client/data` directly or make
+its own online/offline choice. EventBus notifications use the same WebSocket;
+after disconnect, access and snapshots recover before queued events are replayed.
 
-`ResourceManager` distinguishes evictable cache resources from resources the user
-explicitly requested to persist. Do not add a second persistence/cache layer.
+Do not add another persistence/cache layer. The detailed client invariants are
+defined in [docs/client-model.md](./docs/client-model.md).
 
 For bidirectional infinite scrolling, follow [INFINI.md](./INFINI.md).
 

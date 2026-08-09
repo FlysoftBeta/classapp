@@ -18,7 +18,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { Group } from "@/shared/types/api";
-import { fetchGroupMembers } from "@/client/api/groups";
+import { fetchGroupMembers } from "@/client/interact/groups";
 import { flexGap } from "@/client/lib/css";
 import {
   adminSearchUsers,

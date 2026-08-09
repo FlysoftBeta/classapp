@@ -39,6 +39,7 @@ export class RemoteProtocolError extends Error {
 
 type PendingAction = {
   action: ActionName;
+  authEpoch: number;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
   timeout: ReturnType<typeof setTimeout>;
@@ -66,13 +67,14 @@ export class Client {
   constructor() {
     transport.onMessage((raw) => this.receive(raw));
     transport.onStateChange((state) => this.handleTransportState(state));
+    session.onTokenChange(() => this.cancelPending("登录身份已切换"));
   }
 
   isConnected(): boolean {
     return transport.isConnected();
   }
 
-  async call<K extends ActionName>(
+  call<K extends ActionName>(
     action: K,
     ...args: ActionArgs<K>
   ): Promise<CheckedActionResult<ActionData<K>>> {
@@ -87,7 +89,13 @@ export class Client {
         this.pending.delete(id);
         item.reject(new RemoteProtocolError("TIMEOUT", "请求超时"));
       }, 30_000);
-      this.pending.set(id, { action, resolve, reject, timeout });
+      this.pending.set(id, {
+        action,
+        authEpoch: session.getEpoch(),
+        resolve,
+        reject,
+        timeout,
+      });
     });
     transport.send(
       JSON.stringify({
@@ -148,6 +156,10 @@ export class Client {
     if (!pending) return;
     this.pending.delete(frame.id);
     clearTimeout(pending.timeout);
+    if (pending.authEpoch !== session.getEpoch()) {
+      pending.resolve(this.cancelledResult("登录身份已切换"));
+      return;
+    }
     const contract = actionContracts[pending.action];
     const result = actionResultSchema(contract.output).safeParse(frame.result);
     if (!result.success) {
@@ -186,11 +198,38 @@ export class Client {
     this.connected = connected;
     for (const listener of this.connectionListeners) listener(connected);
     if (connected || this.pending.size === 0) return;
+    this.rejectPending(
+      new RemoteProtocolError("DISCONNECTED", "服务连接已断开"),
+    );
+  }
+
+  private rejectPending(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
-      pending.reject(new RemoteProtocolError("DISCONNECTED", "服务连接已断开"));
+      pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private cancelPending(message: string): void {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.resolve(this.cancelledResult(message));
+    }
+    this.pending.clear();
+  }
+
+  private cancelledResult(message: string) {
+    return {
+      ok: false as const,
+      error: {
+        kind: "checked" as const,
+        code: "CONFLICT" as const,
+        message,
+        status: 409,
+      },
+      meta: { buildId: this.buildId },
+    };
   }
 }
 

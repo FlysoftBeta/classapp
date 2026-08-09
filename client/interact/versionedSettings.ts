@@ -1,7 +1,7 @@
-import { observeActionResult } from "./runtime";
+import { observeActionResult } from "@/client/api/runtime";
 const { fetchVersionedUserConfigAction, patchVersionedUserConfigAction } =
   client.actions;
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 import { offlineRepository } from "@/client/data/repository";
 
 const USER_NAMESPACE = "user-config";
@@ -63,6 +63,20 @@ export async function writeUserSetting(key: string, value: string) {
     }
   }
   return local;
+}
+
+export async function reconcileUserSettingEvent(data: {
+  key: string;
+  value: string | null;
+  updatedAt?: number;
+}) {
+  if (data.updatedAt === undefined || data.value === null) return data;
+  const winner = await offlineRepository.reconcileVersionedValue(
+    USER_NAMESPACE,
+    data.key,
+    { value: data.value, updatedAt: data.updatedAt },
+  );
+  return { ...data, value: winner.value, updatedAt: winner.updatedAt };
 }
 
 export async function syncPendingUserSettings() {

@@ -16,20 +16,21 @@ import type {
 } from "@infini-scroll/core";
 import type { InfiniDomHost } from "@infini-scroll/dom-support";
 import { useInfini } from "@infini-scroll/react";
-import { markConversationRead } from "@/client/api/conversations";
+import { markConversationRead } from "@/client/interact/conversations";
 import {
   fetchCachedPosts,
-  fetchPost,
+  locatePost,
+  resolvePost,
   fetchPosts,
   fetchRemotePosts,
-} from "@/client/api/posts";
+  commitPostRevisionRange,
+} from "@/client/interact/posts";
 import {
   LOAD_LIMIT,
   conversationKey,
   postBelongsToConversation,
 } from "@/client/lib/chat/posts";
-import { offlineRepository } from "@/client/data/repository";
-import { collectRevisionRange } from "@/client/data/consistency";
+import { collectRevisionRange } from "@/client/interact/consistency";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export interface UseChatPostsParams {
@@ -190,6 +191,7 @@ export function useChatPosts({
         type: conversationType,
         id: conversationId,
         conv_id: conversationConvId,
+        revision: conversationRevision,
       } as const;
       const canWarmStart =
         onlineRef.current &&
@@ -230,26 +232,21 @@ export function useChatPosts({
           direction === "after" ? !hasMore : cursor.kind === "latest",
       };
     },
-    [conversationConvId, conversationId, conversationType],
+    [conversationConvId, conversationId, conversationRevision, conversationType],
   );
 
   // ---- resolveItem: fetch a single post by ID for re-bootstrap ----
   const resolveItem = useCallback(
     async (id: string, authoritative = false): Promise<Post | null> => {
-      const cached = (
-        await offlineRepository.getPosts({
+      return resolvePost(
+        {
           type: conversationType,
           id: conversationId,
           conv_id: conversationConvId,
-        })
-      ).find((post) => post.id === id);
-      if (!authoritative && cached) return cached;
-      if (!onlineRef.current) return cached ?? null;
-      const { data } = await fetchPost(id);
-      if ("post" in data && data.post) {
-        return data.post;
-      }
-      return null;
+        },
+        id,
+        authoritative,
+      );
     },
     [conversationConvId, conversationId, conversationType],
   );
@@ -316,25 +313,7 @@ export function useChatPosts({
         1,
         (anchor.sequence ?? 1) + signedItemOffset,
       );
-      let target: Post | undefined;
-      if (!onlineRef.current) {
-        const cached = await offlineRepository.getPosts(ref);
-        target = cached.reduce<Post | undefined>((nearest, post) => {
-          if (post.sequence == null) return nearest;
-          if (!nearest?.sequence) return post;
-          return Math.abs(post.sequence - targetSequence) <
-            Math.abs(nearest.sequence - targetSequence)
-            ? post
-            : nearest;
-        }, undefined);
-      } else {
-        const data = await fetchPosts(ref, {
-          limit: "1",
-          before_id: "__infini_sequence_cursor__",
-          before_sequence: String(targetSequence + 1),
-        });
-        target = data?.posts?.[0];
-      }
+      const target = await locatePost(ref, targetSequence);
       if (signal.aborted) throw new Error("post locate request superseded");
       if (!target) throw new Error("post locate request found no target");
       return {
@@ -486,6 +465,7 @@ export function useChatPosts({
           return data.posts;
         },
       );
+      await commitPostRevisionRange(ref, rows, conversationRevision);
       if (contentKeyRef.current !== runKey) return;
       const changed = new Map(rows.map((post) => [post.id, post]));
 
@@ -716,7 +696,6 @@ export function useChatPosts({
         if (!postBelongsToConversation(post, conversation)) return;
 
         lastPostIdRef.current = post.id;
-        void offlineRepository.savePosts(conversation, [post]);
         appliedRevisionRef.current = Math.max(
           appliedRevisionRef.current,
           post.revision,
@@ -737,7 +716,6 @@ export function useChatPosts({
       if (evt.kind === "post.updated" && evt.data?.post) {
         const post = evt.data.post;
         if (!postBelongsToConversation(post, conversation)) return;
-        void offlineRepository.savePosts(conversation, [post]);
         appliedRevisionRef.current = Math.max(
           appliedRevisionRef.current,
           post.revision,
@@ -749,7 +727,6 @@ export function useChatPosts({
       if (evt.kind === "post.deleted" && evt.data?.post) {
         const post = evt.data.post;
         if (!postBelongsToConversation(post, conversation)) return;
-        void offlineRepository.savePosts(conversation, [post]);
         appliedRevisionRef.current = Math.max(
           appliedRevisionRef.current,
           post.revision,
@@ -803,10 +780,9 @@ export function useChatPosts({
   /** Called by ChatPostCard when a post is deleted. */
   const handleDeleted = useCallback(
     (post: Post) => {
-      void offlineRepository.savePosts(conversation, [post]);
       mutateItems((item) => (item.id === post.id ? post : item));
     },
-    [conversation, mutateItems],
+    [mutateItems],
   );
 
   const clearReplyTo = useCallback(() => setReplyTo(null), []);

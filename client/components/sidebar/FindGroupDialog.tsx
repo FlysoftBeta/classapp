@@ -14,7 +14,7 @@ import {
   discoverGroups,
   joinGroup,
   type DiscoverySection,
-} from "@/client/api/groups";
+} from "@/client/interact/groups";
 
 export type { DiscoverySection };
 

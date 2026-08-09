@@ -17,7 +17,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { Post, TextPost, User } from "@/shared/types/api";
 import { isTextPost } from "@/shared/types/api";
 import { LONG_TEXT_THRESHOLD } from "@/shared/validation/posts";
-import { fetchPost, updatePost, deletePost } from "@/client/api/posts";
+import { fetchPost, updatePost, deletePost } from "@/client/interact/posts";
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
 import { flexGap } from "@/client/lib/css";
 

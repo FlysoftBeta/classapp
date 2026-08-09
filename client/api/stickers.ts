@@ -1,6 +1,6 @@
 import type { CreatePostPayload } from "@/shared/validation/posts";
 import { observeActionResult } from "./runtime";
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 
 const {
   fetchRecentStickersAction,

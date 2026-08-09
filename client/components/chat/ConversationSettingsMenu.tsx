@@ -20,12 +20,12 @@ import type { Conversation } from "@/shared/types/api";
 import {
   setConversationMuted,
   setConversationPinned,
-} from "@/client/api/conversations";
+} from "@/client/interact/conversations";
 import {
-  offlineRepository,
+  getConversationRetention,
+  saveConversationRetention,
   type ConversationDownloadPolicy,
-} from "@/client/data/repository";
-import { downloadConversationForOffline } from "@/client/data/sync";
+} from "@/client/interact/retention";
 import { flexGap } from "@/client/lib/css";
 import Tooltip from "@mui/material/Tooltip";
 
@@ -56,7 +56,7 @@ export function ConversationSettingsMenu({
   const [downloaded, setDownloaded] = useState<number | null>(null);
 
   useEffect(() => {
-    void offlineRepository.getConversationPolicy(conversation).then((value) => {
+    void getConversationRetention(conversation).then((value) => {
       setPolicy(value);
     });
   }, [conversation]);
@@ -64,13 +64,9 @@ export function ConversationSettingsMenu({
   const saveDownloadPolicy = async () => {
     setLoading(true);
     setDownloaded(0);
-    await offlineRepository.setConversationPolicy(conversation, policy);
-    if (online && policy !== "auto") {
-      await downloadConversationForOffline(conversation, policy, setDownloaded);
-    }
-    if (online)
-      await offlineRepository.markConversationPolicySynced(conversation);
-    setPolicy(await offlineRepository.getConversationPolicy(conversation));
+    setPolicy(
+      await saveConversationRetention(conversation, policy, setDownloaded),
+    );
     setLoading(false);
     setDownloadOpen(false);
   };

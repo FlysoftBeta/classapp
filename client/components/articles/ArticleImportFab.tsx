@@ -11,7 +11,7 @@ import AddIcon from "@mui/icons-material/Add";
 import AttachmentIcon from "@mui/icons-material/Attachment";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import type { Conversation } from "@/shared/types/api";
-import { createArticle, createBlobArticle } from "@/client/api/articles";
+import { createArticle, createBlobArticle } from "@/client/interact/articles";
 import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
 import { decodeUploadedText } from "@/client/lib/textEncoding";
 import { NetworkArticleDialog } from "./NetworkArticleDialog";

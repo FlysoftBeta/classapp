@@ -40,6 +40,7 @@ export async function markConversationReadAction(
       ...conversation,
       postId: expectString(input.post_id, "参数不完整"),
       updatedAt: expectTimestamp(input.updatedAt),
+      merge: input.merge,
     });
   });
 }

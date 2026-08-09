@@ -24,7 +24,7 @@ import { ArticleImportFab } from "./ArticleImportFab";
 import InfiniView from "@/client/components/shared/InfiniView";
 import type { Provider } from "@infini-scroll/core";
 import { useInfini } from "@infini-scroll/react";
-import { listArticles, type ArticleListCursor } from "@/client/api/articles";
+import { listArticles, type ArticleListCursor } from "@/client/interact/articles";
 import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
 import { InfiniId } from "@/client/components/debug/InfiniId";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
@@ -375,7 +375,7 @@ function ArticleListSession({
   );
 
   const provider: Provider<ArticleRow, ArticleCursor, string> = {
-    async bootstrap({ cursor, targetSize, signal }) {
+    async bootstrap({ targetSize, signal }) {
       const wanted = Math.max(
         ARTICLE_PAGE_SIZE,
         Math.ceil(targetSize / ARTICLE_ROW_HEIGHT) + 4,

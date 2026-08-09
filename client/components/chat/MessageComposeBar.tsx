@@ -19,12 +19,12 @@ import type {
   StickerRecentItem,
 } from "@/shared/types/api";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
-import { createPost, type CreatePostBody } from "@/client/api/posts";
+import { createPost, type CreatePostBody } from "@/client/interact/posts";
 import { sendStickerPost } from "@/client/api/stickers";
 import {
   fetchConversationDraft,
   saveConversationDraft,
-} from "@/client/api/conversations";
+} from "@/client/interact/conversations";
 import { StickerPicker } from "@/client/components/chat/StickerPicker";
 import { hasFeature } from "@/shared/features";
 import { parseDbTime } from "@/shared/time";

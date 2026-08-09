@@ -18,6 +18,9 @@ export const conversationSchema = z
     members_hidden: z.number().int(),
     admin_only: z.number().int(),
     no_leave: z.number().int(),
+    /** Server-evaluated actor capabilities. The client must not reimplement policy. */
+    can_post: z.boolean(),
+    can_leave: z.boolean(),
     last_message: z.string().nullable(),
     last_at: z.string().nullable(),
     last_read_post_id: z.string().nullable(),

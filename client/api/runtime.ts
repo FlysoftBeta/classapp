@@ -1,6 +1,6 @@
 import { lbFetchUrl } from "@/client/lib/loadBalancer";
-import { session } from "@/client/lib/remote/session";
-import { transport } from "@/client/lib/remote/transport";
+import { session } from "@/client/interact/remote/session";
+import { transport } from "@/client/interact/remote/transport";
 import type { ActionResult } from "@/shared/protocol/result";
 
 type RuntimeConfig = {

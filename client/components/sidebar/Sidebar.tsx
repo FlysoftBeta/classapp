@@ -8,7 +8,7 @@ import { ConversationSection } from "./ConversationSection";
 import { ArticleSection } from "./ArticleSection";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarSection } from "./SidebarSection";
-import type { ConvEntry } from "@/client/app/appReducer";
+import type { ConvEntry } from "@/client/interact/types";
 import { TaskManagerPopover } from "@/client/components/tasks/TaskManagerPopover";
 import { hasFeature } from "@/shared/features";
 import { groupConvId } from "@/shared/conversations/id";
@@ -25,6 +25,8 @@ function emptyGroupEntry(g: { id: string; name: string }): ConvEntry {
     members_hidden: 0,
     admin_only: 0,
     no_leave: 0,
+    can_post: true,
+    can_leave: true,
     last_message: null,
     last_at: null,
     last_read_post_id: null,

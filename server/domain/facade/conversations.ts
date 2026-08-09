@@ -22,7 +22,11 @@ export class ConversationActorFacade {
   }
 
   async markRead(
-    input: ConversationRefInput & { postId: string; updatedAt: number },
+    input: ConversationRefInput & {
+      postId: string;
+      updatedAt: number;
+      merge: "override" | "furthest";
+    },
   ): Promise<{ postId: string | null; sequence: number; updatedAt: number }> {
     const user = await this.actor.requireUser();
     return this.conversations.markRead(user.id, input);

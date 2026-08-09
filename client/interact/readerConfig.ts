@@ -5,7 +5,7 @@ import {
   parseBlobReaderZoom,
 } from "@/shared/userConfig/reader";
 import { ResultTools } from "@/shared/protocol/result";
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 
 export type ReaderConfig = {
   grayscale: boolean;

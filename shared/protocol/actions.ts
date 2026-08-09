@@ -546,6 +546,7 @@ export const actionContracts = {
         articleId: nonEmptyString,
         offset: z.number().int().nonnegative(),
         updatedAt: timestamp,
+        merge: z.enum(["override", "furthest"]),
       }),
     ),
     object({ offset: z.number().int().nonnegative(), updatedAt: timestamp }),
@@ -577,7 +578,11 @@ export const actionContracts = {
   markConversationReadAction: contract(
     one(
       conversationRefSchema
-        .extend({ post_id: nonEmptyString, updatedAt: timestamp })
+        .extend({
+          post_id: nonEmptyString,
+          updatedAt: timestamp,
+          merge: z.enum(["override", "furthest"]),
+        })
         .strict(),
     ),
     object({

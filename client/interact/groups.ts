@@ -1,6 +1,7 @@
-import { observeActionResult } from "./runtime";
+import { observeActionResult } from "@/client/api/runtime";
 import type { ActionArgs } from "@/shared/protocol/actions";
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
+import { offlineRepository } from "@/client/data/repository";
 
 const {
   createGroupAction,
@@ -102,9 +103,12 @@ export async function leaveGroup(groupId: string) {
 }
 
 export async function fetchGroupMembers(groupId: string) {
+  if (!client.isConnected()) return offlineRepository.getGroupMembers(groupId);
   const result = await fetchGroupMembersAction(groupId);
   observeActionResult(result);
-  return result.ok ? result.data : null;
+  if (!result.ok) return offlineRepository.getGroupMembers(groupId);
+  await offlineRepository.saveGroupMembers(groupId, result.data);
+  return result.data;
 }
 
 export async function patchMyGroupMembership(

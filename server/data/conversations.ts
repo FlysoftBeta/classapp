@@ -6,6 +6,7 @@ import {
   orderedDmPeers,
   parseConvId,
 } from "@/shared/conversations/id";
+import { featureBit } from "@/shared/features";
 
 function sortConvEntries(entries: Conversation[]): Conversation[] {
   return entries.sort((a, b) => {
@@ -31,6 +32,9 @@ export function listConversations(
       `SELECT g.id, g.conv_id, g.revision, g.handle, g.name,
          (g.password_hash IS NOT NULL) AS has_password,
          g.members_hidden, g.admin_only, g.no_leave,
+         (COALESCE(me.is_muted, 0) = 0 AND
+           (g.admin_only = 0 OR (COALESCE(me.feature_mask, 0) & :admin_bit) != 0)) AS can_post,
+         (g.no_leave = 0) AS can_leave,
          ${LAST_MESSAGE_SQL} AS last_message,
          lp.created_at AS last_at,
          state.last_read_post_id,
@@ -49,15 +53,18 @@ export function listConversations(
          COALESCE(state.muted_updated_at_ms, 0) AS muted_updated_at_ms
        FROM group_members member
        JOIN groups g ON g.id = member.group_id
+       JOIN users me ON me.id = member.user_id
        LEFT JOIN convs_user state
          ON state.user_id = member.user_id AND state.conv_id = g.conv_id
        LEFT JOIN posts rp ON rp.id = state.last_read_post_id
        LEFT JOIN posts lp ON lp.sequence = (
          SELECT p.sequence FROM posts p WHERE p.conv_id = g.conv_id
          ORDER BY p.sequence DESC LIMIT 1)
-       WHERE member.user_id = ?`,
+       WHERE member.user_id = :uid`,
     )
-    .all(userId) as Array<Record<string, unknown>>;
+    .all({ uid: userId, admin_bit: featureBit("admin") }) as Array<
+    Record<string, unknown>
+  >;
 
   const dms = db
     .prepare(
@@ -65,6 +72,8 @@ export function listConversations(
          CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END AS id,
          COALESCE(u.username, du.username, '已注销') AS name,
          u.handle,
+         (COALESCE(me.is_muted, 0) = 0) AS can_post,
+         0 AS can_leave,
          ${LAST_MESSAGE_SQL} AS last_message,
          lp.created_at AS last_at,
          state.last_read_post_id,
@@ -82,6 +91,7 @@ export function listConversations(
          COALESCE(state.muted, 0) AS muted,
          COALESCE(state.muted_updated_at_ms, 0) AS muted_updated_at_ms
        FROM dms d
+       JOIN users me ON me.id = :uid
        LEFT JOIN users u
          ON u.id = CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END
         AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
@@ -98,19 +108,29 @@ export function listConversations(
 
   return sortConvEntries([
     ...groups.map((row) => ({
-      ...(row as Omit<Conversation, "type">),
+      ...(row as Omit<Conversation, "type" | "can_post" | "can_leave">),
       type: "group" as const,
+      can_post: !!row.can_post,
+      can_leave: !!row.can_leave,
     })),
     ...dms.map((row) => ({
       ...(row as Omit<
         Conversation,
-        "type" | "has_password" | "members_hidden" | "admin_only" | "no_leave"
+        | "type"
+        | "has_password"
+        | "members_hidden"
+        | "admin_only"
+        | "no_leave"
+        | "can_post"
+        | "can_leave"
       >),
       type: "dm" as const,
       has_password: 0,
       members_hidden: 0,
       admin_only: 0,
       no_leave: 0,
+      can_post: !!row.can_post,
+      can_leave: !!row.can_leave,
     })),
   ]);
 }

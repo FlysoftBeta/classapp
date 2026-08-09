@@ -1,5 +1,5 @@
-import { observeActionResult } from "./runtime";
-import type { ConvEntry } from "@/client/app/appReducer";
+import { observeActionResult } from "@/client/api/runtime";
+import type { ConvEntry } from "@/client/interact/types";
 const {
   fetchConversationDraftAction,
   fetchConversationRevisionsAction,
@@ -9,29 +9,32 @@ const {
   setConversationMutedAction,
   setConversationPinnedAction,
 } = client.actions;
-import { client } from "@/client/lib/remote/client";
+import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { offlineRepository } from "@/client/data/repository";
+import { collectRevisionRange } from "@/client/interact/consistency";
 import {
-  changedConversationRevisions,
-  collectRevisionRange,
-} from "@/client/data/consistency";
-import { fetchRemotePosts } from "@/client/api/posts";
+  commitPostRevisionRange,
+  fetchRemotePosts,
+} from "@/client/interact/posts";
 
-async function syncConversationPostRevisions(): Promise<void> {
+export async function syncConversationPostRevisions(): Promise<void> {
   const cached = await offlineRepository.getConversations();
   if (!cached.length) return;
   const result = await fetchConversationRevisionsAction();
   observeActionResult(result);
   if (!result.ok) return;
-  const changed = changedConversationRevisions(cached, result.data.revisions);
-  for (const remote of changed) {
+  for (const remote of result.data.revisions) {
     const conversation = cached.find(
       (entry) => entry.conv_id === remote.conv_id,
     );
     if (!conversation) continue;
-    await collectRevisionRange(
-      conversation.revision,
+    const knownRevision = await offlineRepository.getKnownPostRevision(
+      remote.conv_id,
+    );
+    if (remote.revision <= knownRevision) continue;
+    const rows = await collectRevisionRange(
+      knownRevision,
       remote.revision,
       async (cursor, through, limit) => {
         const page = await fetchRemotePosts(conversation, {
@@ -43,11 +46,17 @@ async function syncConversationPostRevisions(): Promise<void> {
         return page.posts;
       },
     );
-    await offlineRepository.upsertConversation({
-      ...conversation,
-      revision: remote.revision,
-    });
+    await commitPostRevisionRange(conversation, rows, remote.revision);
   }
+}
+
+export async function fetchConversationAccess(): Promise<ConvEntry[]> {
+  if (!client.isConnected()) return offlineRepository.getConversations();
+  const result = await fetchConversationsAction();
+  observeActionResult(result);
+  if (!result.ok) return offlineRepository.getConversations();
+  await offlineRepository.saveConversations(result.data);
+  return sortConversations(await offlineRepository.getConversations());
 }
 
 function sortConversations(entries: ConvEntry[]): ConvEntry[] {
@@ -63,51 +72,9 @@ function sortConversations(entries: ConvEntry[]): ConvEntry[] {
 export async function fetchConversations(): Promise<ConvEntry[]> {
   if (!client.isConnected()) return offlineRepository.getConversations();
   try {
+    const entries = await fetchConversationAccess();
     await syncConversationPostRevisions();
-    const result = await fetchConversationsAction();
-    observeActionResult(result);
-    if (!result.ok) return offlineRepository.getConversations();
-    const entries = result.data;
-    for (const entry of entries) {
-      const ref = { type: entry.type, id: entry.id };
-      const muted = await offlineRepository.reconcileVersionedValue(
-        "conversation-config",
-        `${entry.type}:${entry.id}:muted`,
-        {
-          value: !!entry.muted,
-          updatedAt: entry.muted_updated_at_ms,
-        },
-      );
-      entry.muted = muted.value ? 1 : 0;
-      entry.muted_updated_at_ms = muted.updatedAt;
-
-      const pinned = await offlineRepository.reconcileVersionedValue(
-        "conversation-config",
-        `${entry.type}:${entry.id}:pinned`,
-        {
-          value: !!entry.pinned,
-          updatedAt: entry.pinned_updated_at_ms,
-        },
-      );
-      entry.pinned = pinned.value ? 1 : 0;
-      entry.pinned_updated_at_ms = pinned.updatedAt;
-
-      const read = await offlineRepository.reconcileConversationRead(ref, {
-        postId: entry.last_read_post_id,
-        sequence: entry.last_read_post_sequence,
-        updatedAt: entry.read_updated_at_ms,
-      });
-      if (read.value.sequence > entry.last_read_post_sequence) {
-        entry.last_read_post_id = read.value.postId;
-        entry.last_read_post_sequence = read.value.sequence;
-        entry.read_updated_at_ms = read.updatedAt;
-        entry.first_unread_post_id = null;
-        entry.unread_count = 0;
-      }
-    }
-    const sorted = sortConversations(entries);
-    await offlineRepository.saveConversations(sorted);
-    return sorted;
+    return entries;
   } catch {
     return offlineRepository.getConversations();
   }
@@ -126,6 +93,7 @@ export async function markConversationRead(body: {
     ref,
     body.post_id,
     cachedPost?.sequence,
+    !client.isConnected(),
   );
   const localResult = () =>
     ResultTools.ok(
@@ -141,6 +109,7 @@ export async function markConversationRead(body: {
     const result = await markConversationReadAction({
       ...body,
       updatedAt: local.version.updatedAt,
+      merge: "override",
     });
     const response = observeActionResult(result);
     if (result.ok) {
@@ -157,23 +126,11 @@ export async function setConversationPinned(body: {
   id: string;
   pinned: boolean;
 }) {
-  const id = `${body.type}:${body.id}:pinned`;
-  const local = await offlineRepository.setVersionedValue(
-    "conversation-config",
-    id,
+  const local = await offlineRepository.setConversationFlag(
+    body,
+    "pinned",
     body.pinned,
   );
-  const entries = await offlineRepository.getConversations();
-  const entry = entries.find(
-    (item) => item.type === body.type && item.id === body.id,
-  );
-  if (entry) {
-    await offlineRepository.upsertConversation({
-      ...entry,
-      pinned: body.pinned ? 1 : 0,
-      pinned_updated_at_ms: local.updatedAt,
-    });
-  }
   const localResult = () =>
     ResultTools.ok(
       { value: local.value, updatedAt: local.updatedAt },
@@ -187,9 +144,9 @@ export async function setConversationPinned(body: {
     });
     const response = observeActionResult(result);
     if (result.ok) {
-      await offlineRepository.reconcileVersionedValue(
-        "conversation-config",
-        id,
+      await offlineRepository.reconcileConversationFlag(
+        body,
+        "pinned",
         result.data,
       );
     }
@@ -204,22 +161,11 @@ export async function setConversationMuted(body: {
   id: string;
   muted: boolean;
 }) {
-  const id = `${body.type}:${body.id}:muted`;
-  const local = await offlineRepository.setVersionedValue(
-    "conversation-config",
-    id,
+  const local = await offlineRepository.setConversationFlag(
+    body,
+    "muted",
     body.muted,
   );
-  const entries = await offlineRepository.getConversations();
-  const entry = entries.find(
-    (item) => item.type === body.type && item.id === body.id,
-  );
-  if (entry)
-    await offlineRepository.upsertConversation({
-      ...entry,
-      muted: body.muted ? 1 : 0,
-      muted_updated_at_ms: local.updatedAt,
-    });
   const localResult = () =>
     ResultTools.ok(
       { value: local.value, updatedAt: local.updatedAt },
@@ -233,9 +179,9 @@ export async function setConversationMuted(body: {
     });
     const response = observeActionResult(result);
     if (result.ok) {
-      await offlineRepository.reconcileVersionedValue(
-        "conversation-config",
-        id,
+      await offlineRepository.reconcileConversationFlag(
+        body,
+        "muted",
         result.data,
       );
     }
@@ -247,57 +193,53 @@ export async function setConversationMuted(body: {
 
 export async function syncPendingConversationConfig() {
   if (!client.isConnected()) return;
-  for (const {
-    id,
-    version,
-  } of await offlineRepository.getPendingVersionedValues<unknown>(
-    "conversation-config",
-  )) {
-    const [type, conversationId, field] = id.split(":");
-    if ((type !== "group" && type !== "dm") || !conversationId) continue;
+  for (const mutation of await offlineRepository.getPendingConversationMutations()) {
+    const { ref, field, updatedAt } = mutation;
     try {
       if (field === "muted" || field === "pinned") {
-        const desired = !!version.value;
+        const desired = mutation.value as boolean;
         const result =
           field === "muted"
             ? await setConversationMutedAction({
-                type,
-                id: conversationId,
+                type: ref.type,
+                id: ref.id,
                 muted: desired,
-                updatedAt: version.updatedAt,
+                updatedAt,
               })
             : await setConversationPinnedAction({
-                type,
-                id: conversationId,
+                type: ref.type,
+                id: ref.id,
                 pinned: desired,
-                updatedAt: version.updatedAt,
+                updatedAt,
               });
         observeActionResult(result);
         if (result.ok) {
-          await offlineRepository.reconcileVersionedValue(
-            "conversation-config",
-            id,
+          await offlineRepository.reconcileConversationFlag(
+            ref,
+            field,
             result.data,
           );
         }
       } else if (field === "read") {
-        const read = await offlineRepository.getConversationReadVersion({
-          type,
-          id: conversationId,
-        });
-        const postId = read?.value.postId;
+        const read = mutation.value as {
+          postId: string | null;
+          sequence: number;
+        };
+        const postId = read.postId;
         if (!postId) continue;
         const result = await markConversationReadAction({
-          type,
-          id: conversationId,
+          type: ref.type,
+          id: ref.id,
           post_id: postId,
-          updatedAt: read.updatedAt,
+          updatedAt,
+          merge: "furthest",
         });
         observeActionResult(result);
         if (result.ok) {
           await offlineRepository.reconcileConversationRead(
-            { type, id: conversationId },
+            ref,
             result.data,
+            "furthest",
           );
         }
       } else continue;

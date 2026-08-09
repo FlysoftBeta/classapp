@@ -7,7 +7,7 @@ import ListItemText from "@mui/material/ListItemText";
 import LinearProgress from "@mui/material/LinearProgress";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
-import { listNetworkArticleDownloads } from "@/client/api/articles";
+import { listNetworkArticleDownloads } from "@/client/interact/articles";
 import { taskStore, useTaskStore } from "@/client/hooks/useTaskStore";
 import { cssMin, flexGap } from "@/client/lib/css";
 

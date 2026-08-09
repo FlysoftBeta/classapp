@@ -15,7 +15,7 @@ import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
 import TextField from "@mui/material/TextField";
 import ExploreIcon from "@mui/icons-material/Explore";
-import { discoverSubgroups, joinGroup } from "@/client/api/groups";
+import { discoverSubgroups, joinGroup } from "@/client/interact/groups";
 import { flexGap } from "@/client/lib/css";
 
 export interface DiscoverGroup {

@@ -15,7 +15,7 @@ import Select from "@mui/material/Select";
 import InputLabel from "@mui/material/InputLabel";
 import FormControl from "@mui/material/FormControl";
 import type { ConvEntry } from "@/client/hooks/useAppLogic";
-import { createGroup } from "@/client/api/groups";
+import { createGroup } from "@/client/interact/groups";
 import {
   DialogTitleWithHelp,
   LabelWithHelp,

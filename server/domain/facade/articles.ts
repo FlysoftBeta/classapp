@@ -88,9 +88,10 @@ export class ArticleActorFacade {
     articleId: string,
     offset: number,
     updatedAt: number,
+    merge: "override" | "furthest",
   ): Promise<{ offset: number; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
-    return this.articles.saveProgress(user, articleId, offset, updatedAt);
+    return this.articles.saveProgress(user, articleId, offset, updatedAt, merge);
   }
 
   async recordReading(

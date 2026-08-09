@@ -11,7 +11,7 @@ import InfiniView from "@/client/components/shared/InfiniView";
 import {
   fetchArticleSegment,
   saveArticleProgress,
-} from "@/client/api/articles";
+} from "@/client/interact/articles";
 import {
   type ClientTextChunk,
   chunkEnd,

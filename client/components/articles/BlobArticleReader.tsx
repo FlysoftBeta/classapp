@@ -23,11 +23,11 @@ import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import ZoomInIcon from "@mui/icons-material/ZoomIn";
 import ZoomOutIcon from "@mui/icons-material/ZoomOut";
 import { flexGap } from "@/client/lib/css";
-import { fetchArticleRender, saveArticleProgress } from "@/client/api/articles";
+import { fetchArticleRender, saveArticleProgress } from "@/client/interact/articles";
 import {
   fetchReaderConfig,
   updateReaderConfig,
-} from "@/client/api/readerConfig";
+} from "@/client/interact/readerConfig";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
 import {
   BLOB_READER_ZOOM_MAX,
