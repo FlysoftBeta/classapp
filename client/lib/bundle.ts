@@ -5,6 +5,7 @@ import {
   type RuntimeAsset,
   type RuntimeManifest,
 } from "@/shared/runtimeManifest";
+import { ensureEndpointsReady, lbAssetUrl } from "./loadBalancer";
 
 type WorkerReply = {
   ok: boolean;
@@ -13,7 +14,11 @@ type WorkerReply = {
 };
 
 async function fetchManifest(): Promise<RuntimeManifest> {
-  const response = await fetch("/app/manifest.json", { cache: "no-store" });
+  await ensureEndpointsReady();
+  console.log(lbAssetUrl("/app/manifest.json"));
+  const response = await fetch(lbAssetUrl("/app/manifest.json"), {
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error(`manifest ${response.status}`);
   return (await response.json()) as RuntimeManifest;
 }
@@ -157,18 +162,15 @@ export class BundleManager {
   ) {}
 
   async start(): Promise<() => void> {
-    if (!import.meta.env.DEV) {
-      try {
-        await this.check();
-      } catch (error) {
-        console.warn("[BundleManager] 启动更新检查失败，使用已安装构建", error);
-      }
-      this.offHello = client.subscribe("remote.hello", () =>
-        this.requestCheck(),
-      );
-      window.addEventListener("classapp:update-check", this.onRequested);
-      this.timer = setInterval(() => this.requestCheck(), 5 * 60_000);
+    try {
+      await this.check();
+    } catch (error) {
+      console.warn("[BundleManager] 启动更新检查失败，使用已安装构建", error);
     }
+    this.offHello = client.subscribe("remote.hello", () => this.requestCheck());
+    window.addEventListener("classapp:update-check", this.onRequested);
+    this.timer = setInterval(() => this.requestCheck(), 5 * 60_000);
+
     return () => this.stop();
   }
 
@@ -179,51 +181,54 @@ export class BundleManager {
   }
 
   private async check(): Promise<void> {
-    if (this.checking || this.stopped || import.meta.env.DEV) return;
+    if (this.checking || this.stopped) return;
     this.checking = true;
     try {
       const manifest = await fetchManifest();
       this.onManifest(manifest);
-      const worker = await serviceWorker();
-      if (manifest.buildId === this.currentBuildId) {
-        await this.reconcileShell(worker, manifest);
-        return;
-      }
 
-      const previousBundleBuildId = await activeBundleBuildId();
-      const previousShellBuildId = await shellBuildId(worker);
-      const [bundleBody, shellBlob] = await Promise.all([
-        fetchAsset(manifest.bundle, "bundle"),
-        fetchAsset(manifest.shell, "shell"),
-      ]);
-      const shellBody = new TextDecoder().decode(shellBlob);
+      if (!import.meta.env.DEV) {
+        const worker = await serviceWorker();
+        if (manifest.buildId === this.currentBuildId) {
+          await this.reconcileShell(worker, manifest);
+          return;
+        }
 
-      await stageBundle(manifest.buildId, bundleBody);
-      await stageShell(worker, manifest.buildId, shellBody);
-      try {
-        await activateBundle(manifest.buildId);
-        await activateShell(worker, manifest.buildId);
-      } catch (error) {
-        await Promise.allSettled([
-          previousBundleBuildId
-            ? activateBundle(previousBundleBuildId)
-            : Promise.resolve(),
-          previousShellBuildId
-            ? activateShell(worker, previousShellBuildId)
-            : Promise.resolve(),
+        const previousBundleBuildId = await activeBundleBuildId();
+        const previousShellBuildId = await shellBuildId(worker);
+        const [bundleBody, shellBlob] = await Promise.all([
+          fetchAsset(manifest.bundle, "bundle"),
+          fetchAsset(manifest.shell, "shell"),
         ]);
-        throw error;
-      }
+        const shellBody = new TextDecoder().decode(shellBlob);
 
-      window.dispatchEvent(
-        new CustomEvent("classapp:update-ready", {
-          detail: { buildId: manifest.buildId },
-        }),
-      );
-      window.location.reload();
-      await new Promise<never>(() => {
-        // Navigation owns completion once the unified build is activated.
-      });
+        await stageBundle(manifest.buildId, bundleBody);
+        await stageShell(worker, manifest.buildId, shellBody);
+        try {
+          await activateBundle(manifest.buildId);
+          await activateShell(worker, manifest.buildId);
+        } catch (error) {
+          await Promise.allSettled([
+            previousBundleBuildId
+              ? activateBundle(previousBundleBuildId)
+              : Promise.resolve(),
+            previousShellBuildId
+              ? activateShell(worker, previousShellBuildId)
+              : Promise.resolve(),
+          ]);
+          throw error;
+        }
+
+        window.dispatchEvent(
+          new CustomEvent("classapp:update-ready", {
+            detail: { buildId: manifest.buildId },
+          }),
+        );
+        window.location.reload();
+        await new Promise<never>(() => {
+          // Navigation owns completion once the unified build is activated.
+        });
+      }
     } finally {
       this.checking = false;
     }
