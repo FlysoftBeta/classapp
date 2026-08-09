@@ -17,11 +17,8 @@ export {
 } from "./post";
 export { isTextPost, isStickerPost, postPreview } from "./post";
 export {
-  articleSchema,
   articleWithMetaSchema,
-  articleWithContentAndMetaSchema,
   articleSidebarPayloadSchema,
-  type Article,
   type ArticleWithMeta,
   type ArticleSidebarPayload,
 } from "./article";

@@ -364,12 +364,10 @@ function splitArticle(entry: ArticleWithMeta): {
     total_read_seconds,
     last_read_at,
     list_sort_at: _sort,
-    content: _content,
     ...core
   } = entry;
   void _locator;
   void _sort;
-  void _content;
   return {
     entity: {
       id: entry.id,

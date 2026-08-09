@@ -38,7 +38,6 @@ const articleBaseShape = {
 export const articleWithMetaSchema = z
   .object({
     ...articleBaseShape,
-    content: z.string().optional(),
     is_bookmarked: z.boolean(),
     bookmark_updated_at_ms: z.number(),
     current_offset: z.number().int().nonnegative(),
@@ -61,21 +60,6 @@ export const articleSidebarPayloadSchema = z
   })
   .strict();
 export type ArticleSidebarPayload = z.infer<typeof articleSidebarPayloadSchema>;
-
-export const articleSchema = z
-  .object({
-    ...articleBaseShape,
-    content: z.string(),
-    is_bookmarked: z.boolean().optional(),
-  })
-  .strict();
-export type Article = z.infer<typeof articleSchema>;
-
-export const articleWithContentAndMetaSchema = articleWithMetaSchema
-  .extend({
-    content: z.string(),
-  })
-  .strict();
 
 /** Max characters returned per text segment API response. */
 export const SEGMENT_SIZE = TEXT_ARTICLE_SEGMENT_SIZE;

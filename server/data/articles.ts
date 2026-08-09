@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import type { Article, ArticleWithMeta } from "@/shared/types/api";
+import type { ArticleWithMeta } from "@/shared/types/api";
 import {
   READING_HISTORY_LIMIT,
   READING_HISTORY_MIN_SECONDS,
@@ -125,9 +125,7 @@ function providerReadModel(provider: ArticleProvider) {
       };
 }
 
-export function rowToArticle(
-  row: Record<string, unknown>,
-): Article & ArticleWithMeta {
+export function rowToArticle(row: Record<string, unknown>): ArticleWithMeta {
   const provider = parseProvider(row.provider_json ?? row.provider);
   return {
     id: String(row.id),
@@ -139,7 +137,6 @@ export function rowToArticle(
     created_at: String(row.created_at),
     username: typeof row.username === "string" ? row.username : null,
     handle: typeof row.handle === "string" ? row.handle : null,
-    ...(typeof row.content === "string" ? { content: row.content } : {}),
     is_bookmarked: !!row.is_bookmarked,
     bookmark_updated_at_ms: (row.bookmark_updated_at_ms as number | null) ?? 0,
     current_offset: (row.current_offset as number | null) ?? 0,
@@ -152,7 +149,7 @@ export function rowToArticle(
     ...(typeof row.list_sort_at === "string"
       ? { list_sort_at: row.list_sort_at }
       : {}),
-  } as Article & ArticleWithMeta;
+  };
 }
 
 export function purgeArticlesForUser(
@@ -324,7 +321,7 @@ export function listArticlesForUser(
     direction?: "before" | "after";
     groupId?: string;
   },
-): { articles: (Article & ArticleWithMeta)[]; hasMore: boolean } {
+): { articles: ArticleWithMeta[]; hasMore: boolean } {
   const view = options.view ?? "all";
   const direction = options.direction ?? "after";
   const from = view === "bookmarked" ? FROM_BOOKMARKED_ARTICLES : FROM_ARTICLES;

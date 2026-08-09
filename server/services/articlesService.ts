@@ -1,7 +1,6 @@
 import crypto from "crypto";
 import type { Database } from "better-sqlite3";
 import type {
-  Article,
   ArticleSidebarPayload,
   ArticleWithMeta,
   User,
@@ -94,7 +93,7 @@ export class ArticleService {
       user.id,
       USER_CONFIG.ACTIVE_ARTICLE_ID,
     );
-    const byId = new Map<string, Article & ArticleWithMeta>();
+    const byId = new Map<string, ArticleWithMeta>();
     for (const row of listBookmarkedArticleRows(this.db, user.id))
       byId.set(row.id as string, rowToArticle(row));
     for (const row of listArticleHistoryRows(this.db, user.id))
@@ -114,7 +113,7 @@ export class ArticleService {
   createText(
     user: User,
     input: CreateArticleInput,
-  ): { article: Article & ArticleWithMeta } {
+  ): { article: ArticleWithMeta } {
     assertCanCreateArticle(this.db, user, input.group_id);
     const article = this.insertText(
       user.id,
@@ -129,7 +128,7 @@ export class ArticleService {
   createBundle(
     user: User,
     input: CreateBundleArticleInput,
-  ): { article: Article & ArticleWithMeta } {
+  ): { article: ArticleWithMeta } {
     assertCanCreateArticle(this.db, user, input.group_id);
     if (!input.source_path || !input.archive_path)
       throw new MalformedRequestError("文件保存失败");
@@ -154,16 +153,11 @@ export class ArticleService {
     return { article };
   }
 
-  getMeta(
-    user: User,
-    articleId: string,
-  ): { article: Omit<ArticleWithMeta, "content"> } {
+  getMeta(user: User, articleId: string): { article: ArticleWithMeta } {
     assertCanAccessArticle(this.db, user, articleId);
     const article = findArticleForUser(this.db, articleId, user.id);
     if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
-    const { content: _content, ...meta } = article;
-    void _content;
-    return { article: meta };
+    return { article };
   }
 
   segment(user: User, input: { articleId: string; offset: number }) {

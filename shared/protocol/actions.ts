@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   articleSidebarPayloadSchema,
-  articleWithContentAndMetaSchema,
   articleWithMetaSchema,
   adminGroupSchema,
   conversationSchema,
@@ -485,7 +484,7 @@ export const actionContracts = {
       }),
     ),
     object({
-      article: articleWithContentAndMetaSchema,
+      article: articleWithMetaSchema,
     }),
   ),
   searchNetworkArticlesAction: contract(

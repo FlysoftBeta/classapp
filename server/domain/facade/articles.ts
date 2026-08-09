@@ -1,6 +1,5 @@
 import type { Actor } from "@/server/session/session";
 import type {
-  Article,
   ArticleSidebarPayload,
   ArticleWithMeta,
 } from "@/shared/types/api";
@@ -25,7 +24,7 @@ export class ArticleActorFacade {
     cursor?: { sortAt: string; id: string };
     direction?: "before" | "after";
     groupId?: string;
-  }): Promise<{ articles: (Article & ArticleWithMeta)[]; hasMore: boolean }> {
+  }): Promise<{ articles: ArticleWithMeta[]; hasMore: boolean }> {
     const user = await this.actor.requireFeature("articles");
     return this.articles.list(user, input);
   }
@@ -37,7 +36,7 @@ export class ArticleActorFacade {
 
   async createText(
     input: CreateArticleInput,
-  ): Promise<{ article: Article & ArticleWithMeta }> {
+  ): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
     return this.articles.createText(user, input);
@@ -45,15 +44,13 @@ export class ArticleActorFacade {
 
   async createBundle(
     input: CreateBundleArticleInput,
-  ): Promise<{ article: Article & ArticleWithMeta }> {
+  ): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
     return this.articles.createBundle(user, input);
   }
 
-  async getMeta(
-    articleId: string,
-  ): Promise<{ article: Omit<ArticleWithMeta, "content"> }> {
+  async getMeta(articleId: string): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     const result = this.articles.getMeta(user, articleId);
     await this.actor.requireFeature(
