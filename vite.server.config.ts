@@ -32,6 +32,10 @@ export default defineConfig({
     outDir: "dist/server",
     emptyOutDir: true,
     target: "node22",
-    rolldownOptions: { output: { entryFileNames: "main.mjs" } },
+    assetsInlineLimit: Infinity,
+    chunkSizeWarningLimit: Infinity,
+    rolldownOptions: {
+      output: { entryFileNames: "main.mjs", codeSplitting: false },
+    },
   },
 });

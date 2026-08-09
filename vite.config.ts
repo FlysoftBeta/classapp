@@ -46,6 +46,7 @@ export default defineConfig(({ command }) => ({
     target: "chrome70",
     cssCodeSplit: false,
     assetsInlineLimit: Infinity,
+    chunkSizeWarningLimit: Infinity,
     rolldownOptions: {
       input: path.resolve(__dirname, "client/main.tsx"),
       output: {

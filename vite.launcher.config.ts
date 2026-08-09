@@ -9,8 +9,14 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: false,
     target: "node22",
+    assetsInlineLimit: Infinity,
+    chunkSizeWarningLimit: Infinity,
     rolldownOptions: {
-      output: { format: "cjs", entryFileNames: "launcher.js" },
+      output: {
+        format: "cjs",
+        entryFileNames: "launcher.js",
+        codeSplitting: false,
+      },
     },
   },
 });
