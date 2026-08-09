@@ -8,9 +8,9 @@ import {
   parseRecentStickerRefs,
   type RecentStickerRef,
 } from "@/shared/stickers/recent";
-import { getRuntimeConfig } from "./runtimeConfig";
+import { runtimeConfig } from "./runtimeConfig";
 
-const STICKERS_ROOT = path.join(getRuntimeConfig().appDir, "public/stickers");
+const STICKERS_ROOT = path.join(runtimeConfig().appDir, "public/stickers");
 
 export interface StickerEntry {
   name: string;

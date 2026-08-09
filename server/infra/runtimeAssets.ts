@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ClassAppRuntimeConfig } from "./runtimeConfig";
+import type { RuntimeConfig } from "./runtimeConfig";
 import type { RuntimeManifest } from "@/shared/runtimeManifest";
 
 export interface RuntimeAssets {
@@ -15,13 +15,12 @@ export function runtimeAssets(appDir: string): RuntimeAssets {
   };
 }
 
-export function createRuntimeManifest(
-  config: ClassAppRuntimeConfig,
-): RuntimeManifest {
+export function createRuntimeManifest(config: RuntimeConfig): RuntimeManifest {
   const assets = runtimeAssets(config.appDir);
   const version = encodeURIComponent(config.buildId);
   return {
     buildId: config.buildId,
+    debugMenu: config.debugOverride ?? config.nodeEnv === "development",
     bundle: {
       url: `/app/app.js?v=${version}`,
       size: fs.existsSync(assets.bundleFile)

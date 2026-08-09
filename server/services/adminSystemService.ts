@@ -5,12 +5,7 @@ import {
   deleteBackup,
   listBackupFiles,
 } from "@/server/infra/dbBackup";
-import {
-  confirmUpdate,
-  deployUpdate,
-  getUpdateStatus,
-  requestRollback,
-} from "@/server/infra/updateManager";
+import { updateManager } from "@/server/infra/updateManager";
 import { ServiceError } from "@/server/services/errors";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 
@@ -44,7 +39,16 @@ export class AdminSystemService {
   }
 
   getUpdateStatus() {
-    return getUpdateStatus();
+    const status = updateManager()?.getStatus();
+    return status
+      ? { ...status, disabled: false }
+      : {
+          pending: false,
+          applied_at: null,
+          seconds_remaining: 0,
+          timeout_seconds: 0,
+          disabled: true,
+        };
   }
 
   getHttpsStatus() {
@@ -52,18 +56,18 @@ export class AdminSystemService {
   }
 
   confirmUpdate(): void {
-    confirmUpdate();
+    updateManager()?.confirmUpdate();
   }
 
   rollback(): { ok: true; message: string } {
-    requestRollback(this.db);
+    updateManager()?.requestRollback();
     return { ok: true, message: "服务器即将回滚并重启" };
   }
 
   async deployPackage(
     zipBytes: Uint8Array,
   ): Promise<{ ok: true; message: string }> {
-    await deployUpdate(this.db, zipBytes);
+    await updateManager()?.deployUpdate(zipBytes);
     return { ok: true, message: "服务器即将重启以应用更新" };
   }
 

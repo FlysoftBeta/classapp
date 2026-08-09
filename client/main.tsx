@@ -15,11 +15,16 @@ declare const __BUILD_ID__: string;
 
 async function bootstrap(): Promise<void> {
   const buildId = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
-  configureClientRuntime({ buildId });
+  configureClientRuntime({ buildId, debugMenu: false });
 
   // Do not connect or render the stale application until its production
   // bundle has either been confirmed current or replaced and activated.
-  await startBundleManager(buildId);
+  await startBundleManager(buildId, (manifest) => {
+    configureClientRuntime({
+      buildId,
+      debugMenu: manifest.debugMenu,
+    });
+  });
   await initializeInfini();
 
   const style = document.createElement("style");

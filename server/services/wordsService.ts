@@ -28,7 +28,7 @@ import type {
   WordWithLearnedCount,
   WordWithWrongCount,
 } from "@/shared/types/api/words";
-import { getRuntimeConfig } from "../infra/runtimeConfig";
+import { runtimeConfig } from "../infra/runtimeConfig";
 
 function pickDistractors(all: Word[], wordId: string, count = 3): Word[] {
   return all
@@ -92,7 +92,7 @@ export class WordsService {
     if (countWords(this.db) > 0) return;
 
     const possiblePaths = [
-      path.join(path.join(getRuntimeConfig().appDir, "public/words.txt")),
+      path.join(path.join(runtimeConfig().appDir, "public/words.txt")),
     ];
 
     for (const wordsFilePath of possiblePaths) {

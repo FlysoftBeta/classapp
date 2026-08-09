@@ -18,7 +18,12 @@ export interface HTTPSRuntimeConfig {
   redirectOverride: boolean | null;
 }
 
-export interface ClassAppRuntimeConfig {
+export interface UpdateRuntimeConfig {
+  stagingDir: string;
+  backupDir: string;
+}
+
+export interface RuntimeConfig {
   appDir: string;
   dataRoot: string;
   buildId: string;
@@ -28,14 +33,11 @@ export interface ClassAppRuntimeConfig {
   /** Peer addresses allowed to supply forwarding headers. */
   trustedProxyIps: string[];
   nodeEnv: string;
+  debugOverride?: boolean;
   initialAdminPin?: string;
   platform: PlatformRuntimeConfig;
-  https: HTTPSRuntimeConfig | null;
-  update: {
-    enabled: boolean;
-    stagingDir: string;
-    backupDir: string;
-  };
+  https?: HTTPSRuntimeConfig;
+  update?: UpdateRuntimeConfig;
 }
 
 function linuxDevelopmentRendererDirectory(appDir: string): string {
@@ -93,7 +95,7 @@ export function createPlatformRuntimeConfig(
   };
 }
 
-export interface ClassAppRuntimeController {
+export interface RuntimeController {
   requestUpdate(dbBackup: string): void;
   requestRollback(dbBackup?: string): void;
   confirmUpdate(): void;
@@ -101,72 +103,27 @@ export interface ClassAppRuntimeController {
 }
 
 declare global {
-  var __classappRuntimeConfig: ClassAppRuntimeConfig | undefined;
-  var __classappRuntimeController: ClassAppRuntimeController | undefined;
+  var __classappRuntimeConfig: RuntimeConfig | undefined;
+  var __classappRuntimeController: RuntimeController | undefined;
 }
 
-function fallbackRuntimeConfig(): ClassAppRuntimeConfig {
-  const dataRoot = path.resolve(process.cwd());
-  const appDir = dataRoot;
-  const nodeEnv = process.env.NODE_ENV ?? "development";
-  const buildId = nodeEnv === "production" ? readBuildId(appDir) : "dev";
-
-  return {
-    appDir,
-    dataRoot,
-    buildId,
-    ports:
-      nodeEnv === "production"
-        ? [80, 81, 82, 83, 84, 85, 86, 88]
-        : [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007],
-    securePorts: [],
-    bindHost: "0.0.0.0",
-    trustedProxyIps: [],
-    nodeEnv,
-    initialAdminPin: nodeEnv === "production" ? undefined : "123456",
-    platform: createPlatformRuntimeConfig(appDir, nodeEnv),
-    https: null,
-    update: {
-      enabled: false,
-      stagingDir: path.join(dataRoot, "staging"),
-      backupDir: path.join(dataRoot, "backup"),
-    },
-  };
-}
-
-export function getRuntimeConfig(): ClassAppRuntimeConfig {
-  if (!globalThis.__classappRuntimeConfig) {
-    globalThis.__classappRuntimeConfig = fallbackRuntimeConfig();
-  }
+export function runtimeConfig(): RuntimeConfig {
+  if (!globalThis.__classappRuntimeConfig) throw new Error("应用未初始化");
   return globalThis.__classappRuntimeConfig;
 }
 
-export function setRuntimeConfig(
-  config: ClassAppRuntimeConfig,
-): ClassAppRuntimeConfig {
+export function setRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
   globalThis.__classappRuntimeConfig = config;
   return config;
 }
 
-export function getRuntimeController(): ClassAppRuntimeController | null {
+export function runtimeController(): RuntimeController | null {
   return globalThis.__classappRuntimeController ?? null;
 }
 
 export function setRuntimeController(
-  controller: ClassAppRuntimeController,
-): ClassAppRuntimeController {
+  controller: RuntimeController,
+): RuntimeController {
   globalThis.__classappRuntimeController = controller;
   return controller;
-}
-
-export function getPublicRuntimeConfig(): Pick<
-  ClassAppRuntimeConfig,
-  "buildId" | "ports" | "securePorts"
-> {
-  const runtime = getRuntimeConfig();
-  return {
-    buildId: runtime.buildId,
-    ports: runtime.ports,
-    securePorts: runtime.securePorts,
-  };
 }

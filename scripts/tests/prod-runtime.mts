@@ -27,6 +27,7 @@ type StartProductionLauncherOptions = {
   httpPort: number;
   securePort?: number;
   httpsRedirectOverride?: boolean;
+  debugOverride?: boolean;
   stdio?: StdioOptions;
 };
 
@@ -111,6 +112,10 @@ export function startProductionLauncher(
         options.httpsRedirectOverride === undefined
           ? ""
           : String(options.httpsRedirectOverride),
+      CLASSAPP_DEBUG_OVERRIDE:
+        options.debugOverride === undefined
+          ? ""
+          : String(options.debugOverride),
     },
   });
 }

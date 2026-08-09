@@ -6,7 +6,7 @@ import {
   getHttpsRedirectEnabled,
   setHttpsRedirectEnabled,
 } from "@/server/data/appState";
-import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 
 export interface HttpsCertificateStatus {
   present: boolean;
@@ -62,7 +62,7 @@ function chainMatchesRoot(
 }
 
 function certificateStatus(): HttpsCertificateStatus {
-  const { https } = getRuntimeConfig();
+  const { https } = runtimeConfig();
   if (!https || !fs.existsSync(https.certificatePath)) {
     return emptyCertificate("未找到网站证书");
   }
@@ -155,7 +155,7 @@ export class HttpsUpgradeService {
 
   isRedirectEnabled(): boolean {
     return (
-      getRuntimeConfig().https?.redirectOverride ??
+      runtimeConfig().https?.redirectOverride ??
       getHttpsRedirectEnabled(this.db)
     );
   }
@@ -165,7 +165,7 @@ export class HttpsUpgradeService {
   }
 
   getStatus(): HttpsUpgradeStatus {
-    const runtime = getRuntimeConfig();
+    const runtime = runtimeConfig();
     return {
       configured: runtime.https !== null && runtime.securePorts.length > 0,
       domain: runtime.https?.domain ?? null,

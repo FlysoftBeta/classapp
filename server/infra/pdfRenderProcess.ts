@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { availableParallelism } from "node:os";
 import path from "node:path";
-import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { ServiceError } from "@/server/services/errors";
 
 const MAX_RENDER_PROCESSES = 2;
@@ -39,7 +39,7 @@ export async function renderPdfArchive(
 ): Promise<void> {
   const release = await acquireRenderSlot();
   try {
-    const pdfRender = getRuntimeConfig().platform.pdfRender;
+    const pdfRender = runtimeConfig().platform.pdfRender;
     const jobs = Math.max(
       1,
       Math.min(4, Math.ceil(availableParallelism() / 2)),

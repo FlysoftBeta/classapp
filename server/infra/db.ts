@@ -1,11 +1,10 @@
 import { Database, default as BetterSQLite3 } from "better-sqlite3";
 import path from "path";
 import crypto from "crypto";
-import { initUpdateManager, isUpdateManagerEnabled } from "./updateManager";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
-import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { ADMIN_FEATURE_MASK } from "@/shared/features";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
@@ -444,9 +443,6 @@ function initializeDatabase(db: Database): void {
   ensureDefaultGroup(db);
   ensureAdminUser(db);
   createWordsService(db).ensureSampleWords();
-  if (process.env.NODE_ENV === "production" && isUpdateManagerEnabled()) {
-    initUpdateManager(db);
-  }
 }
 
 function ensureConfigDefaults(db: Database) {
@@ -537,7 +533,7 @@ function ensureAdminUser(db: Database) {
     .get();
   if (existing) return;
 
-  const runtimeInitialPin = getRuntimeConfig().initialAdminPin;
+  const runtimeInitialPin = runtimeConfig().initialAdminPin;
   const pin =
     runtimeInitialPin !== undefined
       ? runtimeInitialPin

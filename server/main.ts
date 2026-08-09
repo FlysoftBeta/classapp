@@ -4,16 +4,17 @@ import { createServer as createSecureServer } from "node:https";
 import {
   setRuntimeConfig,
   setRuntimeController,
-  type ClassAppRuntimeConfig,
+  type RuntimeConfig,
 } from "@/server/infra/runtimeConfig";
 import { createHttpHandler } from "@/server/http/handler";
 import { getDb } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
 import { startOfficeDocumentMonitor } from "@/server/services/officeDocumentMonitor";
+import { setUpdateManager, UpdateManager } from "./infra/updateManager";
 
 export async function bootstrap(
-  config: ClassAppRuntimeConfig,
+  config: RuntimeConfig,
 ): Promise<() => Promise<void>> {
   setRuntimeConfig(config);
   setRuntimeController({
@@ -27,9 +28,9 @@ export async function bootstrap(
     },
   });
   const db = getDb();
+  if (config.update) setUpdateManager(new UpdateManager(db, config.update));
   const protocol = new WebSocketProtocol(config.buildId);
   const stopMaintenance = startMaintenance(db);
-  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
   const servers: Server[] = [];
   const listen = async (
     server: Server,
@@ -71,7 +72,6 @@ export async function bootstrap(
     }
   }
   return async () => {
-    stopOfficeDocumentMonitor();
     stopMaintenance();
     protocol.close();
     await Promise.all(

@@ -8,7 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   createPlatformRuntimeConfig,
-  type ClassAppRuntimeConfig,
+  type HTTPSRuntimeConfig,
+  type RuntimeConfig,
 } from "@/server/infra/runtimeConfig";
 import { readBuildId } from "@/server/infra/buildId";
 import { UPDATE_CONFIRM_TIMEOUT_MS } from "@/server/infra/updateContract";
@@ -48,7 +49,7 @@ const DEFAULT_PORTS = [80, 81, 82, 83, 84, 85, 86, 88];
 const DEFAULT_SECURE_PORTS = [443];
 const PORTS = parsePorts("CLASSAPP_PORTS", DEFAULT_PORTS);
 
-function parseBooleanOverride(name: string): boolean | null {
+function parseBoolean(name: string): boolean | null {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return null;
   if (raw === "1" || raw === "true") return true;
@@ -73,7 +74,7 @@ function errorMessage(error: unknown): string {
 function readHttpsConfig(
   appDir: string,
   redirectOverride: boolean | null,
-): ClassAppRuntimeConfig["https"] {
+): HTTPSRuntimeConfig | null {
   const httpsDir = path.join(appDir, "https");
   const configPath = path.join(httpsDir, "config.json");
   if (!fs.existsSync(configPath)) return null;
@@ -114,10 +115,10 @@ function readHttpsConfig(
   }
 }
 
-function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
+function buildBootPayload(appDir: string): RuntimeConfig {
   const https = readHttpsConfig(
     appDir,
-    parseBooleanOverride("CLASSAPP_HTTPS_REDIRECT_OVERRIDE"),
+    parseBoolean("CLASSAPP_HTTPS_REDIRECT_OVERRIDE"),
   );
   const securePorts = https
     ? parsePorts("CLASSAPP_SECURE_PORTS", DEFAULT_SECURE_PORTS)
@@ -126,15 +127,15 @@ function buildBootPayload(appDir: string): ClassAppRuntimeConfig {
     appDir,
     dataRoot: ROOT,
     buildId: readBuildId(appDir),
+    debugOverride: parseBoolean("CLASSAPP_DEBUG_OVERRIDE") ?? false,
     ports: PORTS,
     securePorts,
     bindHost: "0.0.0.0",
     trustedProxyIps: [],
     nodeEnv: "production",
     platform: createPlatformRuntimeConfig(appDir, "production"),
-    https,
+    https: https ?? undefined,
     update: {
-      enabled: true,
       stagingDir: STAGING_DIR,
       backupDir: APP_BACKUP_DIR,
     },

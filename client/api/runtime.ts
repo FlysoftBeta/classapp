@@ -5,13 +5,18 @@ import type { ActionResult } from "@/shared/protocol/result";
 
 type RuntimeConfig = {
   buildId: string;
+  debugMenu: boolean;
 };
 
 let _buildCheckPending = false;
-let _runtime: RuntimeConfig = { buildId: "dev" };
+let _runtime: RuntimeConfig = { buildId: "dev", debugMenu: false };
 
 export function configureClientRuntime(runtime: RuntimeConfig): void {
   _runtime = runtime;
+}
+
+export function isDebugMenuEnabled(): boolean {
+  return _runtime.debugMenu;
 }
 
 function checkOnBuildMismatch(res: Response): void {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ClassAppRuntimeConfig } from "@/server/infra/runtimeConfig";
+import type { RuntimeConfig } from "@/server/infra/runtimeConfig";
 import { GET as endpoints } from "@/server/http/routes/endpoints";
 import { POST as uploadArticle } from "@/server/http/routes/articleUpload";
 import { GET as articleSource } from "@/server/http/routes/articleSource";
@@ -100,7 +100,7 @@ function safePublicPath(root: string, pathname: string): string | null {
 }
 
 export function createHttpHandler(
-  config: ClassAppRuntimeConfig,
+  config: RuntimeConfig,
   options: { secure?: boolean } = {},
 ) {
   const secure = options.secure === true;
@@ -176,12 +176,14 @@ export function createHttpHandler(
         )
           return;
       }
+      // Latest bundle
       if (url.pathname === "/app/manifest.json") {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");
         res.end(JSON.stringify(createRuntimeManifest(config)));
         return;
       }
+      // Request with ?v=version
       if (url.pathname === "/app/app.js") {
         if (sendFile(bundleFile, res, "public, max-age=31536000, immutable"))
           return;

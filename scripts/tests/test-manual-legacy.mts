@@ -31,6 +31,7 @@ async function main(): Promise<void> {
       deployment: runtime.deployment,
       httpPort,
       securePort: securePort ?? undefined,
+      debugOverride: true,
     });
     await waitForLauncher(
       launcher,

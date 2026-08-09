@@ -8,9 +8,10 @@ import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import { isForcedOffline, setForcedOffline } from "@/client/interact/debug";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
+import { isDebugMenuEnabled } from "@/client/api/runtime";
 
 export default function DebugMenu() {
-  if (!import.meta.env.DEV) return null;
+  if (!isDebugMenuEnabled()) return null;
   return <DebugMenuContents />;
 }
 

@@ -146,7 +146,7 @@ function StickerVirtualGrid({
     [rows],
   );
   const { controller } = useInfini<StickerGridRow, number, string>({
-    debug: import.meta.env.DEV && showInfiniLogs ? "StickerPicker" : undefined,
+    debug: showInfiniLogs ? "StickerPicker" : undefined,
     provider,
     ops: {
       getId: (row) => row.id,

@@ -2,7 +2,6 @@ import { client } from "@/client/interact/remote/client";
 import { requestResult, runTransaction } from "@/client/data/idb";
 import { GLOBAL_KEYS, STORES } from "@/client/data/schema";
 import {
-  parseRuntimeManifest,
   type RuntimeAsset,
   type RuntimeManifest,
 } from "@/shared/runtimeManifest";
@@ -16,7 +15,7 @@ type WorkerReply = {
 async function fetchManifest(): Promise<RuntimeManifest> {
   const response = await fetch("/app/manifest.json", { cache: "no-store" });
   if (!response.ok) throw new Error(`manifest ${response.status}`);
-  return parseRuntimeManifest(await response.json());
+  return (await response.json()) as RuntimeManifest;
 }
 
 async function fetchAsset(
@@ -152,7 +151,10 @@ export class BundleManager {
   private offHello: (() => void) | null = null;
   private readonly onRequested = () => this.requestCheck();
 
-  constructor(private readonly currentBuildId: string) {}
+  constructor(
+    private readonly currentBuildId: string,
+    private readonly onManifest: (manifest: RuntimeManifest) => void,
+  ) {}
 
   async start(): Promise<() => void> {
     if (!import.meta.env.DEV) {
@@ -181,6 +183,7 @@ export class BundleManager {
     this.checking = true;
     try {
       const manifest = await fetchManifest();
+      this.onManifest(manifest);
       const worker = await serviceWorker();
       if (manifest.buildId === this.currentBuildId) {
         await this.reconcileShell(worker, manifest);
@@ -248,6 +251,7 @@ export class BundleManager {
 
 export async function startBundleManager(
   currentBuildId: string,
+  onManifest: (manifest: RuntimeManifest) => void,
 ): Promise<() => void> {
-  return new BundleManager(currentBuildId).start();
+  return new BundleManager(currentBuildId, onManifest).start();
 }

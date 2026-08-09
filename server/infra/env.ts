@@ -1,6 +1,6 @@
-import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 
-const runtime = getRuntimeConfig();
+const runtime = runtimeConfig();
 
 export const BUILD_ID = runtime.buildId;
 export const DATA_ROOT = runtime.dataRoot;

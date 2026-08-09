@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage } from "node:http";
 import { networkInterfaces } from "node:os";
-import { getRuntimeConfig } from "@/server/infra/runtimeConfig";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 
 export interface ClientIdentity {
   ip: string;
@@ -27,7 +27,7 @@ function normalizeIp(value: string): string {
 function requestIp(req: IncomingMessage): string {
   const peer = normalizeIp(req.socket.remoteAddress ?? "127.0.0.1");
   const trustedProxies = new Set(
-    getRuntimeConfig().trustedProxyIps.map(normalizeIp),
+    runtimeConfig().trustedProxyIps.map(normalizeIp),
   );
   if (!trustedProxies.has(peer)) return peer;
 

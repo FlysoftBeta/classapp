@@ -63,6 +63,7 @@ async function main(): Promise<void> {
       httpPort,
       securePort: securePort ?? undefined,
       httpsRedirectOverride: false,
+      debugOverride: true,
     });
     const url = `http://127.0.0.1:${httpPort}/`;
     await waitForLauncher(
