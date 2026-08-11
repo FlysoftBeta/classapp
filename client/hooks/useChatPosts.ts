@@ -17,6 +17,7 @@ import type {
 import type { InfiniDomHost } from "@infini-scroll/dom-support";
 import { useInfini } from "@infini-scroll/react";
 import { markConversationRead } from "@/client/interact/conversations";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 import {
   fetchCachedPosts,
   locatePost,
@@ -156,7 +157,9 @@ export function useChatPosts({
       type: conv.type,
       id: conv.id,
       post_id: postId,
-    }).catch(() => {});
+    }).catch((error) => {
+      captureDetachedClientIncident("chat.mark-read", error);
+    });
   }, []);
 
   const fetchDirectional = useCallback(

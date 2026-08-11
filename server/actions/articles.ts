@@ -1,5 +1,5 @@
 import { withActionSession, expectString } from "./_base";
-import { MalformedRequestError } from "@/shared/protocol/errors";
+import { ContractViolationError } from "@/server/services/incidentService";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function listArticlesAction(
@@ -69,7 +69,7 @@ export async function setArticleBookmarkAction(
 ) {
   return withActionSession(async (session) => {
     if (!Number.isSafeInteger(input.updatedAt) || input.updatedAt < 0) {
-      throw new MalformedRequestError("书签时间戳无效");
+      throw new ContractViolationError("书签时间戳无效");
     }
     return await (
       await (await session.asActor()).articles()
@@ -82,7 +82,7 @@ export async function saveArticleProgressAction(
 ) {
   return withActionSession(async (session) => {
     if (!Number.isSafeInteger(input.updatedAt) || input.updatedAt < 0) {
-      throw new MalformedRequestError("阅读进度时间戳无效");
+      throw new ContractViolationError("阅读进度时间戳无效");
     }
     return await (
       await (await session.asActor()).articles()

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type DependencyList } from "react";
+import { captureClientOperation } from "@/client/interact/clientIncidents";
 type LoadActionData<T> = () => Promise<T>;
 
 export function useActionQuery<T>(
@@ -12,7 +13,9 @@ export function useActionQuery<T>(
     setLoading(true);
     setError("");
     try {
-      setData(await loadData());
+      setData(
+        await captureClientOperation("ui.action-query", () => loadData()),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {

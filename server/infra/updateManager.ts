@@ -1,8 +1,11 @@
 import fs from "fs";
-import path from "path";
 import type BetterSqlite3 from "better-sqlite3";
 import { createDbBackup } from "@/server/infra/dbBackup";
-import { ServiceError } from "@/server/services/errors";
+import { BUILD_ID } from "@/server/infra/env";
+import {
+  attachSuppressedError,
+  PublicError,
+} from "@/server/services/incidentService";
 import {
   runtimeController,
   UpdateRuntimeConfig,
@@ -14,7 +17,7 @@ import {
   setPendingUpdateAt,
 } from "@/server/data/appState";
 import { UPDATE_CONFIRM_TIMEOUT_MS } from "./updateContract";
-import { getDb } from "./db";
+import { recordContainedServerIncident } from "@/server/services/incidentService";
 
 // State machine: an update is either not tracked at all (idle), or a deploy
 // has been applied and is awaiting the launcher watchdog's confirmation
@@ -81,10 +84,10 @@ export class UpdateManager {
 
   requestRollback(): void {
     if (this.state.status !== "pending") {
-      throw new ServiceError("当前没有待确认的更新", 409);
+      throw new PublicError("当前没有待确认的更新");
     }
     if (!fs.existsSync(this.config.backupDir)) {
-      throw new ServiceError("backup/ 目录不存在，无法回滚", 409);
+      throw new PublicError("backup/ 目录不存在，无法回滚");
     }
 
     console.log("[UpdateManager] 管理员触发回滚…");
@@ -124,15 +127,25 @@ export class UpdateManager {
 
   async deployUpdate(zipBytes: Uint8Array): Promise<void> {
     fs.mkdirSync(this.config.stagingDir, { recursive: true });
+    let extractionFailed = false;
+    let extractionError: unknown;
     try {
       extractZipToDir(zipBytes, this.config.stagingDir);
+    } catch (error) {
+      extractionFailed = true;
+      extractionError = error;
+      throw error;
     } finally {
-      fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        if (!extractionFailed) throw cleanupError;
+        attachSuppressedError(extractionError, cleanupError);
+      }
     }
 
     const dbBackup = await createDbBackup();
-    if (!dbBackup)
-      throw new ServiceError("数据库不存在，无法创建回滚备份", 409);
+    if (!dbBackup) throw new PublicError("数据库不存在，无法创建回滚备份");
 
     this.setPendingUpdate();
     const controller = runtimeController();
@@ -152,8 +165,12 @@ export class UpdateManager {
   private triggerRollback(): void {
     try {
       this.clearPending();
-    } catch {
-      /* ignore */
+    } catch (error) {
+      // Rollback must continue even if bookkeeping fails, but the failure is durable.
+      recordContainedServerIncident(this.db, BUILD_ID, error, {
+        component: "update-manager",
+        phase: "clear-pending-before-rollback",
+      });
     }
     const controller = runtimeController();
     if (controller) {

@@ -27,6 +27,7 @@ import type {
 } from "./model";
 import { extentFiles } from "./files";
 import { FileIds } from "./fileIds";
+import { mergeCursorCoverage, type ContinuousCoverage } from "./coverage";
 
 export type ConversationDownloadPolicy = "auto" | "week" | "half-year";
 export type ArticleDownloadPolicy =
@@ -71,6 +72,7 @@ interface GroupRow {
   revision: number;
   handle: string;
   name: string;
+  group_type: string;
   has_password: number;
   members_hidden: number;
   admin_only: number;
@@ -91,15 +93,12 @@ interface DmRow {
 }
 
 const DEFAULT_ASSIGNMENT_TIME = 0;
-let userScope = "anonymous";
 
 class Values {
   static size(value: unknown): number {
-    try {
-      return new TextEncoder().encode(JSON.stringify(value)).byteLength;
-    } catch {
-      return 0;
-    }
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error("Cannot size non-JSON value");
+    return new TextEncoder().encode(encoded).byteLength;
   }
 
   static equal(left: unknown, right: unknown): boolean {
@@ -198,10 +197,6 @@ class Policies {
   }
 }
 
-function activeMe(): string {
-  return userScope;
-}
-
 async function postCoverage(convId: string): Promise<PostCoverage | null> {
   return runTransaction(STORES.SYNC, "readonly", async (tx) => {
     const row = await requestResult(
@@ -212,90 +207,118 @@ async function postCoverage(convId: string): Promise<PostCoverage | null> {
 }
 
 async function clearConversationPostWindow(convId: string): Promise<void> {
-  const rows = await runTransaction(
-    STORES.POSTS,
-    "readonly",
-    async (tx) =>
-      (await requestResult(
-        tx
-          .objectStore(STORES.POSTS)
-          .index("by-conversation-sequence")
-          .getAll(
-            IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
-          ),
-      )) as StoredPost[],
-  );
-  await deleteConversationPostPrefix(convId, rows, rows.length);
-  await runTransaction(STORES.SYNC, "readwrite", (tx) => {
+  await runTransaction([STORES.POSTS, STORES.SYNC], "readwrite", async (tx) => {
+    const keys = await requestResult(
+      tx
+        .objectStore(STORES.POSTS)
+        .index("by-conversation-sequence")
+        .getAllKeys(
+          IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
+        ),
+    );
+    const posts = tx.objectStore(STORES.POSTS);
+    for (const key of keys) posts.delete(key);
     tx.objectStore(STORES.SYNC).delete(`posts:${convId}`);
   });
 }
 
-async function deleteKeysBatched(
-  storeName: StoreName,
-  keys: IDBValidKey[],
-): Promise<void> {
-  for (
-    let start = 0;
-    start < keys.length;
-    start += MAX_RECORD_DELETES_PER_TRANSACTION
-  ) {
-    const batch = keys.slice(start, start + MAX_RECORD_DELETES_PER_TRANSACTION);
-    await runTransaction(storeName, "readwrite", (tx) => {
-      const store = tx.objectStore(storeName);
-      for (const key of batch) store.delete(key);
-    });
-  }
-}
-
 async function deleteConversationPostPrefix(
   convId: string,
-  orderedRows: StoredPost[],
   count: number,
   updatedAt = Date.now(),
-): Promise<void> {
-  for (
-    let start = 0;
-    start < count;
-    start += MAX_RECORD_DELETES_PER_TRANSACTION
-  ) {
-    const end = Math.min(count, start + MAX_RECORD_DELETES_PER_TRANSACTION);
-    const batch = orderedRows.slice(start, end);
-    const retained = orderedRows.slice(end);
+  allowProtected = false,
+): Promise<{ bytes: number; deletedProtected: boolean }> {
+  let remaining = count;
+  let bytes = 0;
+  let deletedProtected = false;
+  while (remaining > 0) {
+    let deleted = 0;
     await runTransaction(
-      [STORES.POSTS, STORES.SYNC],
+      [STORES.POSTS, STORES.SYNC, STORES.SAVE],
       "readwrite",
       async (tx) => {
         const postStore = tx.objectStore(STORES.POSTS);
-        for (const row of batch) postStore.delete(row.id);
+        const orderedRows = (await requestResult(
+          postStore
+            .index("by-conversation-sequence")
+            .getAll(
+              IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
+            ),
+        )) as StoredPost[];
+        const claims = (await requestResult(
+          tx
+            .objectStore(STORES.SAVE)
+            .index("by-resource")
+            .getAll(IDBKeyRange.only(["conversation", convId])),
+        )) as RetentionRow[];
+        const retentionDays = claims.reduce(
+          (days, claim) =>
+            Math.max(
+              days,
+              CONVERSATION_RETENTION_DAYS[Policies.conversation(claim.mode)],
+            ),
+          0,
+        );
+        const cutoff = retentionDays
+          ? Date.now() - retentionDays * 86_400_000
+          : null;
+        const batch: StoredPost[] = [];
+        for (const row of orderedRows) {
+          if (
+            batch.length >=
+            Math.min(remaining, MAX_RECORD_DELETES_PER_TRANSACTION)
+          ) {
+            break;
+          }
+          const protectedByClaim =
+            cutoff !== null && Date.parse(row.created_at) >= cutoff;
+          if (protectedByClaim && !allowProtected) break;
+          batch.push(row);
+          if (protectedByClaim) deletedProtected = true;
+        }
+        const retained = orderedRows.slice(batch.length);
+        deleted = batch.length;
+        for (const row of batch) {
+          postStore.delete(row.id);
+          bytes += row.size;
+        }
 
         const syncStore = tx.objectStore(STORES.SYNC);
         const scope = `posts:${convId}`;
         const coverage = (await requestResult(syncStore.get(scope))) as
           PostCoverage | undefined;
         if (!coverage) return;
+        if (!retained.length) {
+          // Published coverage is a proof about a non-empty contiguous range.
+          // Keeping an empty range would allow revisions to advance while rows
+          // are silently discarded.
+          syncStore.delete(scope);
+          return;
+        }
         const first = retained[0];
         const last = retained[retained.length - 1];
         syncStore.put({
           ...coverage,
-          lower: first ? { id: first.id, sequence: first.sequence } : null,
-          upper: last ? { id: last.id, sequence: last.sequence } : null,
+          oldest: { id: first.id, order: first.sequence },
+          newest: { id: last.id, order: last.sequence },
           reached_oldest: false,
           updated_at: updatedAt,
         });
       },
     );
+    if (!deleted) break;
+    remaining -= deleted;
   }
+  return { bytes, deletedProtected };
 }
 
-function conversationId(
+function conversationIdForActor(
   ref: Pick<Conversation, "type" | "id"> &
     Partial<Pick<Conversation, "conv_id">>,
+  meId: string,
 ): string {
   if (ref.conv_id) return ref.conv_id;
-  return ref.type === "group"
-    ? groupConvId(ref.id)
-    : dmConvId(activeMe(), ref.id);
+  return ref.type === "group" ? groupConvId(ref.id) : dmConvId(meId, ref.id);
 }
 
 function defaultConversationState(
@@ -364,10 +387,14 @@ function splitArticle(entry: ArticleWithMeta): {
     total_read_seconds,
     last_read_at,
     list_sort_at: _sort,
+    username: _username,
+    handle: _handle,
     ...core
   } = entry;
   void _locator;
   void _sort;
+  void _username;
+  void _handle;
   return {
     entity: {
       id: entry.id,
@@ -455,6 +482,7 @@ async function materializeConversation(
     return {
       ...group,
       type: "group",
+      group_type: group.group_type,
       id: group.id,
       last_read_post_id: read.value.post_id,
       last_read_post_sequence: read.value.sequence,
@@ -483,6 +511,7 @@ async function materializeConversation(
     conv_id: dm.conv_id,
     revision: dm.revision,
     type: "dm",
+    group_type: null,
     id: access.target_id,
     handle: user?.handle ?? null,
     name: user?.name ?? "已注销",
@@ -533,6 +562,7 @@ async function upsertConversationInTransaction(
       revision: entry.revision,
       handle: entry.handle ?? entry.id,
       name: entry.name,
+      group_type: entry.group_type ?? "normal",
       has_password: entry.has_password,
       members_hidden: entry.members_hidden,
       admin_only: entry.admin_only,
@@ -617,14 +647,9 @@ async function upsertArticle(
     async (tx) => {
       const { entity, state } = splitArticle(entry);
       const articleStore = tx.objectStore(STORES.ARTICLES);
-      const previous = (await requestResult(articleStore.get(entry.id))) as
-        ObjectiveArticle | undefined;
-      if (previous && !Values.equal(previous.value, entity.value)) {
-        throw new Error(`Immutable article changed: ${entry.id}`);
-      }
-      articleStore.put(
-        previous ? { ...previous, touched_at: Date.now() } : entity,
-      );
+      // The server enforces Article immutability. Re-publishing the same entity
+      // is idempotent and avoids an unnecessary read-before-write race.
+      articleStore.put(entity);
       if (entry.user_id) {
         tx.objectStore(STORES.USERS).put({
           id: entry.user_id,
@@ -690,11 +715,18 @@ async function materializeArticle(
     if (!groupAccess) return null;
   }
   const state = await getArticleState(access.me_id, access.object_id);
+  const author = row.value.user_id
+    ? ((await runTransaction(STORES.USERS, "readonly", (tx) =>
+        requestResult(tx.objectStore(STORES.USERS).get(row.value.user_id!)),
+      )) as ObjectiveUser | undefined)
+    : null;
   const bookmark = Values.resolved(state.bookmark);
   const resume = Values.resolved(state.resume);
   const membership = access.memberships[0];
   return {
     ...row.value,
+    username: author?.name ?? null,
+    handle: author?.handle ?? null,
     is_bookmarked: bookmark.value,
     bookmark_updated_at_ms: bookmark.updatedAt,
     current_offset: resume.value,
@@ -783,7 +815,6 @@ export const sessionRepository = {
         });
       },
     );
-    userScope = user.id;
   },
 
   async clear(): Promise<void> {
@@ -797,1405 +828,1498 @@ export const sessionRepository = {
         tx.objectStore(STORES.ME).put({ ...current, session_token: null });
       }
     });
-    userScope = "anonymous";
   },
 };
 
-export const offlineRepository = {
-  setUserScope(userId: string | null): void {
-    userScope = userId || "anonymous";
-  },
+function createOfflineRepository(userScope: string) {
+  const actorId = () => userScope;
+  const conversationId = (
+    ref: Pick<Conversation, "type" | "id"> &
+      Partial<Pick<Conversation, "conv_id">>,
+  ) => conversationIdForActor(ref, userScope);
 
-  async getVersionedValue<T>(namespace: string, id: string) {
-    const key = `${namespace}:${id}`;
-    return runTransaction(STORES.ME_STATE, "readonly", async (tx) => {
-      const row = (await requestResult(
-        tx.objectStore(STORES.ME_STATE).get([activeMe(), key]),
-      )) as MeStateRow<T> | undefined;
-      if (!row) return null;
-      const resolved = Values.resolved(row.assignment);
-      return {
-        value: resolved.value,
-        purpose: key,
-        updatedAt: resolved.updatedAt,
-        syncedAt: resolved.pending ? null : resolved.updatedAt,
-      } satisfies VersionedValue<T>;
-    });
-  },
-
-  async setVersionedValue<T>(
-    namespace: string,
-    id: string,
-    value: T,
-    options?: { updatedAt?: number; synced?: boolean },
-  ) {
-    const meId = activeMe();
-    const key = `${namespace}:${id}`;
-    return runTransaction(STORES.ME_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_STATE);
-      const current = (await requestResult(store.get([meId, key]))) as
-        MeStateRow<T> | undefined;
-      const assignment = options?.synced
-        ? Values.reconcile(current?.assignment ?? null, {
-            value,
-            updatedAt: options.updatedAt ?? 0,
-          })
-        : Values.propose(
-            current?.assignment ?? null,
-            value,
-            options?.updatedAt,
-          );
-      const row: MeStateRow<T> = {
-        me_id: meId,
-        key,
-        assignment,
-        pending: assignment.proposal ? 1 : 0,
-      };
-      store.put(row);
-      const resolved = Values.resolved(assignment);
-      return {
-        value: resolved.value,
-        purpose: key,
-        updatedAt: resolved.updatedAt,
-        syncedAt: resolved.pending ? null : resolved.updatedAt,
-      } satisfies VersionedValue<T>;
-    });
-  },
-
-  async reconcileVersionedValue<T>(
-    namespace: string,
-    id: string,
-    remote: { value: T; updatedAt: number },
-  ) {
-    return this.setVersionedValue(namespace, id, remote.value, {
-      updatedAt: remote.updatedAt,
-      synced: true,
-    });
-  },
-
-  async getPendingVersionedValues<T>(namespace: string) {
-    const prefix = `${namespace}:`;
-    return runTransaction(STORES.ME_STATE, "readonly", async (tx) => {
-      const rows = (await requestResult(
-        tx
-          .objectStore(STORES.ME_STATE)
-          .index("by-pending")
-          .getAll(IDBKeyRange.only([activeMe(), 1])),
-      )) as MeStateRow<T>[];
-      return rows
-        .filter((row) => row.key.startsWith(prefix))
-        .map((row) => {
-          const resolved = Values.resolved(row.assignment);
-          return {
-            id: row.key.slice(prefix.length),
-            version: {
-              value: resolved.value,
-              purpose: row.key,
-              updatedAt: resolved.updatedAt,
-              syncedAt: null,
-            } satisfies VersionedValue<T>,
-          };
-        });
-    });
-  },
-
-  async saveConversations(entries: Conversation[]): Promise<void> {
-    const meId = activeMe();
-    const stores: StoreName[] = [
-      STORES.GROUPS,
-      STORES.DMS,
-      STORES.USERS,
-      STORES.ME_ACCESS,
-      STORES.ME_CONV_STATE,
-      STORES.SYNC,
-    ];
-    await runTransaction(stores, "readwrite", async (tx) => {
-      const accessStore = tx.objectStore(STORES.ME_ACCESS);
-      const oldKeys = await requestResult(
-        accessStore
-          .index("by-me-kind")
-          .getAllKeys(IDBKeyRange.only([meId, "conversation"])),
-      );
-      for (const key of oldKeys) accessStore.delete(key);
-      for (const entry of entries) {
-        await upsertConversationInTransaction(tx, meId, entry);
-      }
-      tx.objectStore(STORES.SYNC).put({
-        scope: `me:${meId}:conversations`,
-        kind: "conversation-snapshot",
-        me_id: meId,
-        complete: true,
-        updated_at: Date.now(),
+  const repository = {
+    async getVersionedValue<T>(namespace: string, id: string) {
+      const key = `${namespace}:${id}`;
+      return runTransaction(STORES.ME_STATE, "readonly", async (tx) => {
+        const row = (await requestResult(
+          tx.objectStore(STORES.ME_STATE).get([actorId(), key]),
+        )) as MeStateRow<T> | undefined;
+        if (!row) return null;
+        const resolved = Values.resolved(row.assignment);
+        return {
+          value: resolved.value,
+          purpose: key,
+          updatedAt: resolved.updatedAt,
+          syncedAt: resolved.pending ? null : resolved.updatedAt,
+        } satisfies VersionedValue<T>;
       });
-    });
-  },
+    },
 
-  async getConversations(): Promise<Conversation[]> {
-    const rows = (await accessRows(
-      activeMe(),
-      "conversation",
-    )) as ConversationAccessRow[];
-    const entries = await Promise.all(rows.map(materializeConversation));
-    return sortConversations(
-      entries.filter((value): value is Conversation => !!value),
-    );
-  },
+    async setVersionedValue<T>(
+      namespace: string,
+      id: string,
+      value: T,
+      options?: { updatedAt?: number; synced?: boolean },
+    ) {
+      const meId = actorId();
+      const key = `${namespace}:${id}`;
+      return runTransaction(STORES.ME_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_STATE);
+        const current = (await requestResult(store.get([meId, key]))) as
+          MeStateRow<T> | undefined;
+        const assignment = options?.synced
+          ? Values.reconcile(current?.assignment ?? null, {
+              value,
+              updatedAt: options.updatedAt ?? 0,
+            })
+          : Values.propose(
+              current?.assignment ?? null,
+              value,
+              options?.updatedAt,
+            );
+        const row: MeStateRow<T> = {
+          me_id: meId,
+          key,
+          assignment,
+          pending: assignment.proposal ? 1 : 0,
+        };
+        store.put(row);
+        const resolved = Values.resolved(assignment);
+        return {
+          value: resolved.value,
+          purpose: key,
+          updatedAt: resolved.updatedAt,
+          syncedAt: resolved.pending ? null : resolved.updatedAt,
+        } satisfies VersionedValue<T>;
+      });
+    },
 
-  async upsertConversation(entry: Conversation): Promise<void> {
-    const meId = activeMe();
-    await runTransaction(
-      [
+    async reconcileVersionedValue<T>(
+      namespace: string,
+      id: string,
+      remote: { value: T; updatedAt: number },
+    ) {
+      return this.setVersionedValue(namespace, id, remote.value, {
+        updatedAt: remote.updatedAt,
+        synced: true,
+      });
+    },
+
+    async getPendingVersionedValues<T>(namespace: string) {
+      const prefix = `${namespace}:`;
+      return runTransaction(STORES.ME_STATE, "readonly", async (tx) => {
+        const rows = (await requestResult(
+          tx
+            .objectStore(STORES.ME_STATE)
+            .index("by-pending")
+            .getAll(IDBKeyRange.only([actorId(), 1])),
+        )) as MeStateRow<T>[];
+        return rows
+          .filter((row) => row.key.startsWith(prefix))
+          .map((row) => {
+            const resolved = Values.resolved(row.assignment);
+            return {
+              id: row.key.slice(prefix.length),
+              version: {
+                value: resolved.value,
+                purpose: row.key,
+                updatedAt: resolved.updatedAt,
+                syncedAt: null,
+              } satisfies VersionedValue<T>,
+            };
+          });
+      });
+    },
+
+    async saveConversations(entries: Conversation[]): Promise<void> {
+      const meId = actorId();
+      const stores: StoreName[] = [
         STORES.GROUPS,
         STORES.DMS,
         STORES.USERS,
         STORES.ME_ACCESS,
         STORES.ME_CONV_STATE,
-      ],
-      "readwrite",
-      (tx) => upsertConversationInTransaction(tx, meId, entry),
-    );
-  },
-
-  async removeConversation(
-    ref: Pick<Conversation, "type" | "id">,
-  ): Promise<void> {
-    const convId = conversationId(ref);
-    await runTransaction(
-      [STORES.ME_ACCESS, STORES.ME_CONV_STATE],
-      "readwrite",
-      (tx) => {
-        tx.objectStore(STORES.ME_ACCESS).delete([
-          activeMe(),
-          "conversation",
-          convId,
-        ]);
-        tx.objectStore(STORES.ME_CONV_STATE).delete([activeMe(), convId]);
-      },
-    );
-  },
-
-  async saveGroupMembers(
-    groupId: string,
-    payload: GroupMembersAccessRow["snapshot"],
-  ): Promise<void> {
-    await runTransaction(
-      [STORES.ME_ACCESS, STORES.USERS],
-      "readwrite",
-      (tx) => {
-        tx.objectStore(STORES.ME_ACCESS).put({
-          me_id: activeMe(),
-          kind: "group-members",
-          object_id: groupId,
-          snapshot: payload,
-          snapshot_at: Date.now(),
-        } satisfies GroupMembersAccessRow);
-        const users = tx.objectStore(STORES.USERS);
-        for (const member of payload.members) {
-          users.put({
-            id: member.id,
-            handle: member.handle,
-            name: member.username,
-          } satisfies ObjectiveUser);
-        }
-      },
-    );
-  },
-
-  async getGroupMembers(groupId: string) {
-    return runTransaction(STORES.ME_ACCESS, "readonly", async (tx) => {
-      const conversation = await requestResult(
-        tx
-          .objectStore(STORES.ME_ACCESS)
-          .get([activeMe(), "conversation", groupConvId(groupId)]),
-      );
-      if (!conversation) return null;
-      const row = await requestResult(
-        tx
-          .objectStore(STORES.ME_ACCESS)
-          .get([activeMe(), "group-members", groupId]),
-      );
-      return (row as GroupMembersAccessRow | undefined)?.snapshot ?? null;
-    });
-  },
-
-  async setConversationFlag(
-    ref: Pick<Conversation, "type" | "id">,
-    field: "pinned" | "muted",
-    value: boolean,
-  ): Promise<VersionedValue<boolean>> {
-    const meId = activeMe();
-    const convId = conversationId(ref);
-    return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_CONV_STATE);
-      const current =
-        ((await requestResult(store.get([meId, convId]))) as
-          ConversationUserStateRow | undefined) ??
-        defaultConversationState(meId, convId);
-      current[field] = Values.propose(current[field], value);
-      current.pending = statePending(current);
-      store.put(current);
-      const resolved = Values.resolved(current[field]);
-      return {
-        value: resolved.value,
-        purpose: `conversation:${convId}:${field}`,
-        updatedAt: resolved.updatedAt,
-        syncedAt: null,
-      };
-    });
-  },
-
-  async reconcileConversationFlag(
-    ref: Pick<Conversation, "type" | "id">,
-    field: "pinned" | "muted",
-    remote: { value: boolean; updatedAt: number },
-  ): Promise<VersionedValue<boolean>> {
-    const meId = activeMe();
-    const convId = conversationId(ref);
-    return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_CONV_STATE);
-      const current =
-        ((await requestResult(store.get([meId, convId]))) as
-          ConversationUserStateRow | undefined) ??
-        defaultConversationState(meId, convId);
-      current[field] = Values.reconcile(current[field], remote);
-      current.pending = statePending(current);
-      store.put(current);
-      const resolved = Values.resolved(current[field]);
-      return {
-        value: resolved.value,
-        purpose: `conversation:${convId}:${field}`,
-        updatedAt: resolved.updatedAt,
-        syncedAt: resolved.pending ? null : resolved.updatedAt,
-      };
-    });
-  },
-
-  async getPendingConversationMutations() {
-    const entries = await this.getConversations();
-    const rows = await runTransaction(
-      STORES.ME_CONV_STATE,
-      "readonly",
-      async (tx) =>
-        (await requestResult(
-          tx
-            .objectStore(STORES.ME_CONV_STATE)
-            .index("by-pending")
-            .getAll(IDBKeyRange.only([activeMe(), 1])),
-        )) as ConversationUserStateRow[],
-    );
-    return rows.flatMap((row) => {
-      const ref = entries.find((entry) => entry.conv_id === row.conv_id);
-      if (!ref) return [];
-      const pinned = Values.resolved(row.pinned);
-      const muted = Values.resolved(row.muted);
-      const read = Values.resolved(row.read);
-      return [
-        ...(pinned.pending
-          ? [
-              {
-                ref,
-                field: "pinned" as const,
-                value: pinned.value,
-                updatedAt: pinned.updatedAt,
-              },
-            ]
-          : []),
-        ...(muted.pending
-          ? [
-              {
-                ref,
-                field: "muted" as const,
-                value: muted.value,
-                updatedAt: muted.updatedAt,
-              },
-            ]
-          : []),
-        ...(read.pending
-          ? [
-              {
-                ref,
-                field: "read" as const,
-                value: {
-                  postId: read.value.post_id,
-                  sequence: read.value.sequence,
-                },
-                updatedAt: read.updatedAt,
-              },
-            ]
-          : []),
+        STORES.SYNC,
       ];
-    });
-  },
-
-  async getConversationReadVersion(
-    ref: Pick<Conversation, "type" | "id">,
-  ): Promise<VersionedValue<ConversationReadValue> | null> {
-    const state = await getConversationState(activeMe(), conversationId(ref));
-    const read = Values.resolved(state.read);
-    return {
-      value: {
-        postId: read.value.post_id,
-        sequence: read.value.sequence,
-      },
-      purpose: "conversation-read",
-      updatedAt: read.updatedAt,
-      syncedAt: read.pending ? null : read.updatedAt,
-    };
-  },
-
-  async setPendingConversationRead(
-    ref: Pick<Conversation, "type" | "id">,
-    postId: string,
-    knownSequence = 0,
-    offline = true,
-  ) {
-    const meId = activeMe();
-    const convId = conversationId(ref);
-    return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_CONV_STATE);
-      const current =
-        ((await requestResult(store.get([meId, convId]))) as
-          ConversationUserStateRow | undefined) ??
-        defaultConversationState(meId, convId);
-      const resolved = Values.resolved(current.read);
-      if (
-        offline &&
-        knownSequence > 0 &&
-        knownSequence <= resolved.value.sequence
-      ) {
-        return {
-          version: {
-            value: {
-              postId: resolved.value.post_id,
-              sequence: resolved.value.sequence,
-            },
-            purpose: "conversation-read",
-            updatedAt: resolved.updatedAt,
-            syncedAt: resolved.pending ? null : resolved.updatedAt,
-          },
-          changed: false,
-        };
-      }
-      current.read = Values.propose(current.read, {
-        post_id: postId,
-        sequence: knownSequence,
+      await runTransaction(stores, "readwrite", async (tx) => {
+        const accessStore = tx.objectStore(STORES.ME_ACCESS);
+        const oldKeys = await requestResult(
+          accessStore
+            .index("by-me-kind")
+            .getAllKeys(IDBKeyRange.only([meId, "conversation"])),
+        );
+        for (const key of oldKeys) accessStore.delete(key);
+        for (const entry of entries) {
+          await upsertConversationInTransaction(tx, meId, entry);
+        }
+        tx.objectStore(STORES.SYNC).put({
+          scope: `me:${meId}:conversations`,
+          kind: "conversation-snapshot",
+          me_id: meId,
+          complete: true,
+          updated_at: Date.now(),
+        });
       });
-      if (knownSequence > 0) {
-        current.unread = {
-          first_post_id: null,
-          count: 0,
-          snapshot_revision: current.unread.snapshot_revision,
-        };
-      }
-      current.pending = 1;
-      store.put(current);
-      const next = Values.resolved(current.read);
-      return {
-        version: {
-          value: { postId, sequence: knownSequence },
-          purpose: "conversation-read",
-          updatedAt: next.updatedAt,
-          syncedAt: null,
-        },
-        changed: true,
-      };
-    });
-  },
+    },
 
-  async reconcileConversationRead(
-    ref: Pick<Conversation, "type" | "id">,
-    remote: ConversationReadValue & { updatedAt: number },
-    merge: "override" | "furthest" = "override",
-  ) {
-    const meId = activeMe();
-    const convId = conversationId(ref);
-    return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_CONV_STATE);
-      const current =
-        ((await requestResult(store.get([meId, convId]))) as
-          ConversationUserStateRow | undefined) ??
-        defaultConversationState(meId, convId);
-      const proposal = current.read.proposal;
-      current.read = {
-        base: {
-          value: { post_id: remote.postId, sequence: remote.sequence },
-          updated_at: remote.updatedAt,
+    async getConversations(): Promise<Conversation[]> {
+      const rows = (await accessRows(
+        actorId(),
+        "conversation",
+      )) as ConversationAccessRow[];
+      const entries = await Promise.all(rows.map(materializeConversation));
+      return sortConversations(
+        entries.filter((value): value is Conversation => !!value),
+      );
+    },
+
+    async upsertConversation(entry: Conversation): Promise<void> {
+      const meId = actorId();
+      await runTransaction(
+        [
+          STORES.GROUPS,
+          STORES.DMS,
+          STORES.USERS,
+          STORES.ME_ACCESS,
+          STORES.ME_CONV_STATE,
+        ],
+        "readwrite",
+        (tx) => upsertConversationInTransaction(tx, meId, entry),
+      );
+    },
+
+    async removeConversation(
+      ref: Pick<Conversation, "type" | "id">,
+    ): Promise<void> {
+      const convId = conversationId(ref);
+      await runTransaction(
+        [STORES.ME_ACCESS, STORES.ME_CONV_STATE],
+        "readwrite",
+        (tx) => {
+          tx.objectStore(STORES.ME_ACCESS).delete([
+            actorId(),
+            "conversation",
+            convId,
+          ]);
+          tx.objectStore(STORES.ME_CONV_STATE).delete([actorId(), convId]);
         },
-        proposal:
-          proposal &&
-          (merge === "furthest"
-            ? proposal.value.sequence > remote.sequence
-            : proposal.updated_at > remote.updatedAt)
-            ? proposal
-            : null,
-      };
-      current.pending = statePending(current);
-      store.put(current);
-      const resolved = Values.resolved(current.read);
+      );
+    },
+
+    async saveGroupMembers(
+      groupId: string,
+      payload: GroupMembersAccessRow["snapshot"],
+    ): Promise<void> {
+      await runTransaction(
+        [STORES.ME_ACCESS, STORES.USERS],
+        "readwrite",
+        (tx) => {
+          tx.objectStore(STORES.ME_ACCESS).put({
+            me_id: actorId(),
+            kind: "group-members",
+            object_id: groupId,
+            snapshot: payload,
+            snapshot_at: Date.now(),
+          } satisfies GroupMembersAccessRow);
+          const users = tx.objectStore(STORES.USERS);
+          for (const member of payload.members) {
+            users.put({
+              id: member.id,
+              handle: member.handle,
+              name: member.username,
+            } satisfies ObjectiveUser);
+          }
+        },
+      );
+    },
+
+    async getGroupMembers(groupId: string) {
+      return runTransaction(STORES.ME_ACCESS, "readonly", async (tx) => {
+        const conversation = await requestResult(
+          tx
+            .objectStore(STORES.ME_ACCESS)
+            .get([actorId(), "conversation", groupConvId(groupId)]),
+        );
+        if (!conversation) return null;
+        const row = await requestResult(
+          tx
+            .objectStore(STORES.ME_ACCESS)
+            .get([actorId(), "group-members", groupId]),
+        );
+        return (row as GroupMembersAccessRow | undefined)?.snapshot ?? null;
+      });
+    },
+
+    async setConversationFlag(
+      ref: Pick<Conversation, "type" | "id">,
+      field: "pinned" | "muted",
+      value: boolean,
+    ): Promise<VersionedValue<boolean>> {
+      const meId = actorId();
+      const convId = conversationId(ref);
+      return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_CONV_STATE);
+        const current =
+          ((await requestResult(store.get([meId, convId]))) as
+            ConversationUserStateRow | undefined) ??
+          defaultConversationState(meId, convId);
+        current[field] = Values.propose(current[field], value);
+        current.pending = statePending(current);
+        store.put(current);
+        const resolved = Values.resolved(current[field]);
+        return {
+          value: resolved.value,
+          purpose: `conversation:${convId}:${field}`,
+          updatedAt: resolved.updatedAt,
+          syncedAt: null,
+        };
+      });
+    },
+
+    async reconcileConversationFlag(
+      ref: Pick<Conversation, "type" | "id">,
+      field: "pinned" | "muted",
+      remote: { value: boolean; updatedAt: number },
+    ): Promise<VersionedValue<boolean>> {
+      const meId = actorId();
+      const convId = conversationId(ref);
+      return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_CONV_STATE);
+        const current =
+          ((await requestResult(store.get([meId, convId]))) as
+            ConversationUserStateRow | undefined) ??
+          defaultConversationState(meId, convId);
+        current[field] = Values.reconcile(current[field], remote);
+        current.pending = statePending(current);
+        store.put(current);
+        const resolved = Values.resolved(current[field]);
+        return {
+          value: resolved.value,
+          purpose: `conversation:${convId}:${field}`,
+          updatedAt: resolved.updatedAt,
+          syncedAt: resolved.pending ? null : resolved.updatedAt,
+        };
+      });
+    },
+
+    async getPendingConversationMutations() {
+      const entries = await this.getConversations();
+      const rows = await runTransaction(
+        STORES.ME_CONV_STATE,
+        "readonly",
+        async (tx) =>
+          (await requestResult(
+            tx
+              .objectStore(STORES.ME_CONV_STATE)
+              .index("by-pending")
+              .getAll(IDBKeyRange.only([actorId(), 1])),
+          )) as ConversationUserStateRow[],
+      );
+      return rows.flatMap((row) => {
+        const ref = entries.find((entry) => entry.conv_id === row.conv_id);
+        if (!ref) return [];
+        const pinned = Values.resolved(row.pinned);
+        const muted = Values.resolved(row.muted);
+        const read = Values.resolved(row.read);
+        return [
+          ...(pinned.pending
+            ? [
+                {
+                  ref,
+                  field: "pinned" as const,
+                  value: pinned.value,
+                  updatedAt: pinned.updatedAt,
+                },
+              ]
+            : []),
+          ...(muted.pending
+            ? [
+                {
+                  ref,
+                  field: "muted" as const,
+                  value: muted.value,
+                  updatedAt: muted.updatedAt,
+                },
+              ]
+            : []),
+          ...(read.pending
+            ? [
+                {
+                  ref,
+                  field: "read" as const,
+                  value: {
+                    postId: read.value.post_id,
+                    sequence: read.value.sequence,
+                  },
+                  updatedAt: read.updatedAt,
+                },
+              ]
+            : []),
+        ];
+      });
+    },
+
+    async getConversationReadVersion(
+      ref: Pick<Conversation, "type" | "id">,
+    ): Promise<VersionedValue<ConversationReadValue> | null> {
+      const state = await getConversationState(actorId(), conversationId(ref));
+      const read = Values.resolved(state.read);
       return {
         value: {
-          postId: resolved.value.post_id,
-          sequence: resolved.value.sequence,
+          postId: read.value.post_id,
+          sequence: read.value.sequence,
         },
         purpose: "conversation-read",
-        updatedAt: resolved.updatedAt,
-        syncedAt: resolved.pending ? null : resolved.updatedAt,
-      } satisfies VersionedValue<ConversationReadValue>;
-    });
-  },
-
-  async savePosts(
-    ref: Pick<Conversation, "type" | "id"> &
-      Partial<Pick<Conversation, "conv_id">>,
-    incoming: Post[],
-    options: {
-      extendCoverage?: boolean;
-      reachedOldest?: boolean;
-      reachedNewest?: boolean;
-    } = {},
-  ): Promise<void> {
-    const convId = conversationId(ref);
-    if (!incoming.length) return;
-    await runTransaction(
-      [STORES.POSTS, STORES.SYNC],
-      "readwrite",
-      async (tx) => {
-        const store = tx.objectStore(STORES.POSTS);
-        const syncStore = tx.objectStore(STORES.SYNC);
-        const scope = `posts:${convId}`;
-        const current = (await requestResult(syncStore.get(scope))) as
-          PostCoverage | undefined;
-        let lower: { id: string; sequence: number } | null = null;
-        let upper: { id: string; sequence: number } | null = null;
-        for (const post of incoming) {
-          if (
-            !Number.isSafeInteger(post.sequence) ||
-            (post.sequence ?? 0) <= 0
-          ) {
-            throw new Error(`Post ${post.id} is missing its required sequence`);
-          }
-          const previous = (await requestResult(store.get(post.id))) as
-            StoredPost | undefined;
-          const insidePublishedWindow =
-            !!current?.lower &&
-            !!current.upper &&
-            post.sequence >= current.lower.sequence &&
-            post.sequence <= current.upper.sequence;
-          if (
-            options.extendCoverage !== true &&
-            !previous &&
-            !insidePublishedWindow
-          ) {
-            continue;
-          }
-          if (previous && previous.revision > post.revision) continue;
-          if (
-            previous &&
-            previous.revision === post.revision &&
-            !Values.equal(
-              { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
-              { ...post, size: 0, touched_at: 0, eviction_tier: 0 },
-            )
-          ) {
-            throw new Error(`Post revision collision: ${post.id}`);
-          }
-          const row: StoredPost = {
-            ...post,
-            sequence: post.sequence!,
-            size: Values.size(post),
-            touched_at: Date.now(),
-            eviction_tier: 0,
-          };
-          store.put(row);
-          if (!lower || row.sequence < lower.sequence) {
-            lower = { id: row.id, sequence: row.sequence };
-          }
-          if (!upper || row.sequence > upper.sequence) {
-            upper = { id: row.id, sequence: row.sequence };
-          }
-        }
-        if (options.extendCoverage !== true) return;
-        syncStore.put({
-          scope,
-          kind: "posts",
-          conv_id: convId,
-          known_revision: current?.known_revision ?? 0,
-          lower:
-            !current?.lower ||
-            (lower && lower.sequence < current.lower.sequence)
-              ? lower
-              : current.lower,
-          upper:
-            !current?.upper ||
-            (upper && upper.sequence > current.upper.sequence)
-              ? upper
-              : current.upper,
-          reached_oldest:
-            (current?.reached_oldest ?? false) || !!options.reachedOldest,
-          reached_newest:
-            (current?.reached_newest ?? false) || !!options.reachedNewest,
-          updated_at: Date.now(),
-        } satisfies PostCoverage);
-      },
-    );
-    await this.trimConversationPosts(ref);
-  },
-
-  async applyPostVersion(post: Post, liveAppend = false): Promise<void> {
-    const parsed = parseConvId(post.conv_id);
-    if (!parsed) return;
-    const ref =
-      parsed.type === "group"
-        ? { type: "group" as const, id: parsed.groupId, conv_id: post.conv_id }
-        : {
-            type: "dm" as const,
-            id: parsed.peerA === activeMe() ? parsed.peerB : parsed.peerA,
-            conv_id: post.conv_id,
-          };
-    const coverage = await postCoverage(post.conv_id);
-    const mayExtendNewest =
-      liveAppend &&
-      !!coverage?.reached_newest &&
-      !!coverage.upper &&
-      post.sequence > coverage.upper.sequence;
-    await this.savePosts(ref, [post], {
-      extendCoverage: mayExtendNewest,
-      reachedNewest: mayExtendNewest,
-    });
-  },
-
-  async reconcilePostPage(
-    ref: Pick<Conversation, "type" | "id"> &
-      Partial<Pick<Conversation, "conv_id">>,
-    incoming: Post[],
-    page: {
-      beforeId?: string;
-      afterId?: string;
-      exhausted: boolean;
-    },
-  ): Promise<void> {
-    const convId = conversationId(ref);
-    const coverage = await postCoverage(convId);
-    const cursorId = page.beforeId ?? page.afterId;
-    let connected = !coverage;
-    if (coverage && cursorId) {
-      const anchor = (await runTransaction(STORES.POSTS, "readonly", (tx) =>
-        requestResult(tx.objectStore(STORES.POSTS).get(cursorId)),
-      )) as StoredPost | undefined;
-      connected = anchor?.conv_id === convId;
-    } else if (coverage && !cursorId) {
-      const ids = new Set((await this.getPosts(ref)).map((post) => post.id));
-      connected = incoming.some((post) => ids.has(post.id));
-      if (!connected) await clearConversationPostWindow(convId);
-      connected = true;
-    }
-    if (!connected) return;
-    if (incoming.length) {
-      await this.savePosts(ref, incoming, {
-        extendCoverage: true,
-        reachedOldest: !!page.beforeId && page.exhausted,
-        reachedNewest: !page.beforeId && (!page.afterId || page.exhausted),
-      });
-      return;
-    }
-    if (coverage && page.exhausted) {
-      await runTransaction(STORES.SYNC, "readwrite", async (tx) => {
-        const store = tx.objectStore(STORES.SYNC);
-        const current = (await requestResult(store.get(`posts:${convId}`))) as
-          PostCoverage | undefined;
-        if (!current) return;
-        store.put({
-          ...current,
-          reached_oldest: current.reached_oldest || !!page.beforeId,
-          reached_newest: current.reached_newest || !page.beforeId,
-          updated_at: Date.now(),
-        });
-      });
-    }
-  },
-
-  async advancePostRevision(convId: string, revision: number): Promise<void> {
-    const scope = `posts:${convId}`;
-    await runTransaction(STORES.SYNC, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.SYNC);
-      const current = (await requestResult(store.get(scope))) as
-        PostCoverage | undefined;
-      store.put({
-        scope,
-        kind: "posts",
-        conv_id: convId,
-        known_revision: Math.max(current?.known_revision ?? 0, revision),
-        lower: current?.lower ?? null,
-        upper: current?.upper ?? null,
-        reached_oldest: current?.reached_oldest ?? false,
-        reached_newest: current?.reached_newest ?? false,
-        updated_at: Date.now(),
-      } satisfies PostCoverage);
-    });
-  },
-
-  async getKnownPostRevision(convId: string): Promise<number> {
-    return (await postCoverage(convId))?.known_revision ?? 0;
-  },
-
-  async reconcilePostRevisions(
-    ref: Pick<Conversation, "type" | "id"> &
-      Partial<Pick<Conversation, "conv_id">>,
-    incoming: Post[],
-    revision: number,
-  ): Promise<void> {
-    const convId = conversationId(ref);
-    const coverage = await postCoverage(convId);
-    await this.savePosts(ref, incoming, { extendCoverage: false });
-    if (coverage?.reached_newest && coverage.upper) {
-      const appended = incoming
-        .filter((post) => post.sequence > coverage.upper!.sequence)
-        .sort((left, right) => left.sequence - right.sequence);
-      if (appended.length) {
-        await this.savePosts(ref, appended, {
-          extendCoverage: true,
-          reachedNewest: true,
-        });
-      }
-    }
-    await this.advancePostRevision(convId, revision);
-  },
-
-  async getPosts(
-    ref: Pick<Conversation, "type" | "id"> &
-      Partial<Pick<Conversation, "conv_id">>,
-  ): Promise<Post[]> {
-    const convId = conversationId(ref);
-    return runTransaction(
-      [STORES.ME_ACCESS, STORES.POSTS],
-      "readonly",
-      async (tx) => {
-        const access = await requestResult(
-          tx
-            .objectStore(STORES.ME_ACCESS)
-            .get([activeMe(), "conversation", convId]),
-        );
-        if (!access) return [];
-        const rows = (await requestResult(
-          tx
-            .objectStore(STORES.POSTS)
-            .index("by-conversation-sequence")
-            .getAll(
-              IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
-            ),
-        )) as StoredPost[];
-        return rows.map(
-          ({ size: _s, touched_at: _t, eviction_tier: _e, ...post }) => {
-            void _s;
-            void _t;
-            void _e;
-            return post;
-          },
-        );
-      },
-    );
-  },
-
-  async trimConversationPosts(
-    ref: Pick<Conversation, "type" | "id"> &
-      Partial<Pick<Conversation, "conv_id">>,
-  ): Promise<void> {
-    const convId = conversationId(ref);
-    const cutoff = await deviceConversationCutoff(convId);
-    const rows = await runTransaction(
-      STORES.POSTS,
-      "readonly",
-      async (tx) =>
-        (await requestResult(
-          tx
-            .objectStore(STORES.POSTS)
-            .index("by-conversation-sequence")
-            .getAll(
-              IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
-            ),
-        )) as StoredPost[],
-    );
-    const deleteCount =
-      cutoff === null
-        ? Math.max(0, rows.length - 200)
-        : rows.findIndex((row) => Date.parse(row.created_at) >= cutoff);
-    const normalizedCount =
-      cutoff !== null && deleteCount < 0 ? rows.length : deleteCount;
-    await deleteConversationPostPrefix(convId, rows, normalizedCount);
-  },
-
-  async getConversationPolicy(ref: Pick<Conversation, "type" | "id">) {
-    const row = await runTransaction(STORES.SAVE, "readonly", (tx) =>
-      requestResult(
-        tx
-          .objectStore(STORES.SAVE)
-          .get([activeMe(), "conversation", conversationId(ref)]),
-      ),
-    );
-    return Policies.conversation((row as RetentionRow | undefined)?.mode);
-  },
-
-  async setConversationPolicy(
-    ref: Pick<Conversation, "type" | "id">,
-    policy: ConversationDownloadPolicy,
-  ): Promise<void> {
-    const days = CONVERSATION_RETENTION_DAYS[policy];
-    const row: RetentionRow = {
-      claimant: activeMe(),
-      kind: "conversation",
-      object_id: conversationId(ref),
-      mode: policy,
-      keep_after_ms: days ? Date.now() - days * 86_400_000 : null,
-      protected_until: 0,
-      materialized: false,
-      bytes: 0,
-      last_touched_at: Date.now(),
-      missing_reason: "never-downloaded",
-    };
-    await runTransaction(STORES.SAVE, "readwrite", (tx) => {
-      tx.objectStore(STORES.SAVE).put(row);
-    });
-    await this.trimConversationPosts(ref);
-  },
-
-  async getConversationPolicies() {
-    const rows = await runTransaction(
-      STORES.SAVE,
-      "readonly",
-      async (tx) =>
-        (await requestResult(
-          tx.objectStore(STORES.SAVE).getAll(),
-        )) as RetentionRow[],
-    );
-    const conversations = await this.getConversations();
-    return rows
-      .filter(
-        (row) => row.claimant === activeMe() && row.kind === "conversation",
-      )
-      .flatMap((row) => {
-        const ref = conversations.find(
-          (entry) => entry.conv_id === row.object_id,
-        );
-        return ref ? [{ ref, policy: Policies.conversation(row.mode) }] : [];
-      });
-  },
-
-  async markConversationPolicySynced(ref: Pick<Conversation, "type" | "id">) {
-    const key: [string, "conversation", string] = [
-      activeMe(),
-      "conversation",
-      conversationId(ref),
-    ];
-    await runTransaction(STORES.SAVE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.SAVE);
-      const row = (await requestResult(store.get(key))) as
-        RetentionRow | undefined;
-      if (row) store.put({ ...row, materialized: true, missing_reason: null });
-    });
-  },
-
-  async saveArticleList(
-    entries: ArticleWithMeta[],
-    membership: Pick<ArticleMembership, "view" | "group_id"> = {
-      view: "all",
-      group_id: null,
-    },
-  ): Promise<void> {
-    for (const entry of entries) {
-      await upsertArticle(activeMe(), entry, {
-        ...membership,
-        sort_at: entry.list_sort_at ?? entry.created_at,
-      });
-    }
-  },
-
-  async getArticleList(): Promise<ArticleWithMeta[]> {
-    const rows = (await accessRows(
-      activeMe(),
-      "article",
-    )) as ArticleAccessRow[];
-    const articles = await Promise.all(rows.map(materializeArticle));
-    return articles
-      .filter((value): value is ArticleWithMeta => !!value)
-      .sort((left, right) => right.created_at.localeCompare(left.created_at));
-  },
-
-  async getSavedArticleList(): Promise<ArticleWithMeta[]> {
-    const entries = await this.getArticleList();
-    const result: ArticleWithMeta[] = [];
-    for (const article of entries) {
-      if ((await this.getArticlePolicy(article.id)).mode === "retained") {
-        result.push(article);
-      }
-    }
-    return result;
-  },
-
-  async mergeArticleListEntries(
-    entries: ArticleWithMeta[],
-    membership?: Pick<ArticleMembership, "view" | "group_id">,
-  ): Promise<void> {
-    await this.saveArticleList(entries, membership);
-  },
-
-  async reconcileArticlePage(
-    entries: ArticleWithMeta[],
-    page: {
-      view: ArticleMembership["view"];
-      groupId: string | null;
-      direction: "before" | "after";
-      cursor: { sortAt: string; id: string } | null;
-      hasMore: boolean;
-    },
-  ): Promise<void> {
-    await this.saveArticleList(entries, {
-      view: page.view,
-      group_id: page.groupId,
-    });
-    await runTransaction(STORES.SYNC, "readwrite", async (tx) => {
-      type Boundary = { sortAt: string; id: string };
-      type ArticleCoverageDetail = {
-        newest: Boundary | null;
-        oldest: Boundary | null;
-        reachedNewest: boolean;
-        reachedOldest: boolean;
+        updatedAt: read.updatedAt,
+        syncedAt: read.pending ? null : read.updatedAt,
       };
-      const boundary = (entry: ArticleWithMeta | undefined): Boundary | null =>
-        entry
-          ? {
-              sortAt: entry.list_sort_at ?? entry.created_at,
-              id: entry.id,
-            }
-          : null;
-      const same = (left: Boundary | null, right: Boundary | null) =>
-        !!left &&
-        !!right &&
-        left.id === right.id &&
-        left.sortAt === right.sortAt;
+    },
 
-      const store = tx.objectStore(STORES.SYNC);
-      const scope = `me:${activeMe()}:articles:${page.view}:${page.groupId ?? "all"}`;
-      const current = (await requestResult(store.get(scope))) as
-        { detail?: ArticleCoverageDetail } | undefined;
-      const first = boundary(entries[0]);
-      const last = boundary(entries[entries.length - 1]);
-      let detail: ArticleCoverageDetail | null = null;
-      if (!current?.detail && page.cursor === null) {
-        detail = {
-          newest: first,
-          oldest: last,
-          reachedNewest: page.direction === "after" || !page.hasMore,
-          reachedOldest: page.direction === "before" || !page.hasMore,
+    async setPendingConversationRead(
+      ref: Pick<Conversation, "type" | "id">,
+      postId: string,
+      knownSequence = 0,
+      offline = true,
+    ) {
+      const meId = actorId();
+      const convId = conversationId(ref);
+      return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_CONV_STATE);
+        const current =
+          ((await requestResult(store.get([meId, convId]))) as
+            ConversationUserStateRow | undefined) ??
+          defaultConversationState(meId, convId);
+        const resolved = Values.resolved(current.read);
+        if (
+          offline &&
+          knownSequence > 0 &&
+          knownSequence <= resolved.value.sequence
+        ) {
+          return {
+            version: {
+              value: {
+                postId: resolved.value.post_id,
+                sequence: resolved.value.sequence,
+              },
+              purpose: "conversation-read",
+              updatedAt: resolved.updatedAt,
+              syncedAt: resolved.pending ? null : resolved.updatedAt,
+            },
+            changed: false,
+          };
+        }
+        current.read = Values.propose(current.read, {
+          post_id: postId,
+          sequence: knownSequence,
+        });
+        if (knownSequence > 0) {
+          current.unread = {
+            first_post_id: null,
+            count: 0,
+            snapshot_revision: current.unread.snapshot_revision,
+          };
+        }
+        current.pending = 1;
+        store.put(current);
+        const next = Values.resolved(current.read);
+        return {
+          version: {
+            value: { postId, sequence: knownSequence },
+            purpose: "conversation-read",
+            updatedAt: next.updatedAt,
+            syncedAt: null,
+          },
+          changed: true,
         };
-      } else if (
-        current?.detail &&
-        page.direction === "after" &&
-        same(current.detail.oldest, page.cursor)
-      ) {
-        detail = {
-          ...current.detail,
-          oldest: last ?? current.detail.oldest,
-          reachedOldest: current.detail.reachedOldest || !page.hasMore,
-        };
-      } else if (
-        current?.detail &&
-        page.direction === "before" &&
-        same(current.detail.newest, page.cursor)
-      ) {
-        detail = {
-          ...current.detail,
-          newest: first ?? current.detail.newest,
-          reachedNewest: current.detail.reachedNewest || !page.hasMore,
-        };
-      }
-      // An isolated cursor page is useful cached data but proves no contiguous
-      // range, so it deliberately leaves the coverage row unchanged.
-      if (!detail) return;
-      store.put({
-        scope,
-        kind: "article-list",
-        me_id: activeMe(),
-        complete: detail.reachedNewest && detail.reachedOldest,
-        updated_at: Date.now(),
-        detail,
       });
-    });
-  },
+    },
 
-  async upsertArticleListEntry(entry: ArticleWithMeta): Promise<void> {
-    await this.saveArticleList([entry], { view: "direct", group_id: null });
-  },
+    async reconcileConversationRead(
+      ref: Pick<Conversation, "type" | "id">,
+      remote: ConversationReadValue & { updatedAt: number },
+      merge: "override" | "furthest" = "override",
+    ) {
+      const meId = actorId();
+      const convId = conversationId(ref);
+      return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_CONV_STATE);
+        const current =
+          ((await requestResult(store.get([meId, convId]))) as
+            ConversationUserStateRow | undefined) ??
+          defaultConversationState(meId, convId);
+        const proposal = current.read.proposal;
+        current.read = {
+          base: {
+            value: { post_id: remote.postId, sequence: remote.sequence },
+            updated_at: remote.updatedAt,
+          },
+          proposal:
+            proposal &&
+            (merge === "furthest"
+              ? proposal.value.sequence > remote.sequence
+              : proposal.updated_at > remote.updatedAt)
+              ? proposal
+              : null,
+        };
+        current.pending = statePending(current);
+        store.put(current);
+        const resolved = Values.resolved(current.read);
+        return {
+          value: {
+            postId: resolved.value.post_id,
+            sequence: resolved.value.sequence,
+          },
+          purpose: "conversation-read",
+          updatedAt: resolved.updatedAt,
+          syncedAt: resolved.pending ? null : resolved.updatedAt,
+        } satisfies VersionedValue<ConversationReadValue>;
+      });
+    },
 
-  async removeArticle(articleId: string): Promise<void> {
-    await runTransaction(
-      [STORES.ME_ACCESS, STORES.ME_ARTICLE_STATE],
-      "readwrite",
-      (tx) => {
-        tx.objectStore(STORES.ME_ACCESS).delete([
-          activeMe(),
-          "article",
-          articleId,
-        ]);
-        tx.objectStore(STORES.ME_ARTICLE_STATE).delete([activeMe(), articleId]);
+    async savePosts(
+      ref: Pick<Conversation, "type" | "id"> &
+        Partial<Pick<Conversation, "conv_id">>,
+      incoming: Post[],
+      options: {
+        extendCoverage?: boolean;
+        liveAppend?: boolean;
+        reachedOldest?: boolean;
+        reachedNewest?: boolean;
+      } = {},
+    ): Promise<void> {
+      const convId = conversationId(ref);
+      if (!incoming.length) return;
+      await runTransaction(
+        [STORES.POSTS, STORES.SYNC],
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.POSTS);
+          const syncStore = tx.objectStore(STORES.SYNC);
+          const scope = `posts:${convId}`;
+          const current = (await requestResult(syncStore.get(scope))) as
+            PostCoverage | undefined;
+          const extendCoverage =
+            options.extendCoverage === true ||
+            (options.liveAppend === true &&
+              (!current ||
+                (current.reached_newest &&
+                  !!current.newest &&
+                  incoming.every(
+                    (post) => post.sequence > current.newest.order,
+                  ))));
+          let oldest: { id: string; order: number } | null = null;
+          let newest: { id: string; order: number } | null = null;
+          for (const post of incoming) {
+            if (
+              !Number.isSafeInteger(post.sequence) ||
+              (post.sequence ?? 0) <= 0
+            ) {
+              throw new Error(
+                `Post ${post.id} is missing its required sequence`,
+              );
+            }
+            const previous = (await requestResult(store.get(post.id))) as
+              StoredPost | undefined;
+            const insidePublishedWindow =
+              !!current?.oldest &&
+              !!current.newest &&
+              post.sequence >= current.oldest.order &&
+              post.sequence <= current.newest.order;
+            if (!extendCoverage && !previous && !insidePublishedWindow) {
+              continue;
+            }
+            if (previous && previous.revision > post.revision) continue;
+            if (
+              previous &&
+              previous.revision === post.revision &&
+              !Values.equal(
+                { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
+                { ...post, size: 0, touched_at: 0, eviction_tier: 0 },
+              )
+            ) {
+              throw new Error(`Post revision collision: ${post.id}`);
+            }
+            const row: StoredPost = {
+              ...post,
+              sequence: post.sequence!,
+              size: Values.size(post),
+              touched_at: Date.now(),
+              eviction_tier: 0,
+            };
+            store.put(row);
+            if (!oldest || row.sequence < oldest.order) {
+              oldest = { id: row.id, order: row.sequence };
+            }
+            if (!newest || row.sequence > newest.order) {
+              newest = { id: row.id, order: row.sequence };
+            }
+          }
+          if (!extendCoverage || !oldest || !newest) return;
+          syncStore.put({
+            scope,
+            kind: "posts",
+            conv_id: convId,
+            known_revision: current?.known_revision ?? 0,
+            revision_sum: current?.revision_sum ?? "0",
+            oldest:
+              !current?.oldest || oldest.order < current.oldest.order
+                ? oldest
+                : current.oldest,
+            newest:
+              !current?.newest || newest.order > current.newest.order
+                ? newest
+                : current.newest,
+            reached_oldest:
+              (current?.reached_oldest ?? false) || !!options.reachedOldest,
+            reached_newest:
+              (current?.reached_newest ?? false) || !!options.reachedNewest,
+            updated_at: Date.now(),
+          } satisfies PostCoverage);
+        },
+      );
+      await this.trimConversationPosts(ref);
+    },
+
+    async applyPostVersion(post: Post, liveAppend = false): Promise<void> {
+      const parsed = parseConvId(post.conv_id);
+      if (!parsed) return;
+      const ref =
+        parsed.type === "group"
+          ? {
+              type: "group" as const,
+              id: parsed.groupId,
+              conv_id: post.conv_id,
+            }
+          : {
+              type: "dm" as const,
+              id: parsed.peerA === actorId() ? parsed.peerB : parsed.peerA,
+              conv_id: post.conv_id,
+            };
+      await this.savePosts(ref, [post], {
+        liveAppend,
+        reachedNewest: liveAppend,
+      });
+    },
+
+    async reconcilePostPage(
+      ref: Pick<Conversation, "type" | "id"> &
+        Partial<Pick<Conversation, "conv_id">>,
+      incoming: Post[],
+      page: {
+        beforeId?: string;
+        afterId?: string;
+        exhausted: boolean;
       },
-    );
-  },
+    ): Promise<void> {
+      const convId = conversationId(ref);
+      const coverage = await postCoverage(convId);
+      const cursorId = page.beforeId ?? page.afterId;
+      // A cursor page without an existing boundary is a disconnected fragment;
+      // it may be displayed remotely but cannot establish local coverage.
+      let connected = !coverage && !cursorId;
+      if (coverage && cursorId) {
+        const anchor = (await runTransaction(STORES.POSTS, "readonly", (tx) =>
+          requestResult(tx.objectStore(STORES.POSTS).get(cursorId)),
+        )) as StoredPost | undefined;
+        connected = anchor?.conv_id === convId;
+      } else if (coverage && !cursorId) {
+        const ids = new Set((await this.getPosts(ref)).map((post) => post.id));
+        connected = incoming.some((post) => ids.has(post.id));
+        if (!connected) await clearConversationPostWindow(convId);
+        connected = true;
+      }
+      if (!connected) return;
+      if (incoming.length) {
+        await this.savePosts(ref, incoming, {
+          extendCoverage: true,
+          reachedOldest: !!page.beforeId && page.exhausted,
+          reachedNewest: !page.beforeId && (!page.afterId || page.exhausted),
+        });
+        return;
+      }
+      if (coverage && page.exhausted) {
+        await runTransaction(STORES.SYNC, "readwrite", async (tx) => {
+          const store = tx.objectStore(STORES.SYNC);
+          const current = (await requestResult(
+            store.get(`posts:${convId}`),
+          )) as PostCoverage | undefined;
+          if (!current) return;
+          store.put({
+            ...current,
+            reached_oldest: current.reached_oldest || !!page.beforeId,
+            reached_newest: current.reached_newest || !page.beforeId,
+            updated_at: Date.now(),
+          });
+        });
+      }
+    },
 
-  async purgeArticle(articleId: string): Promise<void> {
-    const related = await runTransaction(
-      [
-        STORES.ARTICLE_SEGMENTS,
-        STORES.ME_ACCESS,
-        STORES.ME_ARTICLE_STATE,
-        STORES.SAVE,
-      ],
-      "readonly",
-      async (tx) => ({
-        segments: await requestResult(
-          tx
-            .objectStore(STORES.ARTICLE_SEGMENTS)
-            .index("by-article")
-            .getAllKeys(IDBKeyRange.only(articleId)),
-        ),
-        access: await requestResult(
-          tx
-            .objectStore(STORES.ME_ACCESS)
-            .index("by-object")
-            .getAllKeys(IDBKeyRange.only(["article", articleId])),
-        ),
-        states: (
+    async advancePostRevision(
+      convId: string,
+      revision: number,
+      revisionSum?: string,
+    ): Promise<void> {
+      const scope = `posts:${convId}`;
+      await runTransaction(
+        [STORES.SYNC, STORES.ME_ACCESS],
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.SYNC);
+          const current = (await requestResult(store.get(scope))) as
+            PostCoverage | undefined;
+          if (!current?.oldest || !current.newest) return;
+          store.put({
+            scope,
+            kind: "posts",
+            conv_id: convId,
+            known_revision: Math.max(current?.known_revision ?? 0, revision),
+            revision_sum: revisionSum ?? current.revision_sum,
+            oldest: current.oldest,
+            newest: current.newest,
+            reached_oldest: current.reached_oldest,
+            reached_newest: current.reached_newest,
+            updated_at: Date.now(),
+          } satisfies PostCoverage);
+        },
+      );
+    },
+
+    async getKnownPostRevision(convId: string): Promise<number> {
+      return (await postCoverage(convId))?.known_revision ?? 0;
+    },
+
+    async getKnownPostRevisionSum(convId: string): Promise<string | null> {
+      return (await postCoverage(convId))?.revision_sum ?? null;
+    },
+
+    async reconcilePostRevisions(
+      ref: Pick<Conversation, "type" | "id"> &
+        Partial<Pick<Conversation, "conv_id">>,
+      incoming: Post[],
+      revision: number,
+      revisionSum?: string,
+    ): Promise<void> {
+      const convId = conversationId(ref);
+      const coverage = await postCoverage(convId);
+      if (!coverage?.oldest || !coverage.newest) return;
+      await this.savePosts(ref, incoming, { extendCoverage: false });
+      if (coverage.reached_newest) {
+        const appended = incoming
+          .filter((post) => post.sequence > coverage.newest.order)
+          .sort((left, right) => left.sequence - right.sequence);
+        if (appended.length) {
+          await this.savePosts(ref, appended, {
+            extendCoverage: true,
+            reachedNewest: true,
+          });
+        }
+      }
+      await this.advancePostRevision(convId, revision, revisionSum);
+    },
+
+    async getPosts(
+      ref: Pick<Conversation, "type" | "id"> &
+        Partial<Pick<Conversation, "conv_id">>,
+    ): Promise<Post[]> {
+      const convId = conversationId(ref);
+      return runTransaction(
+        [STORES.ME_ACCESS, STORES.POSTS],
+        "readonly",
+        async (tx) => {
+          const access = await requestResult(
+            tx
+              .objectStore(STORES.ME_ACCESS)
+              .get([actorId(), "conversation", convId]),
+          );
+          if (!access) return [];
+          const rows = (await requestResult(
+            tx
+              .objectStore(STORES.POSTS)
+              .index("by-conversation-sequence")
+              .getAll(
+                IDBKeyRange.bound(
+                  [convId, 0],
+                  [convId, Number.MAX_SAFE_INTEGER],
+                ),
+              ),
+          )) as StoredPost[];
+          return rows.map(
+            ({ size: _s, touched_at: _t, eviction_tier: _e, ...post }) => {
+              void _s;
+              void _t;
+              void _e;
+              return post;
+            },
+          );
+        },
+      );
+    },
+
+    async trimConversationPosts(
+      ref: Pick<Conversation, "type" | "id"> &
+        Partial<Pick<Conversation, "conv_id">>,
+    ): Promise<void> {
+      const convId = conversationId(ref);
+      const cutoff = await deviceConversationCutoff(convId);
+      const rows = await runTransaction(
+        STORES.POSTS,
+        "readonly",
+        async (tx) =>
           (await requestResult(
-            tx.objectStore(STORES.ME_ARTICLE_STATE).getAll(),
-          )) as ArticleUserStateRow[]
-        )
-          .filter((row) => row.article_id === articleId)
-          .map((row) => [row.me_id, row.article_id] as IDBValidKey),
-        saves: await requestResult(
+            tx
+              .objectStore(STORES.POSTS)
+              .index("by-conversation-sequence")
+              .getAll(
+                IDBKeyRange.bound(
+                  [convId, 0],
+                  [convId, Number.MAX_SAFE_INTEGER],
+                ),
+              ),
+          )) as StoredPost[],
+      );
+      const deleteCount =
+        cutoff === null
+          ? Math.max(0, rows.length - 200)
+          : rows.findIndex((row) => Date.parse(row.created_at) >= cutoff);
+      const normalizedCount =
+        cutoff !== null && deleteCount < 0 ? rows.length : deleteCount;
+      await deleteConversationPostPrefix(convId, normalizedCount);
+    },
+
+    async getConversationPolicy(ref: Pick<Conversation, "type" | "id">) {
+      const row = await runTransaction(STORES.SAVE, "readonly", (tx) =>
+        requestResult(
           tx
             .objectStore(STORES.SAVE)
-            .index("by-resource")
-            .getAllKeys(IDBKeyRange.only(["article", articleId])),
+            .get([actorId(), "conversation", conversationId(ref)]),
         ),
-      }),
-    );
-    await runTransaction(STORES.ARTICLES, "readwrite", (tx) => {
-      tx.objectStore(STORES.ARTICLES).delete(articleId);
-    });
-    await deleteKeysBatched(STORES.ARTICLE_SEGMENTS, related.segments);
-    await deleteKeysBatched(STORES.ME_ACCESS, related.access);
-    await deleteKeysBatched(STORES.ME_ARTICLE_STATE, related.states);
-    await deleteKeysBatched(STORES.SAVE, related.saves);
-  },
-
-  async saveArticleMeta(
-    article: ArticleWithMeta,
-    membership: Pick<ArticleMembership, "view" | "group_id"> = {
-      view: "direct",
-      group_id: null,
+      );
+      return Policies.conversation((row as RetentionRow | undefined)?.mode);
     },
-  ): Promise<void> {
-    await upsertArticle(activeMe(), article, {
-      ...membership,
-      sort_at: article.list_sort_at ?? article.created_at,
-    });
-  },
 
-  async getArticleMeta(articleId: string): Promise<ArticleWithMeta | null> {
-    const row = await runTransaction(STORES.ME_ACCESS, "readonly", (tx) =>
-      requestResult(
-        tx
-          .objectStore(STORES.ME_ACCESS)
-          .get([activeMe(), "article", articleId]),
-      ),
-    );
-    return row ? materializeArticle(row as ArticleAccessRow) : null;
-  },
-
-  async getArticleProgress(
-    articleId: string,
-  ): Promise<ReadingProgressVersion | null> {
-    const state = await getArticleState(activeMe(), articleId);
-    const value = Values.resolved(state.resume);
-    return {
-      offset: value.value,
-      updatedAt: value.updatedAt,
-      synced: !value.pending,
-    };
-  },
-
-  async setArticleBookmark(articleId: string, value: boolean) {
-    const meId = activeMe();
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
-      const current =
-        ((await requestResult(store.get([meId, articleId]))) as
-          ArticleUserStateRow | undefined) ??
-        defaultArticleState(meId, articleId);
-      current.bookmark = Values.propose(current.bookmark, value);
-      current.pending = statePending(current);
-      store.put(current);
-      const resolved = Values.resolved(current.bookmark);
-      return {
-        value: resolved.value,
-        purpose: `article:${articleId}:bookmark`,
-        updatedAt: resolved.updatedAt,
-        syncedAt: null,
-      } satisfies VersionedValue<boolean>;
-    });
-  },
-
-  async reconcileArticleBookmark(
-    articleId: string,
-    remote: { value: boolean; updatedAt: number },
-  ) {
-    const meId = activeMe();
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
-      const current =
-        ((await requestResult(store.get([meId, articleId]))) as
-          ArticleUserStateRow | undefined) ??
-        defaultArticleState(meId, articleId);
-      current.bookmark = Values.reconcile(current.bookmark, remote);
-      current.pending = statePending(current);
-      store.put(current);
-      const resolved = Values.resolved(current.bookmark);
-      return {
-        value: resolved.value,
-        purpose: `article:${articleId}:bookmark`,
-        updatedAt: resolved.updatedAt,
-        syncedAt: resolved.pending ? null : resolved.updatedAt,
-      } satisfies VersionedValue<boolean>;
-    });
-  },
-
-  async getPendingArticleBookmarks() {
-    const accessible = new Set(
-      (await this.getArticleList()).map((article) => article.id),
-    );
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readonly", async (tx) => {
-      const rows = (await requestResult(
-        tx
-          .objectStore(STORES.ME_ARTICLE_STATE)
-          .index("by-pending")
-          .getAll(IDBKeyRange.only([activeMe(), 1])),
-      )) as ArticleUserStateRow[];
-      return rows.flatMap((row) => {
-        if (!accessible.has(row.article_id)) return [];
-        const value = Values.resolved(row.bookmark);
-        return value.pending
-          ? [
-              {
-                articleId: row.article_id,
-                value: value.value,
-                updatedAt: value.updatedAt,
-              },
-            ]
-          : [];
+    async setConversationPolicy(
+      ref: Pick<Conversation, "type" | "id">,
+      policy: ConversationDownloadPolicy,
+    ): Promise<void> {
+      const days = CONVERSATION_RETENTION_DAYS[policy];
+      const row: RetentionRow = {
+        claimant: actorId(),
+        kind: "conversation",
+        object_id: conversationId(ref),
+        mode: policy,
+        keep_after_ms: days ? Date.now() - days * 86_400_000 : null,
+        protected_until: 0,
+        materialized: false,
+        bytes: 0,
+        last_touched_at: Date.now(),
+        missing_reason: "never-downloaded",
+      };
+      await runTransaction(STORES.SAVE, "readwrite", (tx) => {
+        tx.objectStore(STORES.SAVE).put(row);
       });
-    });
-  },
+      await this.trimConversationPosts(ref);
+    },
 
-  async setPendingArticleProgress(
-    articleId: string,
-    offset: number,
-    offline: boolean,
-  ) {
-    const meId = activeMe();
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
-      const current =
-        ((await requestResult(store.get([meId, articleId]))) as
-          ArticleUserStateRow | undefined) ??
-        defaultArticleState(meId, articleId);
-      current.resume = Values.propose(current.resume, offset);
-      const furthest = Values.resolved(current.furthest);
-      if (offline && offset > furthest.value) {
-        current.furthest = Values.propose(current.furthest, offset);
-      } else if (!offline && current.furthest.proposal) {
-        // An explicit online navigation supersedes an older offline proposal.
-        current.furthest = {
-          ...current.furthest,
-          proposal: null,
-        };
-      }
-      current.pending = 1;
-      store.put(current);
-      const value = Values.resolved(current.resume);
-      return { offset: value.value, updatedAt: value.updatedAt, synced: false };
-    });
-  },
-
-  async reconcileArticleProgress(
-    articleId: string,
-    remote: { offset: number; updatedAt: number },
-    merge: "override" | "furthest" = "override",
-  ) {
-    const meId = activeMe();
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
-      const current =
-        ((await requestResult(store.get([meId, articleId]))) as
-          ArticleUserStateRow | undefined) ??
-        defaultArticleState(meId, articleId);
-      if (merge === "furthest") {
-        current.resume = Values.assignment(remote.offset, remote.updatedAt);
-        current.furthest = Values.assignment(remote.offset, remote.updatedAt);
-      } else {
-        current.resume = Values.reconcile(current.resume, {
-          value: remote.offset,
-          updatedAt: remote.updatedAt,
+    async getConversationPolicies() {
+      const rows = await runTransaction(
+        STORES.SAVE,
+        "readonly",
+        async (tx) =>
+          (await requestResult(
+            tx.objectStore(STORES.SAVE).getAll(),
+          )) as RetentionRow[],
+      );
+      const conversations = await this.getConversations();
+      return rows
+        .filter(
+          (row) => row.claimant === actorId() && row.kind === "conversation",
+        )
+        .flatMap((row) => {
+          const ref = conversations.find(
+            (entry) => entry.conv_id === row.object_id,
+          );
+          return ref ? [{ ref, policy: Policies.conversation(row.mode) }] : [];
         });
-        const furthest = Values.resolved(current.furthest);
-        current.furthest = Values.assignment(
-          Math.max(remote.offset, furthest.value),
-          Math.max(remote.updatedAt, furthest.updatedAt),
-        );
+    },
+
+    async markConversationPolicySynced(ref: Pick<Conversation, "type" | "id">) {
+      const key: [string, "conversation", string] = [
+        actorId(),
+        "conversation",
+        conversationId(ref),
+      ];
+      await runTransaction(STORES.SAVE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.SAVE);
+        const row = (await requestResult(store.get(key))) as
+          RetentionRow | undefined;
+        if (row)
+          store.put({ ...row, materialized: true, missing_reason: null });
+      });
+    },
+
+    async saveArticleList(
+      entries: ArticleWithMeta[],
+      membership: Pick<ArticleMembership, "view" | "group_id"> = {
+        view: "all",
+        group_id: null,
+      },
+    ): Promise<void> {
+      for (const entry of entries) {
+        await upsertArticle(actorId(), entry, {
+          ...membership,
+          sort_at: entry.list_sort_at ?? entry.created_at,
+        });
       }
-      current.pending = statePending(current);
-      store.put(current);
-      const value = Values.resolved(current.resume);
+    },
+
+    async getArticleList(): Promise<ArticleWithMeta[]> {
+      const rows = (await accessRows(
+        actorId(),
+        "article",
+      )) as ArticleAccessRow[];
+      const articles = await Promise.all(rows.map(materializeArticle));
+      return articles
+        .filter((value): value is ArticleWithMeta => !!value)
+        .sort((left, right) => right.created_at.localeCompare(left.created_at));
+    },
+
+    async getSavedArticleList(): Promise<ArticleWithMeta[]> {
+      const entries = await this.getArticleList();
+      const result: ArticleWithMeta[] = [];
+      for (const article of entries) {
+        if ((await this.getArticlePolicy(article.id)).mode === "retained") {
+          result.push(article);
+        }
+      }
+      return result;
+    },
+
+    async mergeArticleListEntries(
+      entries: ArticleWithMeta[],
+      membership?: Pick<ArticleMembership, "view" | "group_id">,
+    ): Promise<void> {
+      await this.saveArticleList(entries, membership);
+    },
+
+    async reconcileArticlePage(
+      entries: ArticleWithMeta[],
+      page: {
+        view: ArticleMembership["view"];
+        groupId: string | null;
+        direction: "before" | "after";
+        cursor: { sortAt: string; id: string } | null;
+        hasMore: boolean;
+      },
+    ): Promise<void> {
+      await this.saveArticleList(entries, {
+        view: page.view,
+        group_id: page.groupId,
+      });
+      await runTransaction(
+        [STORES.SYNC, STORES.ME_ACCESS],
+        "readwrite",
+        async (tx) => {
+          type Boundary = { order: string; id: string };
+          type ArticleCoverageDetail = ContinuousCoverage<Boundary>;
+          const boundary = (
+            entry: ArticleWithMeta | undefined,
+          ): Boundary | null =>
+            entry
+              ? {
+                  order: entry.list_sort_at ?? entry.created_at,
+                  id: entry.id,
+                }
+              : null;
+
+          const store = tx.objectStore(STORES.SYNC);
+          const scope = `me:${actorId()}:articles:${page.view}:${page.groupId ?? "all"}`;
+          if (!page.cursor) {
+            // A root page replaces this list projection. Memberships outside the
+            // new proof are removed so deleted/moved articles cannot survive as
+            // offline phantoms indefinitely.
+            const pageIds = new Set(entries.map((entry) => entry.id));
+            const accessStore = tx.objectStore(STORES.ME_ACCESS);
+            const rows = (await requestResult(
+              accessStore
+                .index("by-me-kind")
+                .getAll(IDBKeyRange.only([actorId(), "article"])),
+            )) as ArticleAccessRow[];
+            for (const row of rows) {
+              if (pageIds.has(row.object_id)) continue;
+              const memberships = row.memberships.filter(
+                (membership) =>
+                  membership.view !== page.view ||
+                  membership.group_id !== page.groupId,
+              );
+              if (memberships.length) {
+                accessStore.put({ ...row, memberships });
+              } else {
+                accessStore.delete([row.me_id, row.kind, row.object_id]);
+              }
+            }
+            if (!entries.length) {
+              store.delete(scope);
+              return;
+            }
+          }
+          const current = (await requestResult(store.get(scope))) as
+            { detail?: ArticleCoverageDetail } | undefined;
+          const first = boundary(entries[0]);
+          const last = boundary(entries[entries.length - 1]);
+          const detail = mergeCursorCoverage({
+            current: current?.detail ?? null,
+            direction: page.direction,
+            cursor: page.cursor
+              ? { id: page.cursor.id, order: page.cursor.sortAt }
+              : null,
+            first,
+            last,
+            exhausted: !page.hasMore,
+          });
+          // An isolated cursor page is useful cached data but proves no contiguous
+          // range, so it deliberately leaves the coverage row unchanged.
+          if (!detail) return;
+          store.put({
+            scope,
+            kind: "article-list",
+            me_id: actorId(),
+            complete: detail.reached_newest && detail.reached_oldest,
+            updated_at: Date.now(),
+            detail,
+          });
+        },
+      );
+    },
+
+    async upsertArticleListEntry(entry: ArticleWithMeta): Promise<void> {
+      await this.saveArticleList([entry], { view: "direct", group_id: null });
+    },
+
+    async removeArticle(articleId: string): Promise<void> {
+      await runTransaction(
+        [STORES.ME_ACCESS, STORES.ME_ARTICLE_STATE],
+        "readwrite",
+        (tx) => {
+          tx.objectStore(STORES.ME_ACCESS).delete([
+            actorId(),
+            "article",
+            articleId,
+          ]);
+          tx.objectStore(STORES.ME_ARTICLE_STATE).delete([
+            actorId(),
+            articleId,
+          ]);
+        },
+      );
+    },
+
+    async purgeArticle(articleId: string): Promise<void> {
+      await runTransaction(
+        [
+          STORES.ARTICLES,
+          STORES.ARTICLE_SEGMENTS,
+          STORES.ME_ACCESS,
+          STORES.ME_ARTICLE_STATE,
+          STORES.SAVE,
+        ],
+        "readwrite",
+        async (tx) => {
+          tx.objectStore(STORES.ARTICLES).delete(articleId);
+          const segments = await requestResult(
+            tx
+              .objectStore(STORES.ARTICLE_SEGMENTS)
+              .index("by-article")
+              .getAllKeys(IDBKeyRange.only(articleId)),
+          );
+          const access = await requestResult(
+            tx
+              .objectStore(STORES.ME_ACCESS)
+              .index("by-object")
+              .getAllKeys(IDBKeyRange.only(["article", articleId])),
+          );
+          const states = (
+            (await requestResult(
+              tx.objectStore(STORES.ME_ARTICLE_STATE).getAll(),
+            )) as ArticleUserStateRow[]
+          )
+            .filter((row) => row.article_id === articleId)
+            .map((row) => [row.me_id, row.article_id] as IDBValidKey);
+          const saves = await requestResult(
+            tx
+              .objectStore(STORES.SAVE)
+              .index("by-resource")
+              .getAllKeys(IDBKeyRange.only(["article", articleId])),
+          );
+          for (const key of segments) {
+            tx.objectStore(STORES.ARTICLE_SEGMENTS).delete(key);
+          }
+          for (const key of access)
+            tx.objectStore(STORES.ME_ACCESS).delete(key);
+          for (const key of states) {
+            tx.objectStore(STORES.ME_ARTICLE_STATE).delete(key);
+          }
+          for (const key of saves) tx.objectStore(STORES.SAVE).delete(key);
+        },
+      );
+    },
+
+    async saveArticleMeta(
+      article: ArticleWithMeta,
+      membership: Pick<ArticleMembership, "view" | "group_id"> = {
+        view: "direct",
+        group_id: null,
+      },
+    ): Promise<void> {
+      await upsertArticle(actorId(), article, {
+        ...membership,
+        sort_at: article.list_sort_at ?? article.created_at,
+      });
+    },
+
+    async getArticleMeta(articleId: string): Promise<ArticleWithMeta | null> {
+      const row = await runTransaction(STORES.ME_ACCESS, "readonly", (tx) =>
+        requestResult(
+          tx
+            .objectStore(STORES.ME_ACCESS)
+            .get([actorId(), "article", articleId]),
+        ),
+      );
+      return row ? materializeArticle(row as ArticleAccessRow) : null;
+    },
+
+    async getArticleProgress(
+      articleId: string,
+    ): Promise<ReadingProgressVersion | null> {
+      const state = await getArticleState(actorId(), articleId);
+      const value = Values.resolved(state.resume);
       return {
         offset: value.value,
         updatedAt: value.updatedAt,
         synced: !value.pending,
       };
-    });
-  },
+    },
 
-  async getPendingArticleProgress() {
-    const accessible = new Set(
-      (await this.getArticleList()).map((article) => article.id),
-    );
-    return runTransaction(STORES.ME_ARTICLE_STATE, "readonly", async (tx) => {
-      const rows = (await requestResult(
-        tx
-          .objectStore(STORES.ME_ARTICLE_STATE)
-          .index("by-pending")
-          .getAll(IDBKeyRange.only([activeMe(), 1])),
-      )) as ArticleUserStateRow[];
-      return rows.flatMap((row) => {
-        if (!accessible.has(row.article_id)) return [];
-        const furthest = Values.resolved(row.furthest);
-        return furthest.pending
-          ? [
-              {
-                articleId: row.article_id,
-                offset: furthest.value,
-                updatedAt: furthest.updatedAt,
-              },
-            ]
-          : [];
-      });
-    });
-  },
+    async setArticleBookmark(articleId: string, value: boolean) {
+      const meId = actorId();
+      return runTransaction(
+        STORES.ME_ARTICLE_STATE,
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
+          const current =
+            ((await requestResult(store.get([meId, articleId]))) as
+              ArticleUserStateRow | undefined) ??
+            defaultArticleState(meId, articleId);
+          current.bookmark = Values.propose(current.bookmark, value);
+          current.pending = statePending(current);
+          store.put(current);
+          const resolved = Values.resolved(current.bookmark);
+          return {
+            value: resolved.value,
+            purpose: `article:${articleId}:bookmark`,
+            updatedAt: resolved.updatedAt,
+            syncedAt: null,
+          } satisfies VersionedValue<boolean>;
+        },
+      );
+    },
 
-  async getArticlePolicy(articleId: string): Promise<ArticleDownloadPolicy> {
-    const row = await runTransaction(STORES.SAVE, "readonly", (tx) =>
-      requestResult(
-        tx.objectStore(STORES.SAVE).get([activeMe(), "article", articleId]),
-      ),
-    );
-    const policy = Policies.article(
-      (row as RetentionRow | undefined)?.mode === "retained"
-        ? {
-            mode: "retained",
-            days: Number((row as RetentionRow).keep_after_ms),
-            expiresAt: (row as RetentionRow).protected_until,
-          }
-        : null,
-    );
-    if (policy.mode === "retained" && policy.expiresAt <= Date.now()) {
-      await this.setArticlePolicy(articleId, { mode: "auto" });
-      return { mode: "auto" };
-    }
-    return policy;
-  },
-
-  async setArticlePolicy(articleId: string, policy: ArticleDownloadPolicy) {
-    const normalized = Policies.article(policy);
-    const row: RetentionRow = {
-      claimant: activeMe(),
-      kind: "article",
-      object_id: articleId,
-      mode: normalized.mode,
-      keep_after_ms: normalized.mode === "retained" ? normalized.days : null,
-      protected_until:
-        normalized.mode === "retained" ? normalized.expiresAt : 0,
-      materialized: false,
-      bytes: 0,
-      last_touched_at: Date.now(),
-      missing_reason:
-        normalized.mode === "retained" ? "never-downloaded" : null,
-    };
-    await runTransaction(STORES.SAVE, "readwrite", (tx) => {
-      tx.objectStore(STORES.SAVE).put(row);
-    });
-  },
-
-  async getArticlePolicies() {
-    return runTransaction(STORES.SAVE, "readonly", async (tx) => {
-      const rows = (await requestResult(
-        tx.objectStore(STORES.SAVE).getAll(),
-      )) as RetentionRow[];
-      return rows
-        .filter((row) => row.claimant === activeMe() && row.kind === "article")
-        .map((row) => ({
-          articleId: row.object_id,
-          policy:
-            row.mode === "retained"
-              ? ({
-                  mode: "retained",
-                  days: Number(row.keep_after_ms) as 1 | 7 | 180,
-                  expiresAt: row.protected_until,
-                } as ArticleDownloadPolicy)
-              : ({ mode: "auto" } as ArticleDownloadPolicy),
-        }));
-    });
-  },
-
-  async markArticlePolicySynced(articleId: string, bytes = 0) {
-    const key: [string, "article", string] = [activeMe(), "article", articleId];
-    await runTransaction(STORES.SAVE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.SAVE);
-      const row = (await requestResult(store.get(key))) as
-        RetentionRow | undefined;
-      if (row) {
-        store.put({
-          ...row,
-          materialized: true,
-          missing_reason: null,
-          bytes,
-          last_touched_at: Date.now(),
-        });
-      }
-    });
-  },
-
-  async saveArticleSegment(articleId: string, offset: number, data: unknown) {
-    const retained =
-      (await this.getArticlePolicy(articleId)).mode === "retained";
-    const startOffset =
-      data &&
-      typeof data === "object" &&
-      typeof (data as { offset?: unknown }).offset === "number"
-        ? (data as { offset: number }).offset
-        : offset;
-    await runTransaction(STORES.ARTICLE_SEGMENTS, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ARTICLE_SEGMENTS);
-      const previous = (await requestResult(
-        store.get([articleId, startOffset]),
-      )) as StoredArticleSegment | undefined;
-      if (previous && !Values.equal(previous.value, data)) {
-        throw new Error(
-          `Immutable article segment changed: ${articleId}:${startOffset}`,
-        );
-      }
-      store.put({
-        article_id: articleId,
-        start_offset: startOffset,
-        value: data,
-        size: Values.size(data),
-        touched_at: Date.now(),
-        eviction_tier: retained ? 2 : 0,
-      } satisfies StoredArticleSegment);
-    });
-  },
-
-  async getArticleSegment<T>(
-    articleId: string,
-    offset: number,
-  ): Promise<T | null> {
-    const row = await runTransaction(
-      STORES.ARTICLE_SEGMENTS,
-      "readonly",
-      async (tx) => {
-        const request = tx
-          .objectStore(STORES.ARTICLE_SEGMENTS)
-          .index("by-article-start")
-          .openCursor(
-            IDBKeyRange.bound([articleId, 0], [articleId, offset]),
-            "prev",
-          );
-        const cursor = await requestResult(request);
-        return (cursor?.value as StoredArticleSegment<T> | undefined) ?? null;
-      },
-    );
-    if (!row) return null;
-    const value = row.value as T & { offset?: number; content?: string };
-    if (
-      typeof value.offset === "number" &&
-      typeof value.content === "string" &&
-      value.offset < offset
+    async reconcileArticleBookmark(
+      articleId: string,
+      remote: { value: boolean; updatedAt: number },
     ) {
-      const relative = offset - value.offset;
-      if (relative >= value.content.length) return null;
-      return { ...value, offset, content: value.content.slice(relative) };
-    }
-    return value;
-  },
+      const meId = actorId();
+      return runTransaction(
+        STORES.ME_ARTICLE_STATE,
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
+          const current =
+            ((await requestResult(store.get([meId, articleId]))) as
+              ArticleUserStateRow | undefined) ??
+            defaultArticleState(meId, articleId);
+          current.bookmark = Values.reconcile(current.bookmark, remote);
+          current.pending = statePending(current);
+          store.put(current);
+          const resolved = Values.resolved(current.bookmark);
+          return {
+            value: resolved.value,
+            purpose: `article:${articleId}:bookmark`,
+            updatedAt: resolved.updatedAt,
+            syncedAt: resolved.pending ? null : resolved.updatedAt,
+          } satisfies VersionedValue<boolean>;
+        },
+      );
+    },
 
-  async getDraft(
-    ref: Pick<Conversation, "type" | "id">,
-  ): Promise<DraftVersion | null> {
-    const state = await getConversationState(activeMe(), conversationId(ref));
-    const draft = Values.resolved(state.draft);
-    return {
-      content: draft.value,
-      updatedAt: draft.updatedAt,
-      syncedAt: draft.pending ? null : draft.updatedAt,
-    };
-  },
+    async getPendingArticleBookmarks() {
+      const accessible = new Set(
+        (await this.getArticleList()).map((article) => article.id),
+      );
+      return runTransaction(STORES.ME_ARTICLE_STATE, "readonly", async (tx) => {
+        const rows = (await requestResult(
+          tx
+            .objectStore(STORES.ME_ARTICLE_STATE)
+            .index("by-pending")
+            .getAll(IDBKeyRange.only([actorId(), 1])),
+        )) as ArticleUserStateRow[];
+        return rows.flatMap((row) => {
+          if (!accessible.has(row.article_id)) return [];
+          const value = Values.resolved(row.bookmark);
+          return value.pending
+            ? [
+                {
+                  articleId: row.article_id,
+                  value: value.value,
+                  updatedAt: value.updatedAt,
+                },
+              ]
+            : [];
+        });
+      });
+    },
 
-  async saveDraft(
-    ref: Pick<Conversation, "type" | "id">,
-    content: string,
-    options?: { updatedAt?: number; synced?: boolean },
-  ) {
-    const meId = activeMe();
-    const convId = conversationId(ref);
-    return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
-      const store = tx.objectStore(STORES.ME_CONV_STATE);
-      const current =
-        ((await requestResult(store.get([meId, convId]))) as
-          ConversationUserStateRow | undefined) ??
-        defaultConversationState(meId, convId);
-      current.draft = options?.synced
-        ? Values.reconcile(current.draft, {
-            value: content,
-            updatedAt: options.updatedAt ?? 0,
-          })
-        : Values.propose(current.draft, content, options?.updatedAt);
-      current.pending = statePending(current);
-      store.put(current);
-      const draft = Values.resolved(current.draft);
+    async setPendingArticleProgress(
+      articleId: string,
+      offset: number,
+      offline: boolean,
+    ) {
+      const meId = actorId();
+      return runTransaction(
+        STORES.ME_ARTICLE_STATE,
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
+          const current =
+            ((await requestResult(store.get([meId, articleId]))) as
+              ArticleUserStateRow | undefined) ??
+            defaultArticleState(meId, articleId);
+          current.resume = Values.propose(current.resume, offset);
+          const furthest = Values.resolved(current.furthest);
+          if (offline && offset > furthest.value) {
+            current.furthest = Values.propose(current.furthest, offset);
+          } else if (!offline && current.furthest.proposal) {
+            // An explicit online navigation supersedes an older offline proposal.
+            current.furthest = {
+              ...current.furthest,
+              proposal: null,
+            };
+          }
+          current.pending = 1;
+          store.put(current);
+          const value = Values.resolved(current.resume);
+          return {
+            offset: value.value,
+            updatedAt: value.updatedAt,
+            synced: false,
+          };
+        },
+      );
+    },
+
+    async reconcileArticleProgress(
+      articleId: string,
+      remote: { offset: number; updatedAt: number },
+      merge: "override" | "furthest" = "override",
+    ) {
+      const meId = actorId();
+      return runTransaction(
+        STORES.ME_ARTICLE_STATE,
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(STORES.ME_ARTICLE_STATE);
+          const current =
+            ((await requestResult(store.get([meId, articleId]))) as
+              ArticleUserStateRow | undefined) ??
+            defaultArticleState(meId, articleId);
+          if (merge === "furthest") {
+            current.resume = Values.assignment(remote.offset, remote.updatedAt);
+            current.furthest = Values.assignment(
+              remote.offset,
+              remote.updatedAt,
+            );
+          } else {
+            current.resume = Values.reconcile(current.resume, {
+              value: remote.offset,
+              updatedAt: remote.updatedAt,
+            });
+            const furthest = Values.resolved(current.furthest);
+            current.furthest = Values.assignment(
+              Math.max(remote.offset, furthest.value),
+              Math.max(remote.updatedAt, furthest.updatedAt),
+            );
+          }
+          current.pending = statePending(current);
+          store.put(current);
+          const value = Values.resolved(current.resume);
+          return {
+            offset: value.value,
+            updatedAt: value.updatedAt,
+            synced: !value.pending,
+          };
+        },
+      );
+    },
+
+    async getPendingArticleProgress() {
+      const accessible = new Set(
+        (await this.getArticleList()).map((article) => article.id),
+      );
+      return runTransaction(STORES.ME_ARTICLE_STATE, "readonly", async (tx) => {
+        const rows = (await requestResult(
+          tx
+            .objectStore(STORES.ME_ARTICLE_STATE)
+            .index("by-pending")
+            .getAll(IDBKeyRange.only([actorId(), 1])),
+        )) as ArticleUserStateRow[];
+        return rows.flatMap((row) => {
+          if (!accessible.has(row.article_id)) return [];
+          const furthest = Values.resolved(row.furthest);
+          return furthest.pending
+            ? [
+                {
+                  articleId: row.article_id,
+                  offset: furthest.value,
+                  updatedAt: furthest.updatedAt,
+                },
+              ]
+            : [];
+        });
+      });
+    },
+
+    async getArticlePolicy(articleId: string): Promise<ArticleDownloadPolicy> {
+      const meId = actorId();
+      return runTransaction(STORES.SAVE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.SAVE);
+        const row = (await requestResult(
+          store.get([meId, "article", articleId]),
+        )) as RetentionRow | undefined;
+        const policy = Policies.article(
+          row?.mode === "retained"
+            ? {
+                mode: "retained",
+                days: Number(row.keep_after_ms),
+                expiresAt: row.protected_until,
+              }
+            : null,
+        );
+        if (policy.mode !== "retained" || policy.expiresAt > Date.now()) {
+          return policy;
+        }
+        store.put({
+          ...row!,
+          mode: "auto",
+          keep_after_ms: null,
+          protected_until: 0,
+          materialized: false,
+          bytes: 0,
+          last_touched_at: Date.now(),
+          missing_reason: null,
+        } satisfies RetentionRow);
+        return { mode: "auto" };
+      });
+    },
+
+    async setArticlePolicy(articleId: string, policy: ArticleDownloadPolicy) {
+      const normalized = Policies.article(policy);
+      const row: RetentionRow = {
+        claimant: actorId(),
+        kind: "article",
+        object_id: articleId,
+        mode: normalized.mode,
+        keep_after_ms: normalized.mode === "retained" ? normalized.days : null,
+        protected_until:
+          normalized.mode === "retained" ? normalized.expiresAt : 0,
+        materialized: false,
+        bytes: 0,
+        last_touched_at: Date.now(),
+        missing_reason:
+          normalized.mode === "retained" ? "never-downloaded" : null,
+      };
+      await runTransaction(STORES.SAVE, "readwrite", (tx) => {
+        tx.objectStore(STORES.SAVE).put(row);
+      });
+    },
+
+    async getArticlePolicies() {
+      return runTransaction(STORES.SAVE, "readonly", async (tx) => {
+        const rows = (await requestResult(
+          tx.objectStore(STORES.SAVE).getAll(),
+        )) as RetentionRow[];
+        return rows
+          .filter((row) => row.claimant === actorId() && row.kind === "article")
+          .map((row) => ({
+            articleId: row.object_id,
+            policy:
+              row.mode === "retained"
+                ? ({
+                    mode: "retained",
+                    days: Number(row.keep_after_ms) as 1 | 7 | 180,
+                    expiresAt: row.protected_until,
+                  } as ArticleDownloadPolicy)
+                : ({ mode: "auto" } as ArticleDownloadPolicy),
+          }));
+      });
+    },
+
+    async markArticlePolicySynced(articleId: string, bytes = 0) {
+      const key: [string, "article", string] = [
+        actorId(),
+        "article",
+        articleId,
+      ];
+      await runTransaction(STORES.SAVE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.SAVE);
+        const row = (await requestResult(store.get(key))) as
+          RetentionRow | undefined;
+        if (row) {
+          store.put({
+            ...row,
+            materialized: true,
+            missing_reason: null,
+            bytes,
+            last_touched_at: Date.now(),
+          });
+        }
+      });
+    },
+
+    async saveArticleSegment(articleId: string, offset: number, data: unknown) {
+      const retained =
+        (await this.getArticlePolicy(articleId)).mode === "retained";
+      const startOffset =
+        data &&
+        typeof data === "object" &&
+        typeof (data as { offset?: unknown }).offset === "number"
+          ? (data as { offset: number }).offset
+          : offset;
+      await runTransaction(STORES.ARTICLE_SEGMENTS, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ARTICLE_SEGMENTS);
+        const previous = (await requestResult(
+          store.get([articleId, startOffset]),
+        )) as StoredArticleSegment | undefined;
+        if (previous && !Values.equal(previous.value, data)) {
+          throw new Error(
+            `Immutable article segment changed: ${articleId}:${startOffset}`,
+          );
+        }
+        store.put({
+          article_id: articleId,
+          start_offset: startOffset,
+          value: data,
+          size: Values.size(data),
+          touched_at: Date.now(),
+          eviction_tier: retained ? 2 : 0,
+        } satisfies StoredArticleSegment);
+      });
+    },
+
+    async getArticleSegment<T>(
+      articleId: string,
+      offset: number,
+    ): Promise<T | null> {
+      const row = await runTransaction(
+        STORES.ARTICLE_SEGMENTS,
+        "readonly",
+        async (tx) => {
+          const request = tx
+            .objectStore(STORES.ARTICLE_SEGMENTS)
+            .index("by-article-start")
+            .openCursor(
+              IDBKeyRange.bound([articleId, 0], [articleId, offset]),
+              "prev",
+            );
+          const cursor = await requestResult(request);
+          return (cursor?.value as StoredArticleSegment<T> | undefined) ?? null;
+        },
+      );
+      if (!row) return null;
+      const value = row.value as T & { offset?: number; content?: string };
+      if (
+        typeof value.offset === "number" &&
+        typeof value.content === "string" &&
+        value.offset < offset
+      ) {
+        const relative = offset - value.offset;
+        if (relative >= value.content.length) return null;
+        return { ...value, offset, content: value.content.slice(relative) };
+      }
+      return value;
+    },
+
+    async getDraft(
+      ref: Pick<Conversation, "type" | "id">,
+    ): Promise<DraftVersion | null> {
+      const state = await getConversationState(actorId(), conversationId(ref));
+      const draft = Values.resolved(state.draft);
       return {
         content: draft.value,
         updatedAt: draft.updatedAt,
         syncedAt: draft.pending ? null : draft.updatedAt,
-      } satisfies DraftVersion;
-    });
-  },
+      };
+    },
 
-  async getPendingDraftRefs() {
-    const entries = await this.getConversations();
-    const rows = await runTransaction(
-      STORES.ME_CONV_STATE,
-      "readonly",
-      async (tx) =>
-        (await requestResult(
-          tx
-            .objectStore(STORES.ME_CONV_STATE)
-            .index("by-pending")
-            .getAll(IDBKeyRange.only([activeMe(), 1])),
-        )) as ConversationUserStateRow[],
-    );
-    return rows.flatMap((row) => {
-      if (!Values.resolved(row.draft).pending) return [];
-      const entry = entries.find((item) => item.conv_id === row.conv_id);
-      return entry ? [{ type: entry.type, id: entry.id }] : [];
-    });
-  },
-};
+    async saveDraft(
+      ref: Pick<Conversation, "type" | "id">,
+      content: string,
+      options?: { updatedAt?: number; synced?: boolean },
+    ) {
+      const meId = actorId();
+      const convId = conversationId(ref);
+      return runTransaction(STORES.ME_CONV_STATE, "readwrite", async (tx) => {
+        const store = tx.objectStore(STORES.ME_CONV_STATE);
+        const current =
+          ((await requestResult(store.get([meId, convId]))) as
+            ConversationUserStateRow | undefined) ??
+          defaultConversationState(meId, convId);
+        current.draft = options?.synced
+          ? Values.reconcile(current.draft, {
+              value: content,
+              updatedAt: options.updatedAt ?? 0,
+            })
+          : Values.propose(current.draft, content, options?.updatedAt);
+        current.pending = statePending(current);
+        store.put(current);
+        const draft = Values.resolved(current.draft);
+        return {
+          content: draft.value,
+          updatedAt: draft.updatedAt,
+          syncedAt: draft.pending ? null : draft.updatedAt,
+        } satisfies DraftVersion;
+      });
+    },
+
+    async getPendingDraftRefs() {
+      const entries = await this.getConversations();
+      const rows = await runTransaction(
+        STORES.ME_CONV_STATE,
+        "readonly",
+        async (tx) =>
+          (await requestResult(
+            tx
+              .objectStore(STORES.ME_CONV_STATE)
+              .index("by-pending")
+              .getAll(IDBKeyRange.only([actorId(), 1])),
+          )) as ConversationUserStateRow[],
+      );
+      return rows.flatMap((row) => {
+        if (!Values.resolved(row.draft).pending) return [];
+        const entry = entries.find((item) => item.conv_id === row.conv_id);
+        return entry ? [{ type: entry.type, id: entry.id }] : [];
+      });
+    },
+  };
+  return repository;
+}
+
+export type OfflineRepository = ReturnType<typeof createOfflineRepository>;
+
+/** Bind every repository operation to an immutable actor snapshot. */
+export function offlineRepository(userId: string): OfflineRepository {
+  return createOfflineRepository(userId);
+}
 
 export async function handleOfflineQuotaPressure(
   bytesToFree: number,
@@ -2215,14 +2339,19 @@ export async function handleOfflineQuotaPressure(
   );
   const evictedArticles = new Set<string>();
   const evictedConversations = new Set<string>();
-  const articleProtected = (articleId: string) =>
-    claims.some(
-      (claim) =>
-        claim.kind === "article" &&
-        claim.object_id === articleId &&
-        claim.mode === "retained" &&
-        claim.protected_until > now,
-    );
+  const articleProtected = async (articleId: string) =>
+    runTransaction(STORES.SAVE, "readonly", async (tx) => {
+      const current = (await requestResult(
+        tx
+          .objectStore(STORES.SAVE)
+          .index("by-resource")
+          .getAll(IDBKeyRange.only(["article", articleId])),
+      )) as RetentionRow[];
+      return current.some(
+        (claim) =>
+          claim.mode === "retained" && claim.protected_until > Date.now(),
+      );
+    });
 
   // Immutable text segments can be evicted independently. Candidate discovery
   // is separate from bounded deletion transactions to avoid a large IDB spike.
@@ -2239,17 +2368,37 @@ export async function handleOfflineQuotaPressure(
       left.eviction_tier - right.eviction_tier ||
       left.touched_at - right.touched_at,
   );
-  const segmentKeys: IDBValidKey[] = [];
   for (const row of segmentRows) {
     if (freed >= bytesToFree) break;
     if (excludedArticles.has(row.article_id)) continue;
-    const protectedByClaim = articleProtected(row.article_id);
-    if (!allowProtected && protectedByClaim) continue;
-    segmentKeys.push([row.article_id, row.start_offset]);
-    freed += row.size;
+    const deletedBytes = await runTransaction(
+      [STORES.ARTICLE_SEGMENTS, STORES.SAVE],
+      "readwrite",
+      async (tx) => {
+        const claimsNow = (await requestResult(
+          tx
+            .objectStore(STORES.SAVE)
+            .index("by-resource")
+            .getAll(IDBKeyRange.only(["article", row.article_id])),
+        )) as RetentionRow[];
+        const protectedNow = claimsNow.some(
+          (claim) =>
+            claim.mode === "retained" && claim.protected_until > Date.now(),
+        );
+        if (!allowProtected && protectedNow) return 0;
+        const key: IDBValidKey = [row.article_id, row.start_offset];
+        const store = tx.objectStore(STORES.ARTICLE_SEGMENTS);
+        const current = (await requestResult(store.get(key))) as
+          StoredArticleSegment | undefined;
+        if (!current) return 0;
+        store.delete(key);
+        return current.size;
+      },
+    );
+    if (!deletedBytes) continue;
+    freed += deletedBytes;
     evictedArticles.add(row.article_id);
   }
-  await deleteKeysBatched(STORES.ARTICLE_SEGMENTS, segmentKeys);
 
   // A Bundle catalog and its resources form one offline readability unit. Do
   // not leave a catalog pointing at individually evicted dependencies.
@@ -2269,12 +2418,15 @@ export async function handleOfflineQuotaPressure(
     const bundles = [...groups].sort(
       (left, right) => left[1].createdAt - right[1].createdAt,
     );
-    for (const [articleId, bundle] of bundles) {
+    for (const [articleId] of bundles) {
       if (freed >= bytesToFree) break;
       if (excludedArticles.has(articleId)) continue;
-      if (!allowProtected && articleProtected(articleId)) continue;
-      await extentFiles.deletePrefix(FileIds.articlePrefix(articleId));
-      freed += bundle.bytes;
+      if (!allowProtected && (await articleProtected(articleId))) continue;
+      const deleted = await extentFiles.deletePrefix(
+        FileIds.articlePrefix(articleId),
+      );
+      if (!deleted.bytes) continue;
+      freed += deleted.bytes;
       evictedArticles.add(articleId);
     }
   }
@@ -2314,24 +2466,34 @@ export async function handleOfflineQuotaPressure(
       }, 0);
       const cutoff = retentionDays ? now - retentionDays * 86_400_000 : null;
       let deleteCount = 0;
+      let candidateBytes = freed;
       for (const row of rows) {
-        if (freed >= bytesToFree) break;
+        if (candidateBytes >= bytesToFree) break;
         const protectedByClaim =
           cutoff !== null && Date.parse(row.created_at) >= cutoff;
         if (protectedByClaim && !allowProtected) break;
         deleteCount += 1;
-        freed += row.size;
-        if (protectedByClaim) evictedConversations.add(convId);
+        candidateBytes += row.size;
       }
       if (!deleteCount) continue;
-      await deleteConversationPostPrefix(convId, rows, deleteCount, now);
+      const deleted = await deleteConversationPostPrefix(
+        convId,
+        deleteCount,
+        now,
+        allowProtected,
+      );
+      freed += deleted.bytes;
+      if (deleted.bytes) evictedConversations.add(convId);
     }
   }
 
   if (evictedArticles.size || evictedConversations.size) {
     await runTransaction(STORES.SAVE, "readwrite", async (tx) => {
       const store = tx.objectStore(STORES.SAVE);
-      for (const claim of claims) {
+      const currentClaims = (await requestResult(
+        store.getAll(),
+      )) as RetentionRow[];
+      for (const claim of currentClaims) {
         const evicted =
           claim.kind === "article"
             ? evictedArticles.has(claim.object_id)

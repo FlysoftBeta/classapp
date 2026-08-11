@@ -1,6 +1,6 @@
 import { getDb } from "@/server/infra/db";
 import { requireActiveAdmin } from "@/server/domain/policy/auth";
-import { ServiceError, handleServiceError } from "@/server/services/errors";
+import { PublicError, handleHttpError } from "@/server/http/errorResponse";
 import { createAdminSystemService } from "@/server/services/adminSystemService";
 
 export async function POST(req: Request) {
@@ -11,10 +11,10 @@ export async function POST(req: Request) {
   try {
     const formData = await req.formData().catch(() => null);
     if (!formData)
-      throw new ServiceError("请求格式错误，需要 multipart/form-data");
+      throw new PublicError("请求格式错误，需要 multipart/form-data");
 
     const file = formData.get("file") as File | null;
-    if (!file) throw new ServiceError("缺少 file 字段");
+    if (!file) throw new PublicError("缺少 file 字段");
 
     const zipBytes = new Uint8Array(await file.arrayBuffer());
     const system = createAdminSystemService(getDb());
@@ -22,6 +22,6 @@ export async function POST(req: Request) {
 
     return Response.json(result, { status: 202 });
   } catch (e) {
-    return handleServiceError(e);
+    return handleHttpError(e);
   }
 }

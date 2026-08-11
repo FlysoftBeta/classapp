@@ -1,5 +1,10 @@
 import { probeAppState } from "@/client/api/auth";
-import { offlineRepository, sessionRepository } from "@/client/data/repository";
+import { sessionRepository } from "@/client/data/repository";
+import {
+  captureActorContext,
+  isActorContextCurrent,
+  repositoryForActor,
+} from "@/client/interact/actorContext";
 import {
   syncOfflineContent,
   syncPendingMutations,
@@ -17,6 +22,7 @@ import { announcementEvents, configEvents, postEvents } from "./events";
 import { resourceQueries } from "./resources";
 import { client } from "./remote/client";
 import { session } from "./remote/session";
+import { captureDetachedClientIncident } from "./clientIncidents";
 
 type RemoteCallbacks = {
   onArticleListUpdated: () => void;
@@ -40,7 +46,10 @@ class RecoveryCoordinator {
     if (this.phase === "idle") {
       void Promise.resolve()
         .then(event)
-        .catch(() => this.schedule());
+        .catch((error) => {
+          captureDetachedClientIncident("recovery.event", error);
+          this.schedule();
+        });
       return;
     }
     this.queuedEvents.push(event);
@@ -72,7 +81,17 @@ class RecoveryCoordinator {
   }
 
   private async run(): Promise<void> {
-    await refreshState().catch(() => undefined);
+    const continueAfter = async (
+      label: string,
+      operation: Promise<unknown>,
+    ) => {
+      try {
+        await operation;
+      } catch (error) {
+        captureDetachedClientIncident(label, error);
+      }
+    };
+    await continueAfter("recovery.app-state", refreshState());
     if (!session.getToken()) {
       this.queuedEvents = [];
       this.phase = "idle";
@@ -82,18 +101,27 @@ class RecoveryCoordinator {
     // Refresh access first. Proposals for no-longer-accessible objects stay
     // dormant locally and are excluded from flush until access returns.
     this.phase = "refreshing-access";
-    await resourceQueries.refreshConversationAccess().catch(() => undefined);
+    await continueAfter(
+      "recovery.conversation-access",
+      resourceQueries.refreshConversationAccess(),
+    );
 
     this.phase = "flushing-proposals";
-    await syncPendingMutations().catch(() => undefined);
+    await continueAfter("recovery.pending-mutations", syncPendingMutations());
 
     this.phase = "recovering-revisions";
-    await syncConversationPostRevisions().catch(() => undefined);
+    await continueAfter(
+      "recovery.post-revisions",
+      syncConversationPostRevisions(),
+    );
 
     this.phase = "refreshing-snapshots";
     await Promise.all([
-      resourceQueries.refreshArticleSidebar().catch(() => undefined),
-      syncOfflineContent().catch(() => undefined),
+      continueAfter(
+        "recovery.article-sidebar",
+        resourceQueries.refreshArticleSidebar(),
+      ),
+      continueAfter("recovery.offline-content", syncOfflineContent()),
     ]);
 
     this.phase = "replaying-events";
@@ -102,7 +130,9 @@ class RecoveryCoordinator {
       for (const event of batch) {
         await Promise.resolve()
           .then(event)
-          .catch(() => undefined);
+          .catch((error) =>
+            captureDetachedClientIncident("recovery.replayed-event", error),
+          );
       }
     }
     this.phase = "idle";
@@ -118,15 +148,16 @@ async function refreshState(touch = true): Promise<void> {
 }
 
 export function recoverInvalidSession(): void {
-  session.setToken("");
-  offlineRepository.setUserScope(null);
+  session.clearActive();
   void sessionRepository.clear();
   const store = useApplicationStore.getState();
   store.clearSession();
   store.setAppState("loading");
   if (invalidRecovery) return;
   const run = refreshState()
-    .catch(() => undefined)
+    .catch((error) => {
+      captureDetachedClientIncident("session.invalid-recovery", error);
+    })
     .finally(() => {
       if (invalidRecovery === run) invalidRecovery = null;
     });
@@ -152,36 +183,45 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     });
   };
 
-  const onConfig = (data: EventData<"user.config_changed">) =>
+  const onConfig = (data: EventData<"user.config_changed">) => {
+    const actor = captureActorContext();
+    const repository = repositoryForActor(actor);
     recovery.enqueue(async () => {
-      const winner = await reconcileUserSettingEvent(data);
+      if (!isActorContextCurrent(actor)) return;
+      const winner = await reconcileUserSettingEvent(data, repository);
       if (winner.key === USER_CONFIG.ACTIVE_ARTICLE_ID) {
         useApplicationStore.getState().setCurrentArticle(winner.value);
       }
       configEvents.emit(winner);
     });
+  };
 
-  const onConversation = (data: ConvUpdatedPayload) =>
+  const onConversation = (data: ConvUpdatedPayload) => {
+    const actor = captureActorContext();
+    const repository = repositoryForActor(actor);
     recovery.enqueue(async () => {
+      if (!isActorContextCurrent(actor)) return;
       useApplicationStore.getState().applyConversation(data);
-      if (data.entry) await offlineRepository.upsertConversation(data.entry);
+      if (data.entry) await repository.upsertConversation(data.entry);
       if (data.removed) {
-        await offlineRepository.removeConversation(data.removed);
+        await repository.removeConversation(data.removed);
       }
       if (data.refresh) resourceQueries.scheduleConversations();
     });
+  };
 
   const onPost = (
     kind: "post.created" | "post.updated" | "post.deleted",
     data: EventData<typeof kind>,
-  ) =>
+  ) => {
+    const actor = captureActorContext();
+    const repository = repositoryForActor(actor);
     recovery.enqueue(async () => {
-      await offlineRepository.applyPostVersion(
-        data.post,
-        kind === "post.created",
-      );
+      if (!isActorContextCurrent(actor)) return;
+      await repository.applyPostVersion(data.post, kind === "post.created");
       postEvents.emit({ kind, data });
     });
+  };
 
   const unsubscribers = [
     client.subscribe("client.lock_changed", () => void refreshState()),
@@ -230,15 +270,16 @@ export function startHeartbeat(): () => void {
     const state = useApplicationStore.getState();
     if (state.appState !== "app" || !state.token) return;
     void refreshState();
-    void syncPendingMutations().catch(() => undefined);
+    void syncPendingMutations().catch((error) =>
+      captureDetachedClientIncident("heartbeat.pending-mutations", error),
+    );
   }, 120_000);
   return () => clearInterval(timer);
 }
 
 export function applyAppState(payload: AppStatePayload): void {
-  if (payload.reason === "session_expired" || payload.client_invalid) {
-    session.setToken("");
-    offlineRepository.setUserScope(null);
+  if (payload.client_invalid) {
+    session.clearActive();
     void sessionRepository.clear();
   }
   useApplicationStore.getState().applyServerState(payload);

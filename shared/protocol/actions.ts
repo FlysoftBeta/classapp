@@ -26,7 +26,8 @@ import {
   createPostPayloadSchema,
   createStickerPostPayloadSchema,
 } from "@/shared/validation/posts";
-import type { CheckedActionResult } from "./result";
+import type { ActionResult } from "./result";
+import { incidentIdSchema } from "./errors";
 
 const object = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
 const noArgs = z.tuple([]);
@@ -162,6 +163,31 @@ const teachDocumentSchema = object({
   name: z.string(),
   file_size: z.number().int().nonnegative(),
   created_at: z.string(),
+});
+const incidentEnvironmentSchema = z.enum(["server", "client"]);
+const incidentGroupSchema = object({
+  id: z.number().int().positive(),
+  environment: incidentEnvironmentSchema,
+  build_id: z.string(),
+  fingerprint: z.string(),
+  top_frame: z.string(),
+  occurrence_count: z.number().int().nonnegative(),
+  stored_detail_count: z.number().int().nonnegative(),
+  first_at: z.string(),
+  last_at: z.string(),
+});
+const incidentDetailSchema = object({
+  id: z.number().int().positive(),
+  public_id: incidentIdSchema,
+  group_id: z.number().int().positive(),
+  occurred_at: z.string(),
+  error_name: z.string().nullable(),
+  message: z.string().nullable(),
+  stack: z.string().nullable(),
+  context_json: z.string().nullable(),
+  related_incident_ids_json: z.string().nullable(),
+  context: z.unknown().nullable(),
+  related_incident_ids: z.array(incidentIdSchema),
 });
 
 const groupCreateInputSchema = object({
@@ -379,6 +405,36 @@ export const actionContracts = {
     noArgs,
     object({ ok: z.literal(true), deleted: z.number().int().nonnegative() }),
   ),
+  adminFetchIncidentGroupsAction: contract(
+    optionalOne(
+      object({
+        environment: incidentEnvironmentSchema.optional(),
+        buildId: z.string().optional(),
+        offset: z.number().int().nonnegative().optional(),
+      }),
+    ),
+    object({ groups: z.array(incidentGroupSchema) }),
+  ),
+  adminFetchIncidentDetailsAction: contract(
+    one(z.number().int().positive()),
+    object({ incidents: z.array(incidentDetailSchema) }),
+  ),
+  adminTestIncidentAction: contract(noArgs, okSchema),
+
+  reportClientIncidentAction: contract(
+    one(
+      object({
+        buildId: z.string().max(256),
+        errorName: z.string().max(200),
+        message: z.string().max(4000),
+        stack: z.string().max(32000),
+        operation: z.string().max(256),
+        operationId: z.string().regex(/^[a-f0-9]{24}$/),
+        relatedIncidentIds: z.array(incidentIdSchema).max(32),
+      }),
+    ),
+    object({ incidentId: incidentIdSchema }),
+  ),
 
   probeAppStateAction: contract(
     optionalOne(object({ touch: z.boolean().optional() })),
@@ -419,6 +475,7 @@ export const actionContracts = {
   loginPinAction: contract(
     one(z.string().regex(/^\d{6}$/)),
     z.union([
+      object({ error: z.string() }),
       object({ user: userSchema, token: z.string() }),
       object({ needs_oobe: z.literal(true), oobe_token: z.string() }),
       object({
@@ -440,7 +497,10 @@ export const actionContracts = {
           .max(2),
       }),
     ),
-    object({ user: userSchema, token: z.string() }),
+    z.union([
+      object({ user: userSchema, token: z.string() }),
+      object({ error: z.string() }),
+    ]),
   ),
   logoutAction: contract(noArgs, okSchema),
   updateMeAction: contract(
@@ -582,6 +642,7 @@ export const actionContracts = {
         object({
           conv_id: nonEmptyString,
           revision: z.number().int().nonnegative(),
+          revision_sum: z.string().regex(/^\d+$/),
         }),
       ),
     }),
@@ -654,7 +715,14 @@ export const actionContracts = {
         password: z.string().optional(),
       }),
     ),
-    object({ ok: z.literal(true), group: groupSchema }),
+    z.union([
+      object({ ok: z.literal(true), group: groupSchema }),
+      object({
+        ok: z.literal(false),
+        error: z.string(),
+        needs_password: z.boolean(),
+      }),
+    ]),
   ),
   leaveGroupAction: contract(one(nonEmptyString), okSchema),
   fetchGroupMembersAction: contract(
@@ -829,7 +897,7 @@ export type ActionData<K extends ActionName> = z.output<
 export type ActionFunctions = {
   [K in ActionName]: (
     ...args: ActionArgs<K>
-  ) => Promise<CheckedActionResult<ActionData<K>>>;
+  ) => Promise<ActionResult<ActionData<K>>>;
 };
 
 export type ActionHandlerFunctions = {

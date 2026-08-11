@@ -1,7 +1,7 @@
 import { observeActionResult } from "@/client/api/runtime";
 import type { ActionArgs } from "@/shared/protocol/actions";
 import { client } from "@/client/interact/remote/client";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 
 const {
   createGroupAction,
@@ -83,15 +83,14 @@ export async function joinGroup(
     password: password || undefined,
   });
   const res = observeActionResult(result);
-  const data: JoinGroupData = result.ok
-    ? {}
-    : {
-        error: result.error.message,
-        needs_password:
-          result.error.kind === "checked" &&
-          result.error.status === 403 &&
-          result.error.message.includes("密码"),
-      };
+  const data: JoinGroupData = !result.ok
+    ? { error: result.error.message }
+    : result.data.ok
+      ? {}
+      : {
+          error: result.data.error,
+          needs_password: result.data.needs_password,
+        };
   return { res, data };
 }
 

@@ -18,7 +18,10 @@ import {
   purgeUserWordProgress,
 } from "@/server/data/words";
 import { getUserConfig, setUserConfig } from "@/server/services/userConfig";
-import { ServiceError } from "@/server/services/errors";
+import {
+  PublicError,
+  recordContainedServerIncident,
+} from "@/server/services/incidentService";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
 import type {
   UserWordProgress,
@@ -107,8 +110,12 @@ export class WordsService {
           );
           return;
         }
-      } catch (e) {
-        console.error("[WordsService] Failed to read words.txt:", e);
+      } catch (error) {
+        recordContainedServerIncident(this.db, runtimeConfig().buildId, error, {
+          component: "words-service",
+          phase: "load-sample-words",
+          path: wordsFilePath,
+        });
       }
     }
   }
@@ -206,7 +213,7 @@ export class WordsService {
     }
 
     if (!word) {
-      throw new ServiceError("暂无单词", 404);
+      throw new PublicError("暂无单词");
     }
 
     const all = listAllWords(this.db);

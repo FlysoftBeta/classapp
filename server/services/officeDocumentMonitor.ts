@@ -4,6 +4,8 @@ import {
   createTeachDocumentsService,
   type OpenOfficeDocument,
 } from "@/server/services/teachDocumentsService";
+import { recordContainedServerIncident } from "@/server/services/incidentService";
+import { BUILD_ID } from "@/server/infra/env";
 
 const POLL_INTERVAL_MS = 2_000;
 
@@ -91,7 +93,11 @@ export function startOfficeDocumentMonitor(
         await service.capture(document);
         nextCaptured.add(key);
       } catch (error) {
-        console.error(`[OfficeMonitor] 无法复制 ${document.path}`, error);
+        recordContainedServerIncident(db, BUILD_ID, error, {
+          component: "office-document-monitor",
+          phase: "capture",
+          path: document.path,
+        });
       }
     }
     capturedOpenPaths = nextCaptured;
@@ -132,12 +138,18 @@ export function startOfficeDocumentMonitor(
             : [];
           pending = pending.then(() => handleSnapshot(documents));
         } catch (error) {
-          console.error("[OfficeMonitor] 无法解析 PowerShell 输出", error);
+          recordContainedServerIncident(db, BUILD_ID, error, {
+            component: "office-document-monitor",
+            phase: "parse-output",
+          });
         }
       }
     });
     child.on("error", (error) => {
-      console.error("[OfficeMonitor] 无法启动 PowerShell", error);
+      recordContainedServerIncident(db, BUILD_ID, error, {
+        component: "office-document-monitor",
+        phase: "process",
+      });
     });
     child.on("exit", () => {
       child = null;

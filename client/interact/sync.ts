@@ -15,12 +15,25 @@ import {
 import { downloadBundleForOffline } from "@/client/interact/bundles";
 import { SEGMENT_SIZE } from "@/shared/types/api/article";
 import {
-  offlineRepository,
   conversationRetentionCutoff,
   type ConversationDownloadPolicy,
 } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { syncPendingUserSettings } from "@/client/interact/versionedSettings";
 import { taskStore } from "@/client/hooks/useTaskStore";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
+
+async function retryLater<T>(
+  label: string,
+  operation: Promise<T>,
+): Promise<T | null> {
+  try {
+    return await operation;
+  } catch (error) {
+    captureDetachedClientIncident(label, error);
+    return null;
+  }
+}
 
 export async function downloadConversationForOffline(
   ref: Pick<Conversation, "type" | "id" | "conv_id">,
@@ -126,10 +139,7 @@ export async function downloadArticleForOffline(
     }
     const contentLength = knownContentLength ?? article?.content_length;
     if (contentLength == null) {
-      taskStore
-        .getState()
-        .patch(taskId, { status: "failed", detail: "无法读取文章长度" });
-      return;
+      throw new Error("无法读取文章长度");
     }
     const start = 0;
     const end = contentLength;
@@ -157,6 +167,9 @@ export async function downloadArticleForOffline(
       onProgress?.(percent);
       if (!data.has_more) break;
     }
+    if (offset < end) {
+      throw new Error(`文章离线内容不完整 (${offset}/${end})`);
+    }
     await offlineRepository.markArticlePolicySynced(articleId);
     taskStore.getState().patch(taskId, { status: "completed", progress: 100 });
   } catch (error) {
@@ -174,47 +187,64 @@ export async function syncPendingMutations(): Promise<void> {
       syncPendingUserSettings(),
       syncPendingConversationConfig(),
       syncPendingArticleConfig(),
-    ].map((task) => task.catch(() => undefined)),
+    ].map((task, index) => retryLater(`sync.pending.${index}`, task)),
   );
-  const drafts = await offlineRepository.getPendingDraftRefs().catch(() => []);
+  const drafts =
+    (await retryLater(
+      "sync.pending-drafts.read",
+      offlineRepository.getPendingDraftRefs(),
+    )) ?? [];
   await Promise.all(
-    drafts.map((ref) => fetchConversationDraft(ref).catch(() => undefined)),
+    drafts.map((ref) =>
+      retryLater("sync.pending-draft.flush", fetchConversationDraft(ref)),
+    ),
   );
-  const progress = await offlineRepository
-    .getPendingArticleProgress()
-    .catch(() => []);
+  const progress =
+    (await retryLater(
+      "sync.pending-article-progress.read",
+      offlineRepository.getPendingArticleProgress(),
+    )) ?? [];
   await Promise.all(
     progress.map((item) =>
-      flushPendingArticleProgress(
-        item.articleId,
-        item.offset,
-        item.updatedAt,
-      ).catch(() => undefined),
+      retryLater(
+        "sync.pending-article-progress.flush",
+        flushPendingArticleProgress(
+          item.articleId,
+          item.offset,
+          item.updatedAt,
+        ),
+      ),
     ),
   );
 }
 
 export async function syncOfflineContent(): Promise<void> {
   await syncPendingMutations();
-  await primeOfflineArticleList().catch(() => {});
-  const conversationPolicies = await offlineRepository
-    .getConversationPolicies()
-    .catch(() => []);
+  await retryLater("sync.article-list-prime", primeOfflineArticleList());
+  const conversationPolicies =
+    (await retryLater(
+      "sync.conversation-policies.read",
+      offlineRepository.getConversationPolicies(),
+    )) ?? [];
   for (const { ref, policy } of conversationPolicies) {
     try {
       await downloadConversationForOffline(ref, policy);
       await offlineRepository.markConversationPolicySynced(ref);
-    } catch {
+    } catch (error) {
+      captureDetachedClientIncident("sync.conversation-policy", error);
       /* isolate this policy; retry on the next recovery */
     }
   }
-  const articlePolicies = await offlineRepository
-    .getArticlePolicies()
-    .catch(() => []);
+  const articlePolicies =
+    (await retryLater(
+      "sync.article-policies.read",
+      offlineRepository.getArticlePolicies(),
+    )) ?? [];
   for (const { articleId, policy } of articlePolicies) {
     try {
       if (policy.mode !== "auto") await downloadArticleForOffline(articleId);
-    } catch {
+    } catch (error) {
+      captureDetachedClientIncident("sync.article-policy", error);
       /* isolate this policy; retry on the next recovery */
     }
   }

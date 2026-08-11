@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type BetterSqlite3 from "better-sqlite3";
-import { ServiceError } from "./errors";
+import { PublicError } from "@/server/services/incidentService";
 import {
   publishRemoteResubscribe,
   publishGroupPost,
@@ -80,7 +80,7 @@ function buildBeforeClause(
   if (!beforeId) return { clause: "", val: [] };
   const rowid = getPostRowid(db, beforeId);
   const cursor = rowid ?? beforeSequence;
-  if (cursor == null) throw new ServiceError("游标帖子不存在", 400);
+  if (cursor == null) throw new PublicError("游标帖子不存在");
   return { clause: "AND p.sequence < ?", val: [cursor] };
 }
 
@@ -92,7 +92,7 @@ function buildAfterClause(
   if (!afterId) return { clause: "", val: [] };
   const rowid = getPostRowid(db, afterId);
   const cursor = rowid ?? afterSequence;
-  if (cursor == null) throw new ServiceError("游标帖子不存在", 400);
+  if (cursor == null) throw new PublicError("游标帖子不存在");
   return { clause: "AND p.sequence > ?", val: [cursor] };
 }
 
@@ -164,7 +164,7 @@ export function getGroupPosts(
   isAdmin = false,
 ): Post[] {
   if (!groupMembershipExists(db, userId, groupId) && !isAdmin) {
-    throw new ServiceError("你不在该群组中", 403);
+    throw new PublicError("你不在该群组中");
   }
 
   const bc = buildBeforeClause(db, before_id, before_sequence);
@@ -259,25 +259,22 @@ export function createPost(
 ): Post {
   const params = normalizeCreatePost(raw);
   if (params.brief.length > POST_CONTENT_MAX) {
-    throw new ServiceError("内容过长（最多 500 万字符）");
+    throw new PublicError("内容过长（最多 500 万字符）");
   }
   const id = crypto.randomUUID();
   db.transaction(() => {
     const parsed = parseConvId(params.conv_id);
-    if (!parsed) throw new ServiceError("会话 ID 无效", 400);
+    if (!parsed) throw new PublicError("会话 ID 无效");
     if (parsed.type === "dm") {
       if (parsed.peerA !== user.id && parsed.peerB !== user.id) {
-        throw new ServiceError("无权建立该私信", 403);
+        throw new PublicError("无权建立该私信");
       }
       const peerId = parsed.peerA === user.id ? parsed.peerB : parsed.peerA;
-      if (!userExists(db, peerId)) throw new ServiceError("干员不存在", 404);
+      if (!userExists(db, peerId)) throw new PublicError("干员不存在");
       if (!findDmConversation(db, parsed.peerA, parsed.peerB)) {
         const proofGroupId = findSharedVisibleGroup(db, user.id, peerId);
         if (!proofGroupId) {
-          throw new ServiceError(
-            "你与该干员没有互相可见的共同群组，无法私信",
-            403,
-          );
+          throw new PublicError("你与该干员没有互相可见的共同群组，无法私信");
         }
         insertDmConversation(db, user.id, peerId, proofGroupId);
       }
@@ -297,7 +294,7 @@ export function createPost(
 
   const post = getPostById(db, id);
   if (!post) {
-    throw new ServiceError("帖子不存在", 404);
+    throw new PublicError("帖子不存在");
   }
 
   if (!opts?.deferNotify) {
@@ -316,14 +313,14 @@ export function updatePost(
   assertCanEditPost(db, user, postId);
   const params = normalizeUpdatePost(text);
   if (params.brief.length > POST_CONTENT_MAX) {
-    throw new ServiceError("内容过长（最多 500 万字符）");
+    throw new PublicError("内容过长（最多 500 万字符）");
   }
 
   updatePostBody(db, postId, params.brief, params.content_json);
 
   const updated = getPostById(db, postId);
   if (!updated) {
-    throw new ServiceError("帖子不存在", 404);
+    throw new PublicError("帖子不存在");
   }
 
   const parsed = parseConvId(updated.conv_id);
@@ -362,7 +359,7 @@ function softDeletePostRow(
 ): Post {
   markPostDeleted(db, postId);
   const tombstone = getPostById(db, postId);
-  if (!tombstone) throw new ServiceError("帖子不存在", 404);
+  if (!tombstone) throw new PublicError("帖子不存在");
 
   const parsed = parseConvId(post.conv_id);
   if (parsed?.type === "group") {
@@ -423,19 +420,19 @@ export class PostService {
       input.changed_through_revision != null &&
       input.changed_after_revision == null
     ) {
-      throw new ServiceError("revision 上界缺少下界", 400);
+      throw new PublicError("revision 上界缺少下界");
     }
     if (
       input.changed_after_revision != null &&
       input.changed_through_revision != null &&
       input.changed_through_revision < input.changed_after_revision
     ) {
-      throw new ServiceError("revision 范围无效", 400);
+      throw new PublicError("revision 范围无效");
     }
     if (input.type === "conversation") {
-      if (!input.conv_id) throw new ServiceError("缺少会话 ID", 400);
+      if (!input.conv_id) throw new PublicError("缺少会话 ID");
       const parsed = parseConvId(input.conv_id);
-      if (!parsed) throw new ServiceError("会话 ID 无效", 400);
+      if (!parsed) throw new PublicError("会话 ID 无效");
       if (parsed.type === "group") {
         return getGroupPosts(
           this.db,
@@ -447,15 +444,15 @@ export class PostService {
       }
       const peerId = parsed.peerA === user.id ? parsed.peerB : parsed.peerA;
       if (parsed.peerA !== user.id && parsed.peerB !== user.id) {
-        throw new ServiceError("无权访问", 403);
+        throw new PublicError("无权访问");
       }
       if (!findDmConversation(this.db, parsed.peerA, parsed.peerB)) {
-        throw new ServiceError("对话不存在", 404);
+        throw new PublicError("对话不存在");
       }
       return getDmPosts(this.db, user.id, peerId, input);
     }
     if (input.changed_after_revision != null) {
-      throw new ServiceError("feed 不支持对话 revision 补拉", 400);
+      throw new PublicError("feed 不支持对话 revision 补拉");
     }
     return getFeedPosts(this.db, user.id, input);
   }
@@ -464,7 +461,7 @@ export class PostService {
     assertCanAccessPost(this.db, user, postId);
     const post = getPost(this.db, postId);
     if (!post) {
-      throw new ServiceError("帖子不存在", 404);
+      throw new PublicError("帖子不存在");
     }
     return post;
   }

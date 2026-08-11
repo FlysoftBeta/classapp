@@ -1,5 +1,6 @@
 import { requestResult, runTransaction } from "./idb";
 import { STORES } from "./schema";
+import { reportDetachedClientFailure } from "@/client/interact/incidentContext";
 
 export const EXTENT_SIZE = 4 * 1024 * 1024;
 const MAX_EXTENTS_PER_TRANSACTION = 4;
@@ -362,7 +363,11 @@ export class ExtentFileStore {
               await writer.write(copyView(result.value));
             }
           } finally {
-            reader.releaseLock();
+            try {
+              reader.releaseLock();
+            } catch (error) {
+              reportDetachedClientFailure("extent-file.stream-release", error);
+            }
           }
         },
         checksum,

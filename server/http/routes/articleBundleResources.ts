@@ -5,7 +5,7 @@ import {
   loadRenderArchive,
   streamArchiveResource,
 } from "@/server/infra/renderArchive";
-import { handleServiceError, ServiceError } from "@/server/services/errors";
+import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 import { requireActiveAuth } from "@/server/domain/policy/auth";
 import { assertCanAccessArticle } from "@/server/domain/policy/articles";
 import { hasFeature } from "@/shared/features";
@@ -49,11 +49,11 @@ export async function POST(
   try {
     const { id } = await params;
     const parsed = bundleResourceRequestSchema.safeParse(await req.json());
-    if (!parsed.success) throw new ServiceError("资源请求无效", 400);
+    if (!parsed.success) throw new PublicError("资源请求无效");
     if (
       new Set(parsed.data.content_ids).size !== parsed.data.content_ids.length
     ) {
-      throw new ServiceError("资源请求包含重复项", 400);
+      throw new PublicError("资源请求包含重复项");
     }
     const db = getDb();
     assertCanAccessArticle(db, auth.user, id);
@@ -63,12 +63,12 @@ export async function POST(
       article.content_kind !== "bundle" ||
       !article.archive_path
     ) {
-      throw new ServiceError("文档资源不存在", 404);
+      throw new PublicError("文档资源不存在");
     }
     const archive = await loadRenderArchive(article.archive_path);
     const resources = parsed.data.content_ids.map((contentId) => {
       const resource = archive.resources.get(contentId);
-      if (!resource) throw new ServiceError("文档资源不存在", 404);
+      if (!resource) throw new PublicError("文档资源不存在");
       return resource;
     });
     const payloadBytes = resources.reduce(
@@ -76,7 +76,7 @@ export async function POST(
       12,
     );
     if (!Number.isSafeInteger(payloadBytes) || payloadBytes > MAX_BATCH_BYTES) {
-      throw new ServiceError("单次资源请求过大，请缩小批次", 413);
+      throw new PublicError("单次资源请求过大，请缩小批次");
     }
 
     async function* stream() {
@@ -104,6 +104,6 @@ export async function POST(
       },
     );
   } catch (error) {
-    return handleServiceError(error);
+    return handleHttpError(error);
   }
 }

@@ -34,6 +34,9 @@ const {
   adminUpdateGroupAction,
   adminUpdateUserAction,
   adminWhitelistCurrentClientAction,
+  adminFetchIncidentGroupsAction,
+  adminFetchIncidentDetailsAction,
+  adminTestIncidentAction,
 } = client.actions;
 
 export type AdminMutationData = {
@@ -355,6 +358,38 @@ export async function adminCleanupTeachDocuments() {
     res: observeActionResult(result),
     data: result.ok ? result.data : { error: result.error.message },
   };
+}
+
+export type AdminIncidentGroup =
+  ActionData<"adminFetchIncidentGroupsAction">["groups"][number];
+export type AdminIncidentDetail =
+  ActionData<"adminFetchIncidentDetailsAction">["incidents"][number];
+
+export async function adminFetchIncidentGroups(input?: {
+  environment?: "server" | "client";
+  buildId?: string;
+  offset?: number;
+}) {
+  const result = await adminFetchIncidentGroupsAction(input ?? {});
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.groups;
+}
+
+export async function adminFetchIncidentDetails(groupId: number) {
+  const result = await adminFetchIncidentDetailsAction(groupId);
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.incidents;
+}
+
+export async function adminTestServerIncident(): Promise<never> {
+  await adminTestIncidentAction();
+  throw new Error("Incident test unexpectedly succeeded");
+}
+
+export function adminIncidentLogsDownloadUrl(token: string): string {
+  return `/api/admin/incidents/logs?token=${encodeURIComponent(token)}`;
 }
 
 export function adminTeachDocumentDownloadUrl(

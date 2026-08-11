@@ -7,18 +7,18 @@ import {
   patchClientMe,
   probeAppState,
 } from "@/client/api/auth";
-import { offlineRepository, sessionRepository } from "@/client/data/repository";
+import { sessionRepository } from "@/client/data/repository";
 import type { AppStatePayload } from "@/shared/types/events";
 import { useApplicationStore } from "./appStore";
 import { applyAppState } from "./remoteLifecycle";
 import { resourceQueries } from "./resources";
 import { session } from "./remote/session";
 import { transport } from "./remote/transport";
+import { captureDetachedClientIncident } from "./clientIncidents";
 
 function commitSession(token: string, user: AppStatePayload["user"]): void {
   if (!user) return;
-  session.setToken(token);
-  offlineRepository.setUserScope(user.id);
+  session.bind(user.id, token);
   useApplicationStore.getState().setSession(token, user);
   void sessionRepository.save(user, token);
 }
@@ -34,7 +34,10 @@ async function refreshInitialData(): Promise<void> {
 export async function bootstrapSession(
   setClientId: (clientId: string) => void,
 ): Promise<void> {
-  let restored = await sessionRepository.active().catch(() => null);
+  let restored = await sessionRepository.active().catch((error) => {
+    captureDetachedClientIncident("session.restore", error);
+    return null;
+  });
   let knownKonamiLocked: boolean | null = null;
   if (restored?.session_token) {
     commitSession(restored.session_token, restored.user);
@@ -93,7 +96,8 @@ export async function bootstrapSession(
         .getState()
         .setAppState(automatic.konami_locked ? "konami" : "login");
     }
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("session.bootstrap", error);
     if (!restored) {
       useApplicationStore
         .getState()
@@ -103,14 +107,13 @@ export async function bootstrapSession(
 }
 
 async function clearLocalSession(): Promise<void> {
-  session.setToken("");
+  session.clearActive();
   await sessionRepository.clear();
-  offlineRepository.setUserScope(null);
   useApplicationStore.getState().clearSession();
 }
 
 export async function lockSession(): Promise<void> {
-  await patchClientMe(true).catch(() => undefined);
+  await patchClientMe(true);
   useApplicationStore.getState().setAppState("konami");
 }
 
@@ -123,7 +126,8 @@ export async function unlockSession(
       setClientId(result.data.client_id);
       return result.data.client_id;
     }
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("session.unlock", error);
     return "";
   }
   const payload = await probeAppState();
@@ -141,7 +145,7 @@ export async function loginWithPin(pin: string): Promise<void> {
   store.setLoginError("");
   store.setLoginLoading(true);
   try {
-    const { res, data: raw } = await loginPin(pin);
+    const { data: raw } = await loginPin(pin);
     const data = raw as Record<string, unknown>;
     if (data.banned) {
       store.setAppDisable({
@@ -153,7 +157,7 @@ export async function loginWithPin(pin: string): Promise<void> {
       store.setAppState("app_locked");
       return;
     }
-    if (!res.ok) {
+    if ("error" in data) {
       store.setLoginError(
         (typeof data.error === "string" && data.error) ||
           "PIN 错误，请重试；如需帮助请联系管理员。",
@@ -178,8 +182,13 @@ export async function loginWithPin(pin: string): Promise<void> {
     const payload = await probeAppState();
     if (payload) applyAppState(payload);
     else store.setAppState("app");
-  } catch {
-    store.setLoginError("无法连接服务器，请检查网络后重试。");
+  } catch (error) {
+    captureDetachedClientIncident("session.login", error);
+    store.setLoginError(
+      error instanceof Error
+        ? error.message
+        : "无法连接服务器，请检查网络后重试。",
+    );
   } finally {
     useApplicationStore.getState().setLoginLoading(false);
   }
@@ -202,7 +211,7 @@ export async function submitOobe(): Promise<void> {
   const original = state.oobe;
   state.setOobe({ ...original, submitting: true, error: "" });
   try {
-    const { res, data } = await completeOobe({
+    const { data } = await completeOobe({
       oobe_token: original.oobe_token,
       handle: state.oobeHandle.trim(),
       username: state.oobeUsername.trim(),
@@ -210,7 +219,7 @@ export async function submitOobe(): Promise<void> {
         ? [original.pin1, original.pin2]
         : [original.pin1],
     });
-    if (!res.ok || "error" in data) {
+    if ("error" in data) {
       state.setOobe({
         ...original,
         submitting: false,
@@ -224,19 +233,39 @@ export async function submitOobe(): Promise<void> {
     const payload = await probeAppState();
     if (payload) applyAppState(payload);
     else state.setAppState("app");
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("session.oobe", error);
     const current = useApplicationStore.getState().oobe;
-    useApplicationStore
-      .getState()
-      .setOobe(
-        current ? { ...current, submitting: false, error: "网络错误" } : null,
-      );
+    useApplicationStore.getState().setOobe(
+      current
+        ? {
+            ...current,
+            submitting: false,
+            error: error instanceof Error ? error.message : "网络错误",
+          }
+        : null,
+    );
   }
 }
 
 export async function logoutSession(): Promise<void> {
-  await apiLogout().catch(() => undefined);
-  await clearLocalSession();
+  let remoteFailed = false;
+  let remoteError: unknown;
+  try {
+    await apiLogout();
+  } catch (error) {
+    remoteFailed = true;
+    remoteError = error;
+  }
+  try {
+    await clearLocalSession();
+  } catch (cleanupError) {
+    if (!remoteFailed) throw cleanupError;
+    // Local cleanup is best-effort after a remote panic; preserve the remote
+    // Incident while reporting the independent cleanup failure.
+    captureDetachedClientIncident("session.logout-cleanup", cleanupError);
+  }
+  if (remoteFailed) throw remoteError;
   const payload = await probeAppState();
   if (payload) applyAppState(payload);
   else useApplicationStore.getState().setAppState("login");

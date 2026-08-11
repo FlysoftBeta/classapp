@@ -17,12 +17,9 @@ export async function probeAppStateAction(
 
     if (!user) {
       const clientId = clients.getOrCreateForIdentity(actionClientIdentity());
-      const reason: "anonymous" | "session_expired" = token
-        ? "session_expired"
-        : "anonymous";
       return {
         ...appState.snapshotAnonymous(clientId),
-        reason,
+        reason: "anonymous" as const,
       };
     }
 

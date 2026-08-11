@@ -23,7 +23,7 @@ import {
   purgeConversationStateForUser,
 } from "@/server/data/conversations";
 import { publishUserConv } from "./eventBus";
-import { ServiceError } from "./errors";
+import { PublicError } from "@/server/services/incidentService";
 import { chooseFurthestRead } from "@/shared/sync/arbitration";
 import { parseConvId } from "@/shared/conversations/id";
 
@@ -126,13 +126,13 @@ export function markConversationRead(
   let targetPost: { id: string; rowid: number };
   if (input.type === "group") {
     if (!isGroupConversationMember(db, userId, input.id)) {
-      throw new ServiceError("你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
     const post = getGroupConversationPostRow(db, {
       postId: input.postId,
       groupId: input.id,
     });
-    if (!post) throw new ServiceError("帖子不存在", 404);
+    if (!post) throw new PublicError("帖子不存在");
     targetPost = post;
   } else {
     const post = getDmConversationPostRow(db, {
@@ -140,7 +140,7 @@ export function markConversationRead(
       userId,
       partnerId: input.id,
     });
-    if (!post) throw new ServiceError("帖子不存在", 404);
+    if (!post) throw new PublicError("帖子不存在");
     targetPost = post;
   }
 
@@ -189,10 +189,10 @@ export function setConversationPinned(
 ): { value: boolean; updatedAt: number } {
   if (input.type === "group") {
     if (!isGroupConversationMember(db, userId, input.id)) {
-      throw new ServiceError("你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
   } else if (!dmConversationExists(db, userId, input.id)) {
-    throw new ServiceError("对话不存在", 404);
+    throw new PublicError("对话不存在");
   }
 
   setConversationPinnedValue(db, {
@@ -222,10 +222,10 @@ export function setConversationMuted(
 ): { value: boolean; updatedAt: number } {
   if (input.type === "group") {
     if (!isGroupConversationMember(db, userId, input.id)) {
-      throw new ServiceError("你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
   } else if (!dmConversationExists(db, userId, input.id)) {
-    throw new ServiceError("对话不存在", 404);
+    throw new PublicError("对话不存在");
   }
 
   setConversationMutedValue(db, {
@@ -250,10 +250,10 @@ function assertConversationAccess(
 ): void {
   if (input.type === "group") {
     if (!isGroupConversationMember(db, userId, input.id)) {
-      throw new ServiceError("你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
   } else if (!dmConversationExists(db, userId, input.id)) {
-    throw new ServiceError("对话不存在", 404);
+    throw new PublicError("对话不存在");
   }
 }
 
@@ -326,7 +326,9 @@ export class ConversationService {
     return listConversations(this.db, userId);
   }
 
-  revisions(userId: string): Array<{ conv_id: string; revision: number }> {
+  revisions(
+    userId: string,
+  ): Array<{ conv_id: string; revision: number; revision_sum: string }> {
     return listConversationRevisions(this.db, userId);
   }
 

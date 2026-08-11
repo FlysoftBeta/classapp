@@ -4,7 +4,7 @@ import {
   articleSourceSize,
   streamArticleSource,
 } from "@/server/infra/articleArtifacts";
-import { handleServiceError, ServiceError } from "@/server/services/errors";
+import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 import { requireActiveAuth } from "@/server/domain/policy/auth";
 import { assertCanAccessArticle } from "@/server/domain/policy/articles";
 import { hasFeature } from "@/shared/features";
@@ -29,7 +29,7 @@ export async function GET(
     assertCanAccessArticle(db, auth.user, id);
     const article = findArticleRecord(db, id);
     if (!article || article.content_kind !== "bundle" || !article.source_path) {
-      throw new ServiceError("原始文档不存在", 404);
+      throw new PublicError("原始文档不存在");
     }
     const size = await articleSourceSize(article.source_path);
     const range = parseRange(req.headers.get("range"), size);
@@ -59,7 +59,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    return handleServiceError(error);
+    return handleHttpError(error);
   }
 }
 

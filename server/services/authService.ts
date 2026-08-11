@@ -29,7 +29,10 @@ import {
   getUserBanStatus,
   insertNewUser,
 } from "@/server/data/users";
-import { MalformedRequestError, CheckedError } from "@/shared/protocol/errors";
+import {
+  ContractViolationError,
+  PublicError,
+} from "@/server/services/incidentService";
 import type { User } from "@/shared/types/api";
 import { DEFAULT_FEATURE_MASK } from "@/shared/features";
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
@@ -50,7 +53,13 @@ export interface LoginBannedResult {
   username: string;
 }
 
-export type LoginFlowResult = LoginResult | LoginOobeResult | LoginBannedResult;
+/** Expected login refusals are part of this Action's domain result, not panics. */
+export interface LoginRejectedResult {
+  error: string;
+}
+
+export type LoginFlowResult =
+  LoginResult | LoginOobeResult | LoginBannedResult | LoginRejectedResult;
 
 export interface AutoLoginResult {
   user: User | null;
@@ -68,21 +77,19 @@ export interface CompleteOobeParams {
   new_pins?: string[];
 }
 
-export interface CompleteOobeResult {
-  user: User;
-  token: string;
-}
+export type CompleteOobeResult =
+  { user: User; token: string } | { error: string };
 
 function requirePinFormat(pin: string): string {
   if (!/^\d{6}$/.test(pin)) {
-    throw new MalformedRequestError("PIN must be a 6-digit number");
+    throw new ContractViolationError("PIN must be a 6-digit number");
   }
   return pin;
 }
 
 function requireHandleFormat(handle: string): string {
   if (!/^[a-zA-Z0-9_]{1,20}$/.test(handle)) {
-    throw new MalformedRequestError(
+    throw new ContractViolationError(
       "Handle must contain only letters, numbers, and underscores, with max length 20",
     );
   }
@@ -92,7 +99,7 @@ function requireHandleFormat(handle: string): string {
 function requireDisplayName(username: string): string {
   const displayName = username.trim();
   if (!displayName || displayName.length > 30) {
-    throw new MalformedRequestError(
+    throw new ContractViolationError(
       "Display name must be non-empty and at most 30 characters",
     );
   }
@@ -101,13 +108,13 @@ function requireDisplayName(username: string): string {
 
 function requireNewPins(newPins: string[]): string[] {
   if (!Array.isArray(newPins) || newPins.length === 0 || newPins.length > 2) {
-    throw new MalformedRequestError("Please provide 1 or 2 new PINs");
+    throw new ContractViolationError("Please provide 1 or 2 new PINs");
   }
   for (const pin of newPins) {
     requirePinFormat(pin);
   }
   if (newPins.length === 2 && newPins[0] === newPins[1]) {
-    throw new MalformedRequestError("Two PINs must not be identical");
+    throw new ContractViolationError("Two PINs must not be identical");
   }
   return newPins;
 }
@@ -136,27 +143,19 @@ export class AuthService {
     const clients = createClientService(this.db);
     const clientId = clients.getOrCreateForIdentity(this.identity);
     if (!clients.isIdentityAllowed(this.identity, clientId)) {
-      throw new CheckedError("FORBIDDEN", "该设备不在白名单中", 403);
+      return { error: "该设备不在白名单中" };
     }
     const throttleStatus = checkClientThrottled(this.db, clientId);
     if (throttleStatus.throttled) {
       const mins = Math.ceil((throttleStatus.seconds ?? 0) / 60);
-      throw new CheckedError(
-        "THROTTLED",
-        `错误次数过多，请等待 ${mins} 分钟`,
-        429,
-      );
+      return { error: `错误次数过多，请等待 ${mins} 分钟` };
     }
 
     const pinHash = this.deps.hashPinValue(normalizedPin);
     const ghostId = findGhostUserIdByPinHash(this.db, pinHash);
     if (ghostId) {
       if (clients.isBound(clientId)) {
-        throw new CheckedError(
-          "FORBIDDEN",
-          "该客户端已绑定其他用户，不能用于新用户初始设置",
-          403,
-        );
+        return { error: "该客户端已绑定其他用户，不能用于新用户初始设置" };
       }
       recordLoginAttempt(this.db, clientId, true);
       return {
@@ -168,17 +167,13 @@ export class AuthService {
     const found = findUserByPinHash(this.db, pinHash);
     if (!found) {
       recordLoginAttempt(this.db, clientId, false);
-      throw new CheckedError("AUTHENTICATION_FAILED", "密码错误", 401);
+      return { error: "密码错误" };
     }
     if (!clients.canLoginUser(clientId, found.id)) {
-      throw new CheckedError("FORBIDDEN", "该客户端已绑定其他用户", 403);
+      return { error: "该客户端已绑定其他用户" };
     }
     if (!canClientLogin(this.db, clientId, found.id)) {
-      throw new CheckedError(
-        "FORBIDDEN",
-        "该客户端已登录两个账户，请先退出其中一个",
-        403,
-      );
+      return { error: "该客户端已登录两个账户，请先退出其中一个" };
     }
 
     const banStatus = getUserBanStatus(this.db, found.id);
@@ -249,16 +244,11 @@ export class AuthService {
 
   completeOobe(params: CompleteOobeParams): CompleteOobeResult {
     if (!params.oobe_token) {
-      throw new MalformedRequestError("Missing OOBE token");
+      throw new ContractViolationError("Missing OOBE token");
     }
     const ghostId = findGhostUserIdByOobeToken(this.db, params.oobe_token);
     if (!ghostId) {
-      throw new CheckedError(
-        "SESSION_EXPIRED",
-        "OOBE 令牌已过期或无效，请重新登录",
-        401,
-        true,
-      );
+      return { error: "OOBE 令牌已过期或无效，请重新登录" };
     }
 
     const handle = requireHandleFormat(params.handle ?? "");
@@ -266,7 +256,7 @@ export class AuthService {
     const newPins = requireNewPins(params.new_pins ?? []);
 
     if (findUserIdByHandle(this.db, handle)) {
-      throw new CheckedError("CONFLICT", "该 ID 已被占用", 409);
+      return { error: "该 ID 已被占用" };
     }
 
     const nextPinHashes = newPins.map((pin) => this.deps.hashPinValue(pin));
@@ -275,21 +265,17 @@ export class AuthService {
         findUserPinOwnerId(this.db, pinHash) ||
         findGhostUserIdByPinHash(this.db, pinHash)
       ) {
-        throw new CheckedError("CONFLICT", "PIN 已被使用", 409);
+        return { error: "PIN 已被使用" };
       }
     }
 
     const clients = createClientService(this.db);
     const clientId = clients.getOrCreateForIdentity(this.identity);
     if (!clients.isIdentityAllowed(this.identity, clientId)) {
-      throw new CheckedError("FORBIDDEN", "该设备不在白名单中", 403);
+      return { error: "该设备不在白名单中" };
     }
     if (clients.isBound(clientId)) {
-      throw new CheckedError(
-        "FORBIDDEN",
-        "该客户端已绑定其他用户，不能用于新用户初始设置",
-        403,
-      );
+      return { error: "该客户端已绑定其他用户，不能用于新用户初始设置" };
     }
     const userId = this.deps.createUserId();
     const token = this.deps.generateSessionToken();
@@ -309,7 +295,7 @@ export class AuthService {
 
     const user = getUser(this.db, userId);
     if (!user) {
-      throw new CheckedError("NOT_FOUND", "干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
     return { user, token };
   }

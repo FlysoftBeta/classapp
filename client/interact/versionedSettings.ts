@@ -2,7 +2,9 @@ import { observeActionResult } from "@/client/api/runtime";
 const { fetchVersionedUserConfigAction, patchVersionedUserConfigAction } =
   client.actions;
 import { client } from "@/client/interact/remote/client";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
+import type { OfflineRepository } from "@/client/data/repository";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 const USER_NAMESPACE = "user-config";
 
@@ -15,24 +17,24 @@ export async function readUserSetting(
     key,
   );
   if (!client.isConnected()) return local?.value ?? fallback;
+  const result = await fetchVersionedUserConfigAction({ keys: [key] });
+  observeActionResult(result);
+  if (!result.ok) return local?.value ?? fallback;
+  const remote = result.data[key] ?? { value: null, updatedAt: 0 };
+  if (local && local.updatedAt > remote.updatedAt) {
+    await flushUserSetting(key, local.value, local.updatedAt);
+    return local.value;
+  }
+  const value = remote.value ?? fallback;
   try {
-    const result = await fetchVersionedUserConfigAction({ keys: [key] });
-    observeActionResult(result);
-    if (!result.ok) return local?.value ?? fallback;
-    const remote = result.data[key] ?? { value: null, updatedAt: 0 };
-    if (local && local.updatedAt > remote.updatedAt) {
-      await flushUserSetting(key, local.value, local.updatedAt);
-      return local.value;
-    }
-    const value = remote.value ?? fallback;
     await offlineRepository.reconcileVersionedValue(USER_NAMESPACE, key, {
       value,
       updatedAt: remote.updatedAt,
     });
-    return value;
-  } catch {
-    return local?.value ?? fallback;
+  } catch (error) {
+    captureDetachedClientIncident("user-setting.read-cache", error);
   }
+  return value;
 }
 
 async function flushUserSetting(key: string, value: string, updatedAt: number) {
@@ -42,11 +44,16 @@ async function flushUserSetting(key: string, value: string, updatedAt: number) {
     updatedAt,
   });
   observeActionResult(result);
-  if (result.ok)
-    await offlineRepository.reconcileVersionedValue(USER_NAMESPACE, key, {
-      value: result.data.value ?? value,
-      updatedAt: result.data.updatedAt,
-    });
+  if (result.ok) {
+    try {
+      await offlineRepository.reconcileVersionedValue(USER_NAMESPACE, key, {
+        value: result.data.value ?? value,
+        updatedAt: result.data.updatedAt,
+      });
+    } catch (error) {
+      captureDetachedClientIncident("user-setting.write-cache", error);
+    }
+  }
 }
 
 export async function writeUserSetting(key: string, value: string) {
@@ -56,22 +63,21 @@ export async function writeUserSetting(key: string, value: string) {
     value,
   );
   if (client.isConnected()) {
-    try {
-      await flushUserSetting(key, value, local.updatedAt);
-    } catch {
-      /* remains pending */
-    }
+    await flushUserSetting(key, value, local.updatedAt);
   }
   return local;
 }
 
-export async function reconcileUserSettingEvent(data: {
-  key: string;
-  value: string | null;
-  updatedAt?: number;
-}) {
+export async function reconcileUserSettingEvent(
+  data: {
+    key: string;
+    value: string | null;
+    updatedAt?: number;
+  },
+  repository: OfflineRepository = offlineRepository,
+) {
   if (data.updatedAt === undefined || data.value === null) return data;
-  const winner = await offlineRepository.reconcileVersionedValue(
+  const winner = await repository.reconcileVersionedValue(
     USER_NAMESPACE,
     data.key,
     { value: data.value, updatedAt: data.updatedAt },
@@ -89,7 +95,8 @@ export async function syncPendingUserSettings() {
   )) {
     try {
       await flushUserSetting(id, version.value, version.updatedAt);
-    } catch {
+    } catch (error) {
+      captureDetachedClientIncident("user-setting.flush", error);
       /* retry on reconnect */
     }
   }

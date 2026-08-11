@@ -1,4 +1,4 @@
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 import {
   encodeCreatePayload,
   encodeTextBody,
@@ -39,7 +39,7 @@ function normalizeBody(raw: CreatePostInput): {
   if (raw.content && isCreatePostPayload(raw.content)) {
     if (raw.content.type === "sticker") {
       if (!getStickerEntry(raw.content.sticker_pack, raw.content.sticker_id)) {
-        throw new ServiceError("贴纸不存在");
+        throw new PublicError("贴纸不存在");
       }
     }
 
@@ -50,14 +50,14 @@ function normalizeBody(raw: CreatePostInput): {
     };
   }
 
-  throw new ServiceError("内容不能为空");
+  throw new PublicError("内容不能为空");
 }
 
 export function normalizeCreatePost(
   raw: CreatePostInput,
 ): NormalizedCreatePost {
   const conv_id = raw.conv_id?.trim();
-  if (!conv_id) throw new ServiceError("必须指定会话");
+  if (!conv_id) throw new PublicError("必须指定会话");
 
   const body = normalizeBody(raw);
 

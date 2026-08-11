@@ -10,7 +10,7 @@ import type {
   BundleResource,
 } from "@/shared/bundles/protocol";
 import { DATA_ROOT } from "@/server/infra/env";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 
 const BLOB_ROOT = path.join(DATA_ROOT, "blobs");
 const MANIFEST_NAME = "manifest.json";
@@ -109,7 +109,7 @@ function normalizeRelativePath(relativePath: string): string {
     path.posix.isAbsolute(normalized) ||
     /^[A-Za-z]:\//.test(normalized)
   ) {
-    throw new ServiceError("无效归档路径", 400);
+    throw new PublicError("无效归档路径");
   }
   return normalized;
 }
@@ -141,13 +141,13 @@ async function extractManifest(absolutePath: string): Promise<{
 
   const archive = new Unzip((file) => {
     if (entries.length >= MAX_ARCHIVE_ENTRIES + 2) {
-      throw new ServiceError("渲染归档包含过多条目", 400);
+      throw new PublicError("渲染归档包含过多条目");
     }
     if (!validEntryName(file.name) || names.has(file.name)) {
-      throw new ServiceError("渲染归档包含无效条目", 400);
+      throw new PublicError("渲染归档包含无效条目");
     }
     if (file.size === undefined || file.originalSize === undefined) {
-      throw new ServiceError("渲染归档不允许数据描述符", 400);
+      throw new PublicError("渲染归档不允许数据描述符");
     }
     names.add(file.name);
     entries.push({
@@ -157,17 +157,17 @@ async function extractManifest(absolutePath: string): Promise<{
       compression: file.compression,
     });
     if (file.compression !== 0) {
-      throw new ServiceError("渲染归档必须使用 STORED ZIP 条目", 400);
+      throw new PublicError("渲染归档必须使用 STORED ZIP 条目");
     }
     if (file.name === MANIFEST_NAME && file.originalSize > MAX_MANIFEST_BYTES) {
-      throw new ServiceError("渲染归档索引过大", 400);
+      throw new PublicError("渲染归档索引过大");
     }
     file.ondata = (error, data, final) => {
-      if (error) throw new ServiceError("渲染归档无法读取", 400);
+      if (error) throw new PublicError("渲染归档无法读取");
       if (file.name === MANIFEST_NAME && data?.length) {
         manifestSize += data.length;
         if (manifestSize > MAX_MANIFEST_BYTES) {
-          throw new ServiceError("渲染归档索引过大", 400);
+          throw new PublicError("渲染归档索引过大");
         }
         manifestChunks.push(data.slice());
       }
@@ -186,10 +186,14 @@ async function extractManifest(absolutePath: string): Promise<{
     }
     archive.push(new Uint8Array(), true);
   } catch (error) {
-    if (error instanceof ServiceError) throw error;
-    throw new ServiceError("渲染归档无法读取", 400);
+    if (error instanceof PublicError) throw error;
+    throw new PublicError(
+      "渲染归档无法读取",
+      "Render archive read failed",
+      error,
+    );
   }
-  if (!manifestComplete) throw new ServiceError("渲染归档缺少 manifest", 400);
+  if (!manifestComplete) throw new PublicError("渲染归档缺少 manifest");
   const manifestBytes = new Uint8Array(manifestSize);
   let offset = 0;
   for (const chunk of manifestChunks) {
@@ -204,11 +208,11 @@ function parseManifest(bytes: Uint8Array): ArchiveManifest {
   try {
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
-    throw new ServiceError("渲染归档 manifest 无效", 400);
+    throw new PublicError("渲染归档 manifest 无效");
   }
   const parsed = renderArchiveManifestSchema.safeParse(value);
   if (!parsed.success) {
-    throw new ServiceError("渲染归档 manifest 格式不受支持", 400);
+    throw new PublicError("渲染归档 manifest 格式不受支持");
   }
   return parsed.data;
 }
@@ -234,7 +238,7 @@ function validateManifest(
   const expectedEntryCount =
     manifest.resources.length + 1 + (manifest.dictionary ? 1 : 0);
   if (zipEntries.size !== expectedEntryCount) {
-    throw new ServiceError("渲染归档条目与 manifest 不一致", 400);
+    throw new PublicError("渲染归档条目与 manifest 不一致");
   }
 
   for (const resource of manifest.resources) {
@@ -247,11 +251,11 @@ function validateManifest(
       entry.originalSize !== resource.storedSize ||
       resource.storedOffset + resource.storedSize > archiveSize
     ) {
-      throw new ServiceError("渲染归档资源索引不一致", 400);
+      throw new PublicError("渲染归档资源索引不一致");
     }
     const suffix = resource.encoding === "identity" ? "" : ".zst";
     if (resource.path !== `objects/${resource.contentId}${suffix}`) {
-      throw new ServiceError("渲染归档资源路径无效", 400);
+      throw new PublicError("渲染归档资源路径无效");
     }
     paths.add(resource.path);
     resources.set(resource.contentId, {
@@ -270,7 +274,7 @@ function validateManifest(
       source.storedOffset + source.size > archiveSize ||
       resources.has(source.contentId)
     ) {
-      throw new ServiceError("渲染归档字典索引不一致", 400);
+      throw new PublicError("渲染归档字典索引不一致");
     }
     dictionary = {
       content_id: source.contentId,
@@ -292,14 +296,14 @@ function validateManifest(
   }
   for (const id of referenced) {
     if (!resources.has(id)) {
-      throw new ServiceError("渲染归档引用了不存在的资源", 400);
+      throw new PublicError("渲染归档引用了不存在的资源");
     }
   }
   const ordinals = new Set<number>();
   const itemIds = new Set<string>();
   for (const item of manifest.document.items) {
     if (ordinals.has(item.ordinal) || itemIds.has(item.id)) {
-      throw new ServiceError("渲染归档包含重复页面", 400);
+      throw new PublicError("渲染归档包含重复页面");
     }
     ordinals.add(item.ordinal);
     itemIds.add(item.id);
@@ -308,7 +312,7 @@ function validateManifest(
     (left, right) => left.ordinal - right.ordinal,
   );
   if (items.some((item, index) => item.ordinal !== index)) {
-    throw new ServiceError("渲染归档页面序号不连续", 400);
+    throw new PublicError("渲染归档页面序号不连续");
   }
   if (
     manifest.dictionary === null &&
@@ -316,7 +320,7 @@ function validateManifest(
       (resource) => resource.encoding === "zstd-dictionary",
     )
   ) {
-    throw new ServiceError("渲染归档缺少 Zstd 字典", 400);
+    throw new PublicError("渲染归档缺少 Zstd 字典");
   }
   if (
     manifest.dictionary !== null &&
@@ -326,7 +330,7 @@ function validateManifest(
         resource.encoding !== "zstd-dictionary",
     )
   ) {
-    throw new ServiceError("渲染归档的 Zstd 编码不一致", 400);
+    throw new PublicError("渲染归档的 Zstd 编码不一致");
   }
 
   const filePaths = new Set<string>();
@@ -338,7 +342,7 @@ function validateManifest(
       file.path.includes("\\") ||
       file.path.startsWith("/")
     ) {
-      throw new ServiceError("渲染归档文件表无效", 400);
+      throw new PublicError("渲染归档文件表无效");
     }
     filePaths.add(file.path);
   }

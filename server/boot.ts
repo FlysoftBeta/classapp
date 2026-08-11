@@ -29,8 +29,9 @@ async function start(config: RuntimeConfig): Promise<void> {
       await shutdownRuntime();
       clearTimeout(forced);
       process.exit(0);
-    } catch {
+    } catch (error) {
       clearTimeout(forced);
+      console.error("[Server] graceful shutdown failed", error);
       process.exit(1);
     }
   };

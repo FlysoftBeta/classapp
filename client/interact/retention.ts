@@ -1,10 +1,10 @@
 import type { ArticleWithMeta, Conversation } from "@/shared/types/api";
 import {
   ARTICLE_RETENTION_DAYS,
-  offlineRepository,
   type ArticleDownloadPolicy,
   type ConversationDownloadPolicy,
 } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { bundleAvailable } from "@/client/interact/bundles";
 import { client } from "@/client/interact/remote/client";
 import {

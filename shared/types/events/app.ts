@@ -36,7 +36,7 @@ export const appStatePayloadSchema = z
     konami_locked: z.boolean(),
     session_valid: z.boolean(),
     /** Present on anonymous /api/app/state responses. */
-    reason: z.enum(["anonymous", "session_expired"]).optional(),
+    reason: z.literal("anonymous").optional(),
     user: userSchema.nullable(),
     app: appDisableStateSchema,
     flags: z

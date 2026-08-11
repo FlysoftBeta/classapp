@@ -1,59 +1,46 @@
 import { BUILD_ID } from "@/server/infra/env";
-import { ServiceError } from "@/server/services/errors";
-import {
-  CheckedError,
-  MalformedRequestError,
-  UncheckedError,
-  type ActionErrorData,
-  type CheckedErrorCode,
-} from "@/shared/protocol/errors";
+import { getDb } from "@/server/infra/db";
+import { createIncidentService } from "@/server/services/incidentService";
 import { ResultTools, type ActionResult } from "@/shared/protocol/result";
 
-const checkedCodeByStatus: Partial<Record<number, CheckedErrorCode>> = {
-  401: "AUTHENTICATION_FAILED",
-  403: "FORBIDDEN",
-  404: "NOT_FOUND",
-  409: "CONFLICT",
-  429: "THROTTLED",
-};
-
-function packError(error: unknown): ActionErrorData {
-  if (error instanceof CheckedError) return error.toData();
-  if (error instanceof MalformedRequestError) return error.toData();
-  if (error instanceof UncheckedError) {
-    return error.code === "INTERNAL_SERVER_ERROR"
-      ? UncheckedError.internal().toData()
-      : error.toData();
-  }
-  if (error instanceof ServiceError) {
-    const checkedCode = checkedCodeByStatus[error.status];
-    if (checkedCode) {
-      return new CheckedError(
-        checkedCode,
-        error.message,
-        error.status,
-        false,
-      ).toData();
-    }
-    if (error.status >= 500) {
-      console.error("[ActionDispatcher] ServiceError", error);
-      return UncheckedError.internal().toData();
-    }
-    return UncheckedError.badRequest(error.message).toData();
-  }
-  console.error("[ActionDispatcher] Unhandled error", error);
-  return UncheckedError.internal().toData();
+export interface ErrorCaptureContext {
+  action?: string;
+  requestId?: string;
+  userId?: string | null;
+  clientBuildId?: string;
+  transportEpoch?: number;
 }
 
+/** The protocol boundary terminates the failed Action and returns correlation only. */
 export class ServerResultCodec {
   static async capture<T>(
     operation: () => Promise<T>,
+    context: ErrorCaptureContext = {},
   ): Promise<ActionResult<T>> {
     const meta = { buildId: BUILD_ID };
     try {
       return ResultTools.ok(await operation(), meta);
     } catch (error) {
-      return ResultTools.err(packError(error), meta);
+      let captured: { incidentId: string; publicMessage: string };
+      try {
+        captured = createIncidentService(getDb(), BUILD_ID).capture({
+          environment: "server",
+          error,
+          context: { ...context },
+        });
+      } catch (captureError) {
+        // Incident persistence must never replace the original panic.
+        console.error("[Incident] capture failed", captureError);
+        console.error("[Incident] original failure", error);
+        throw error;
+      }
+      return ResultTools.err(
+        {
+          message: captured.publicMessage,
+          incidentId: captured.incidentId,
+        },
+        meta,
+      );
     }
   }
 }

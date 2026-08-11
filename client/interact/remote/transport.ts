@@ -9,7 +9,7 @@ type StateListener = (state: TransportState) => void;
 type MessageListener = (raw: string) => void;
 
 const CONNECT_TIMEOUT_MS = 5_000;
-const COOLDOWN_MS = 10_000;
+const COOLDOWN_MS = 5_000;
 
 export class TransportUnavailableError extends Error {
   constructor(message = "服务连接不可用") {
@@ -45,6 +45,28 @@ export class WebSocketTransport {
         if (state.kind !== "connected") return;
         off();
         resolve();
+      });
+    });
+  }
+
+  /** Wait only for the socket attempt that exists at call time. */
+  waitForCurrentAttempt(): Promise<void> {
+    if (this.state.kind === "connected") return Promise.resolve();
+    if (this.state.kind !== "connecting") {
+      return Promise.reject(new TransportUnavailableError());
+    }
+    const socket = this.state.socket;
+    return new Promise((resolve, reject) => {
+      const off = this.onStateChange((state) => {
+        if (state.kind === "connected" && state.socket === socket) {
+          off();
+          resolve();
+          return;
+        }
+        if (state.kind !== "connecting" || state.socket !== socket) {
+          off();
+          reject(new TransportUnavailableError("本次连接尝试失败"));
+        }
       });
     });
   }

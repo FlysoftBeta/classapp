@@ -18,6 +18,7 @@ import NumPad from "@/client/components/shared/NumPad";
 import type { User } from "@/shared/types/api";
 import { getClientMe, updateMe } from "@/client/api/auth";
 import { updateDoNotDisturb } from "@/client/interact/notificationConfig";
+import { resetClientData } from "@/client/interact/resetClientData";
 import EndfieldLogo from "../EndfieldLogo";
 import { useTheme } from "@mui/material/styles";
 
@@ -82,6 +83,28 @@ export default function Settings({
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState("");
   const [dndSaving, setDndSaving] = useState(false);
+  const [resettingClientData, setResettingClientData] = useState(false);
+  const [resetClientDataError, setResetClientDataError] = useState("");
+
+  const handleResetClientData = async () => {
+    if (
+      !confirm(
+        "确认重置此客户端的数据？本机的登录状态、缓存和离线数据将被清除，应用会重新加载；服务器上的数据不会受影响。",
+      )
+    ) {
+      return;
+    }
+    setResettingClientData(true);
+    setResetClientDataError("");
+    try {
+      await resetClientData();
+    } catch (error) {
+      setResettingClientData(false);
+      setResetClientDataError(
+        error instanceof Error ? error.message : "重置客户端数据失败",
+      );
+    }
+  };
 
   const handleDoNotDisturbToggle = async (
     _event: React.ChangeEvent<HTMLInputElement>,
@@ -422,6 +445,36 @@ export default function Settings({
       >
         退出登录
       </Button>
+
+      <Divider sx={{ my: 2 }} />
+
+      {/* Client data */}
+      <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>
+        客户端数据
+      </Typography>
+      <Typography
+        variant="caption"
+        sx={{ color: "text.secondary", display: "block", mb: 1 }}
+      >
+        清除本机的登录状态、缓存和离线数据。服务器上的数据不会受影响。
+      </Typography>
+      <Button
+        variant="outlined"
+        color="error"
+        size="small"
+        onClick={handleResetClientData}
+        disabled={resettingClientData}
+        startIcon={
+          resettingClientData ? <CircularProgress size={16} /> : undefined
+        }
+      >
+        {resettingClientData ? "正在重置…" : "重置客户端数据"}
+      </Button>
+      {resetClientDataError && (
+        <Alert severity="error" sx={{ mt: 1, py: 0 }}>
+          {resetClientDataError}
+        </Alert>
+      )}
 
       <Divider sx={{ my: 2 }} />
 

@@ -1,6 +1,7 @@
 import { runtimeDatabase } from "@/client/data/idb";
 import { handleOfflineQuotaPressure } from "@/client/data/repository";
 import { extentFiles } from "@/client/data/files";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 const START_RATIO = 0.9;
 const TARGET_RATIO = 0.8;
@@ -36,7 +37,10 @@ class QuotaController {
   }
 
   private async run(force: boolean, excludeArticleId?: string): Promise<void> {
-    await extentFiles.collectOrphans().catch(() => 0);
+    await extentFiles.collectOrphans().catch((error) => {
+      captureDetachedClientIncident("quota.orphan-collection", error);
+      return 0;
+    });
     let current = await estimate();
     if (
       !force &&

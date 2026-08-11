@@ -10,7 +10,10 @@ import {
   forgetRenderArchive,
   inspectRenderArchive,
 } from "@/server/infra/renderArchive";
-import { ServiceError } from "@/server/services/errors";
+import {
+  attachSuppressedError,
+  PublicError,
+} from "@/server/services/incidentService";
 
 const BLOB_ROOT = path.join(DATA_ROOT, "blobs");
 const ARTICLE_DIR = "articles";
@@ -31,7 +34,7 @@ function normalizeArticleMime(file: File): StoredArticleBundle["sourceMime"] {
   if (file.type === "application/pdf" || name.endsWith(".pdf")) {
     return "application/pdf";
   }
-  throw new ServiceError("仅支持 PDF 文件");
+  throw new PublicError("仅支持 PDF 文件");
 }
 
 function normalizeArtifactPath(relativePath: string): string {
@@ -42,7 +45,7 @@ function normalizeArtifactPath(relativePath: string): string {
     path.posix.isAbsolute(normalized) ||
     /^[A-Za-z]:\//.test(normalized)
   ) {
-    throw new ServiceError("无效文档路径", 400);
+    throw new PublicError("无效文档路径");
   }
   return normalized;
 }
@@ -58,9 +61,9 @@ export function resolveArticleArtifactPath(relativePath: string): string {
 export async function storeArticleBundle(
   file: File,
 ): Promise<StoredArticleBundle> {
-  if (!file.size) throw new ServiceError("文件不能为空");
+  if (!file.size) throw new PublicError("文件不能为空");
   if (file.size > MAX_SOURCE_BYTES) {
-    throw new ServiceError(`文件不能超过 ${formatBytes(MAX_SOURCE_BYTES)}`);
+    throw new PublicError(`文件不能超过 ${formatBytes(MAX_SOURCE_BYTES)}`);
   }
   const sourceMime = normalizeArticleMime(file);
   const key = crypto.randomUUID();
@@ -90,7 +93,11 @@ export async function storeArticleBundle(
       itemCount: index.header.item_count,
     };
   } catch (error) {
-    await rm(absoluteDir, { recursive: true, force: true }).catch(() => {});
+    try {
+      await rm(absoluteDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      attachSuppressedError(error, cleanupError);
+    }
     throw error;
   }
 }

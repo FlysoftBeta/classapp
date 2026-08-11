@@ -16,7 +16,9 @@ export class ConversationActorFacade {
     return this.conversations.list(user.id);
   }
 
-  async revisions(): Promise<Array<{ conv_id: string; revision: number }>> {
+  async revisions(): Promise<
+    Array<{ conv_id: string; revision: number; revision_sum: string }>
+  > {
     const user = await this.actor.requireUser();
     return this.conversations.revisions(user.id);
   }

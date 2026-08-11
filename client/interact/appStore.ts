@@ -113,12 +113,7 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
   applyServerState: (payload) => {
     const state = get();
     const sessionDead = !payload.session_valid || !payload.user;
-    if (
-      sessionDead &&
-      state.token &&
-      payload.reason !== "session_expired" &&
-      !payload.client_invalid
-    ) {
+    if (sessionDead && state.token && !payload.client_invalid) {
       return;
     }
     set({
@@ -202,6 +197,7 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
       conv_id: dmConvId(state.user.id, peerId),
       revision: 0,
       type: "dm",
+      group_type: null,
       id: peerId,
       handle: handle ?? null,
       name: peerName,

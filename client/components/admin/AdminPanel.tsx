@@ -14,6 +14,7 @@ import { ClientsTab } from "./ClientsTab";
 import { MaintainTab } from "./MaintainTab";
 import { ToolsTab } from "./ToolsTab";
 import { GlobalTab } from "./GlobalTab";
+import { IncidentsTab } from "./IncidentsTab";
 import { flexGap } from "@/client/lib/css";
 
 interface AdminPanelProps {
@@ -104,6 +105,7 @@ export default function AdminPanel({
           <Tab label="全局设置" />
           <Tab label="运维" />
           <Tab label="便捷工具" />
+          <Tab label="Incidents" />
         </Tabs>
       </Box>
       <Box
@@ -134,6 +136,7 @@ export default function AdminPanel({
         {tab === 5 && <GlobalTab />}
         {tab === 6 && <MaintainTab token={token} />}
         {tab === 7 && <ToolsTab token={token} />}
+        {tab === 8 && <IncidentsTab token={token} />}
       </Box>
     </Box>
   );

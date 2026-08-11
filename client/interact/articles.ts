@@ -21,8 +21,9 @@ const {
 } = client.actions;
 import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { purgeArticleBundle } from "@/client/interact/bundles";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -53,28 +54,35 @@ async function reconcileArticleProgressMeta(
     group_id: string | null;
   } = { view: "direct", group_id: null },
 ): Promise<ArticleWithMeta> {
-  await offlineRepository.saveArticleMeta(article, membership);
-  const bookmark = await offlineRepository.reconcileArticleBookmark(
-    article.id,
-    {
-      value: article.is_bookmarked,
-      updatedAt: article.bookmark_updated_at_ms,
-    },
-  );
-  const progress = await offlineRepository.reconcileArticleProgress(
-    article.id,
-    {
-      offset: article.current_offset,
-      updatedAt: article.current_offset_updated_at,
-    },
-  );
-  return {
-    ...article,
-    is_bookmarked: bookmark.value,
-    bookmark_updated_at_ms: bookmark.updatedAt,
-    current_offset: progress.offset,
-    current_offset_updated_at: progress.updatedAt,
-  };
+  try {
+    await offlineRepository.saveArticleMeta(article, membership);
+    const bookmark = await offlineRepository.reconcileArticleBookmark(
+      article.id,
+      {
+        value: article.is_bookmarked,
+        updatedAt: article.bookmark_updated_at_ms,
+      },
+    );
+    const progress = await offlineRepository.reconcileArticleProgress(
+      article.id,
+      {
+        offset: article.current_offset,
+        updatedAt: article.current_offset_updated_at,
+      },
+    );
+    return {
+      ...article,
+      is_bookmarked: bookmark.value,
+      bookmark_updated_at_ms: bookmark.updatedAt,
+      current_offset: progress.offset,
+      current_offset_updated_at: progress.updatedAt,
+    };
+  } catch (error) {
+    // IDB is an evictable projection. A cache panic is reported, but cannot
+    // invalidate a server payload that already passed the Action contract.
+    captureDetachedClientIncident("article.meta-cache", error);
+    return article;
+  }
 }
 
 async function reconcileArticleList(
@@ -113,13 +121,17 @@ async function fetchRemoteArticlePage(
       view: "all",
       group_id: groupId ?? null,
     });
-    await offlineRepository.reconcileArticlePage(articles, {
-      view: "all",
-      groupId: groupId ?? null,
-      direction,
-      cursor: cursor ?? null,
-      hasMore: result.data.hasMore,
-    });
+    try {
+      await offlineRepository.reconcileArticlePage(articles, {
+        view: "all",
+        groupId: groupId ?? null,
+        direction,
+        cursor: cursor ?? null,
+        hasMore: result.data.hasMore,
+      });
+    } catch (error) {
+      captureDetachedClientIncident("article.coverage-cache", error);
+    }
     return { articles, hasMore: result.data.hasMore };
   })().finally(() => {
     if (remoteArticlePageRequests.get(key) === request) {
@@ -281,9 +293,13 @@ export async function fetchArticle(articleId: string) {
   const data = result.data;
   if (data.article) {
     data.article = await reconcileArticleProgressMeta(data.article);
-    const progress = await offlineRepository.getArticleProgress(articleId);
-    if (progress && !progress.synced) {
-      data.article = { ...data.article, current_offset: progress.offset };
+    try {
+      const progress = await offlineRepository.getArticleProgress(articleId);
+      if (progress && !progress.synced) {
+        data.article = { ...data.article, current_offset: progress.offset };
+      }
+    } catch (error) {
+      captureDetachedClientIncident("article.progress-cache", error);
     }
   }
   return data;
@@ -312,7 +328,13 @@ export async function loadArticleForReader(
   source: "remote" | "offline";
   article: ArticleWithMeta | null;
 }> {
-  const cached = await fetchCachedArticle(articleId);
+  let cached: Awaited<ReturnType<typeof fetchCachedArticle>> = null;
+  try {
+    cached = await fetchCachedArticle(articleId);
+  } catch (error) {
+    captureDetachedClientIncident("article.reader-cache", error);
+    if (!client.isConnected()) throw error;
+  }
   if (cached?.article) await onCached?.(cached.article);
   if (!client.isConnected()) {
     return { source: "offline", article: cached?.article ?? null };
@@ -326,11 +348,16 @@ export async function fetchArticleSegment(
   offset: number,
   options: { requireCache?: boolean } = {},
 ) {
-  const cached =
-    await offlineRepository.getArticleSegment<ArticleSegmentPayload>(
+  let cached: ArticleSegmentPayload | null = null;
+  try {
+    cached = await offlineRepository.getArticleSegment<ArticleSegmentPayload>(
       articleId,
       offset,
     );
+  } catch (error) {
+    captureDetachedClientIncident("article.segment-cache-read", error);
+    if (!client.isConnected()) throw error;
+  }
   // Article bodies are immutable. A cached segment is authoritative and can
   // warm-start the reader even while the remote connection is available.
   if (cached || !client.isConnected()) return cached;
@@ -346,11 +373,7 @@ export async function fetchArticleSegment(
     // fetch into an Infini provider failure solely because its cache could not
     // be warmed.
     if (options.requireCache) throw error;
-    console.warn("[articles] Failed to cache text segment", {
-      articleId,
-      offset,
-      error,
-    });
+    captureDetachedClientIncident("article.segment-cache-write", error);
   }
   return data;
 }
@@ -425,20 +448,21 @@ export async function toggleArticleBookmark(
     bookmarked,
   );
   if (!client.isConnected()) return { bookmarked: local.value };
+  const result = await setArticleBookmarkAction({
+    articleId,
+    bookmarked: local.value,
+    updatedAt: local.updatedAt,
+  });
+  observeActionResult(result);
+  if (!result.ok) return null;
   try {
-    const result = await setArticleBookmarkAction({
-      articleId,
-      bookmarked: local.value,
-      updatedAt: local.updatedAt,
-    });
-    observeActionResult(result);
-    if (!result.ok) return null;
     const winner = await offlineRepository.reconcileArticleBookmark(
       articleId,
       result.data,
     );
     return { bookmarked: winner.value };
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("article.bookmark-cache", error);
     return { bookmarked: local.value };
   }
 }
@@ -456,7 +480,8 @@ export async function syncPendingArticleConfig() {
       observeActionResult(result);
       if (!result.ok) continue;
       await offlineRepository.reconcileArticleBookmark(articleId, result.data);
-    } catch {
+    } catch (error) {
+      captureDetachedClientIncident("article.bookmark.flush", error);
       /* retry on the next recovery */
     }
   }
@@ -471,25 +496,25 @@ export async function saveArticleProgress(articleId: string, offset: number) {
   );
   const localResult = () => ResultTools.ok(local, { buildId: client.buildId });
   if (!client.isConnected()) return localResult();
-  try {
-    const result = await saveArticleProgressAction({
-      articleId,
-      offset: local.offset,
-      updatedAt: local.updatedAt,
-      merge: "override",
-    });
-    const response = observeActionResult(result);
-    if (result.ok) {
+  const result = await saveArticleProgressAction({
+    articleId,
+    offset: local.offset,
+    updatedAt: local.updatedAt,
+    merge: "override",
+  });
+  const response = observeActionResult(result);
+  if (result.ok) {
+    try {
       await offlineRepository.reconcileArticleProgress(
         articleId,
         result.data,
         "override",
       );
+    } catch (error) {
+      captureDetachedClientIncident("article.progress-cache", error);
     }
-    return response;
-  } catch {
-    return localResult();
   }
+  return response;
 }
 
 export async function flushPendingArticleProgress(

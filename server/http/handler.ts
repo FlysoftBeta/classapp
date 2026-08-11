@@ -10,9 +10,11 @@ import { POST as articleBundleResources } from "@/server/http/routes/articleBund
 import { POST as deploy } from "@/server/http/routes/deploy";
 import { GET as downloadBackup } from "@/server/http/routes/backupDownload";
 import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocumentDownload";
+import { GET as downloadIncidentLogs } from "@/server/http/routes/incidentLogsDownload";
 import { renderServiceWorker } from "@/server/http/serviceWorker";
 import { getDb } from "@/server/infra/db";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
+import { handleHttpError } from "@/server/http/errorResponse";
 import {
   createRuntimeManifest,
   runtimeAssets,
@@ -263,6 +265,13 @@ export function createHttpHandler(
         );
         return;
       }
+      if (
+        req.method === "GET" &&
+        url.pathname === "/api/admin/incidents/logs"
+      ) {
+        await sendResponse(await downloadIncidentLogs(request()), res);
+        return;
+      }
 
       const publicFile = safePublicPath(publicRoot, url.pathname);
       if (
@@ -274,12 +283,12 @@ export function createHttpHandler(
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.end(JSON.stringify({ error: "Not found" }));
     } catch (error) {
-      console.error("HTTP request failed", error);
+      const response = handleHttpError(error);
       if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        await sendResponse(response, res);
+      } else {
+        res.end();
       }
-      res.end(JSON.stringify({ error: "Internal server error" }));
     }
   };
 }

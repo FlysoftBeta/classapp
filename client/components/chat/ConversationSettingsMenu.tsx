@@ -21,6 +21,7 @@ import {
   setConversationMuted,
   setConversationPinned,
 } from "@/client/interact/conversations";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 import {
   getConversationRetention,
   saveConversationRetention,
@@ -69,25 +70,35 @@ export function ConversationSettingsMenu({
 
   const handleTogglePin = async () => {
     setLoading(true);
-    await setConversationPinned({
-      type: conversation.type,
-      id: conversation.id,
-      pinned: !pinned,
-    }).catch(() => {});
-    setLoading(false);
-    setAnchor(null);
+    try {
+      await setConversationPinned({
+        type: conversation.type,
+        id: conversation.id,
+        pinned: !pinned,
+      });
+      setAnchor(null);
+    } catch (error) {
+      captureDetachedClientIncident("conversation.pin-action", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleToggleMute = async () => {
     setLoading(true);
-    await setConversationMuted({
-      type: conversation.type,
-      id: conversation.id,
-      muted: !muted,
-    }).catch(() => {});
-    setMutedOverride({ conversationId: conversation.id, value: !muted });
-    setLoading(false);
-    setAnchor(null);
+    try {
+      await setConversationMuted({
+        type: conversation.type,
+        id: conversation.id,
+        muted: !muted,
+      });
+      setMutedOverride({ conversationId: conversation.id, value: !muted });
+      setAnchor(null);
+    } catch (error) {
+      captureDetachedClientIncident("conversation.mute-action", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

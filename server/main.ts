@@ -10,7 +10,6 @@ import { createHttpHandler } from "@/server/http/handler";
 import { getDb } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
-import { startOfficeDocumentMonitor } from "@/server/services/officeDocumentMonitor";
 import { setUpdateManager, UpdateManager } from "./infra/updateManager";
 
 export async function bootstrap(

@@ -7,7 +7,12 @@
 
 import type { EventData, ServerEventName } from "@/shared/protocol/events";
 import { eventContracts } from "@/shared/protocol/events";
-import { UncheckedError } from "@/shared/protocol/errors";
+import { getDb } from "@/server/infra/db";
+import { BUILD_ID } from "@/server/infra/env";
+import {
+  ContractViolationError,
+  createIncidentService,
+} from "@/server/services/incidentService";
 
 export type BusEvent = {
   [K in ServerEventName]: {
@@ -58,19 +63,37 @@ export function publish<K extends ServerEventName>(
 ): void {
   const parsed = eventContracts[kind].safeParse(data);
   if (!parsed.success) {
-    console.error(`[EventBus] ${kind} payload 不符合契约`, parsed.error.issues);
-    throw UncheckedError.internal("Event payload 不符合契约");
+    // The Action/background boundary records this panic. Keeping it unchecked
+    // prevents a malformed server event from being mistaken for client state.
+    throw new ContractViolationError(
+      `${kind} Event payload 不符合契约`,
+      parsed.error.issues,
+    );
   }
   const set = subscribers().get(channel);
   if (!set) return;
   const evt = { kind, channel, data: parsed.data } as BusEvent;
+  let uncaptured: unknown = null;
   for (const fn of set) {
     try {
       fn(evt);
-    } catch {
-      /* never let one bad subscriber kill the bus */
+    } catch (error) {
+      // Fan-out is a containment boundary: one subscriber must not suppress
+      // delivery to the others, but its panic still needs a durable Incident.
+      try {
+        createIncidentService(getDb(), BUILD_ID).capture({
+          environment: "server",
+          error,
+          context: { component: "event-bus", event: kind, channel },
+        });
+      } catch (captureError) {
+        console.error("[EventBus] Incident capture failed", captureError);
+        console.error("[EventBus] original subscriber failure", error);
+        uncaptured ??= error;
+      }
     }
   }
+  if (uncaptured) throw uncaptured;
 }
 
 // ── Channel helpers ──────────────────────────────────────────────────────────

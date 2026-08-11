@@ -3,6 +3,7 @@ import type {
   DiscoverySection,
   GroupMembersResult,
   GroupService,
+  JoinGroupResult,
   UpdateGroupInput,
 } from "@/server/services/groupsService";
 import type { AdminGroup, Group } from "@/shared/types/api";
@@ -33,7 +34,7 @@ export class GroupActorFacade {
     groupKey: string,
     source: { type: "search" } | { type: "group"; groupId: string },
     password?: string,
-  ): Promise<Group> {
+  ): Promise<JoinGroupResult> {
     const user = await this.actor.requireUser();
     return this.groups.join(user.id, groupKey, source, password);
   }

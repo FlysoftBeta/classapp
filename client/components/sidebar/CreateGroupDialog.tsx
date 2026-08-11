@@ -47,7 +47,7 @@ export function CreateGroupDialog({
 
   useEffect(() => {
     if (!open) return;
-    const wild = joinedGroups.find((g) => g.handle === "wild");
+    const wild = joinedGroups.find((group) => group.group_type === "wild");
     const seed = wild?.id ?? joinedGroups[0]?.id ?? "";
     // eslint-disable-next-line react-hooks/set-state-in-effect -- seed default parent once on open
     setParentGroupId((prev) => (prev ? prev : seed));

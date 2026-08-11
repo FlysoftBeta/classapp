@@ -26,7 +26,10 @@ import {
   updateMembershipHideSelf,
   userExists,
 } from "@/server/data/groups";
-import { MalformedRequestError, CheckedError } from "@/shared/protocol/errors";
+import {
+  ContractViolationError,
+  PublicError,
+} from "@/server/services/incidentService";
 import { publishConversationUpdate } from "@/server/services/conversationsService";
 import { publishRemoteResubscribe } from "@/server/services/eventBus";
 import type { AdminGroup, Group, GroupMember } from "@/shared/types/api";
@@ -45,7 +48,7 @@ function hashPassword(password: string): string {
 function requireTrimmed(value: string, message: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
-    throw new MalformedRequestError(message);
+    throw new ContractViolationError(message);
   }
   return trimmed;
 }
@@ -53,7 +56,7 @@ function requireTrimmed(value: string, message: string): string {
 function ensureHandleFormat(handle: string): string {
   const trimmed = handle.trim();
   if (!HANDLE_RE.test(trimmed)) {
-    throw new MalformedRequestError(
+    throw new ContractViolationError(
       "Handle must contain only letters, numbers, underscores, or hyphens and be 1-32 characters long",
     );
   }
@@ -88,12 +91,16 @@ export interface GroupMembersResult {
   self_hide_self: boolean;
 }
 
+export type JoinGroupResult =
+  | { ok: true; group: Group }
+  | { ok: false; error: string; needs_password: boolean };
+
 export class GroupService {
   constructor(private readonly db: Database) {}
 
   private ensureUniqueHandle(handle: string, exceptId?: string): void {
     if (groupHandleExists(this.db, handle, exceptId)) {
-      throw new CheckedError("CONFLICT", "该 handle 已被占用", 409);
+      throw new PublicError("该 handle 已被占用");
     }
   }
 
@@ -116,7 +123,7 @@ export class GroupService {
   private requireGroup(groupKey: string): Group {
     const group = findGroupByIdOrHandle(this.db, groupKey);
     if (!group) {
-      throw new CheckedError("NOT_FOUND", "群组不存在", 404);
+      throw new PublicError("群组不存在");
     }
     return group;
   }
@@ -129,14 +136,14 @@ export class GroupService {
     if (!parentGroupId) return null;
     const parent = findGroupById(this.db, parentGroupId);
     if (!parent) {
-      throw new CheckedError("NOT_FOUND", "父群组不存在", 404);
+      throw new PublicError("父群组不存在");
     }
     if (
       creatorId &&
       !isAdmin &&
       !isGroupMember(this.db, creatorId, parentGroupId)
     ) {
-      throw new CheckedError("FORBIDDEN", "你不在所选父群组中", 403);
+      throw new PublicError("你不在所选父群组中");
     }
     return parentGroupId;
   }
@@ -242,7 +249,7 @@ export class GroupService {
   discoverSubgroups(userId: string, groupKey: string, query = ""): Group[] {
     const group = this.requireGroup(groupKey);
     if (!isGroupMember(this.db, userId, group.id)) {
-      throw new CheckedError("FORBIDDEN", "你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
     return listLinkedGroups(this.db, group.id, userId, query);
   }
@@ -252,47 +259,54 @@ export class GroupService {
     groupKey: string,
     source: { type: "search" } | { type: "group"; groupId: string },
     password?: string,
-  ): Group {
-    const group = this.requireGroup(groupKey);
+  ): JoinGroupResult {
+    const group = findGroupByIdOrHandle(this.db, groupKey);
+    if (!group) {
+      return { ok: false, error: "群组不存在", needs_password: false };
+    }
     const joinInfo = findGroupJoinInfo(this.db, group.id);
     if (!joinInfo) {
-      throw new CheckedError("NOT_FOUND", "群组不存在", 404);
+      return { ok: false, error: "群组不存在", needs_password: false };
     }
     if (source.type === "search") {
       if (joinInfo.discoverable !== 1) {
-        throw new CheckedError("FORBIDDEN", "该群组未开启搜索加入", 403);
+        return {
+          ok: false,
+          error: "该群组未开启搜索加入",
+          needs_password: false,
+        };
       }
     } else if (
       joinInfo.parent_group_id !== source.groupId ||
       !isGroupMember(this.db, userId, source.groupId)
     ) {
-      throw new CheckedError("FORBIDDEN", "群组发现来源无效", 403);
+      return { ok: false, error: "群组发现来源无效", needs_password: false };
     }
     if (joinInfo.password_hash) {
       if (!password) {
-        throw new CheckedError("FORBIDDEN", "该群组需要密码", 403);
+        return { ok: false, error: "该群组需要密码", needs_password: true };
       }
       if (hashPassword(password) !== joinInfo.password_hash) {
-        throw new CheckedError("FORBIDDEN", "密码错误", 401);
+        return { ok: false, error: "密码错误", needs_password: true };
       }
     }
     addGroupMember(this.db, userId, group.id);
     publishConversationUpdate(this.db, userId, { type: "group", id: group.id });
     publishRemoteResubscribe(userId, "membership");
-    return group;
+    return { ok: true, group };
   }
 
   leave(userId: string, groupKey: string): void {
     const group = this.requireGroup(groupKey);
     const policy = findGroupLeavePolicy(this.db, group.id);
     if (!policy) {
-      throw new CheckedError("NOT_FOUND", "群组不存在", 404);
+      throw new PublicError("群组不存在");
     }
     if (policy.no_leave === 1) {
-      throw new CheckedError("FORBIDDEN", "该群组禁止退出", 403);
+      throw new PublicError("该群组禁止退出");
     }
     if (!isGroupMember(this.db, userId, group.id)) {
-      throw new CheckedError("CONFLICT", "未加入该群组", 409);
+      throw new PublicError("未加入该群组");
     }
     removeGroupMember(this.db, userId, group.id);
     publishConversationUpdate(this.db, userId, {
@@ -312,7 +326,7 @@ export class GroupService {
     const group = this.requireGroup(groupKey);
     const visibility = findGroupMemberVisibility(this.db, group.id);
     if (!visibility) {
-      throw new CheckedError("NOT_FOUND", "群组不存在", 404);
+      throw new PublicError("群组不存在");
     }
     const selfMembership = findMembership(this.db, userId, group.id);
     const selfHideSelf = selfMembership?.hide_self === 1;
@@ -325,7 +339,7 @@ export class GroupService {
       };
     }
     if (!selfMembership && !isAdmin) {
-      throw new CheckedError("FORBIDDEN", "你不在该群组中", 403);
+      throw new PublicError("你不在该群组中");
     }
     return {
       members: listGroupMembersForView(this.db, group.id, userId, isAdmin),
@@ -338,7 +352,7 @@ export class GroupService {
   setSelfHidden(userId: string, groupKey: string, hideSelf: boolean): void {
     const group = this.requireGroup(groupKey);
     if (!findMembership(this.db, userId, group.id)) {
-      throw new CheckedError("CONFLICT", "未加入该群组", 409);
+      throw new PublicError("未加入该群组");
     }
     updateMembershipHideSelf(this.db, group.id, userId, hideSelf);
   }
@@ -386,7 +400,7 @@ export class GroupService {
     if (input.parent_group_id !== undefined) {
       const parentId = this.resolveParentGroupId(input.parent_group_id, true);
       if (parentId === group.id) {
-        throw new MalformedRequestError("群组不能关联自己");
+        throw new ContractViolationError("群组不能关联自己");
       }
       updates.parent_group_id = parentId;
     }
@@ -394,7 +408,7 @@ export class GroupService {
       if (input.type === group.type) {
         // no-op
       } else if (isSpecialType(group.type)) {
-        throw new CheckedError("FORBIDDEN", "无法修改系统群组类型", 403);
+        throw new PublicError("无法修改系统群组类型");
       } else {
         if (isSpecialType(input.type)) {
           demoteGroupsByType(this.db, input.type, group.id);
@@ -416,7 +430,7 @@ export class GroupService {
   adminDelete(groupId: string): void {
     const group = this.requireGroup(groupId);
     if (isSpecialType(group.type)) {
-      throw new CheckedError("FORBIDDEN", "无法删除系统群组", 403);
+      throw new PublicError("无法删除系统群组");
     }
     const memberIds = listGroupMemberIds(this.db, group.id);
     deleteGroupById(this.db, group.id);
@@ -433,7 +447,7 @@ export class GroupService {
   adminAddMember(groupId: string, userId: string): void {
     const group = this.requireGroup(groupId);
     if (!userExists(this.db, userId)) {
-      throw new CheckedError("NOT_FOUND", "干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
     addGroupMember(this.db, userId, group.id);
     publishConversationUpdate(this.db, userId, { type: "group", id: group.id });

@@ -19,6 +19,7 @@ import {
 } from "@/client/interact/bundles";
 import { saveArticleProgress } from "@/client/interact/articles";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 const SAVE_DEBOUNCE_MS = 1500;
 const PAGE_GAP = 24;
@@ -300,7 +301,9 @@ export default function BundleArticleReader({
       lastSavedRef.current = ordinal;
       saveArticleProgress(articleId, ordinal)
         .then(() => onProgressChange?.(ordinal))
-        .catch(() => {});
+        .catch((error) => {
+          captureDetachedClientIncident("article.bundle-progress", error);
+        });
     },
     [articleId, onProgressChange],
   );

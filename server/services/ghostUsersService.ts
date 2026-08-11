@@ -8,7 +8,7 @@ import {
 } from "@/server/data/ghostUsers";
 import { findUserPinOwnerId } from "@/server/data/users";
 import { hashPin } from "@/server/infra/auth";
-import { ServiceError } from "./errors";
+import { PublicError } from "@/server/services/incidentService";
 
 export interface GhostUserServiceDeps {
   generatePin: () => string;
@@ -45,12 +45,12 @@ export class GhostUserService {
         ghost_id: createGhostUserRecord(this.db, pinHash),
       };
     }
-    throw new ServiceError("生成的 PIN 冲突，请重试", 409);
+    throw new PublicError("生成的 PIN 冲突，请重试");
   }
 
   delete(id: string): void {
     if (!deleteGhostUserById(this.db, id)) {
-      throw new ServiceError("幽灵用户不存在", 404);
+      throw new PublicError("幽灵用户不存在");
     }
   }
 }

@@ -1,5 +1,4 @@
 import { lbFetchUrl } from "@/client/lib/loadBalancer";
-import { session } from "@/client/interact/remote/session";
 import { transport } from "@/client/interact/remote/transport";
 import type { ActionResult } from "@/shared/protocol/result";
 
@@ -17,6 +16,10 @@ export function configureClientRuntime(runtime: RuntimeConfig): void {
 
 export function isDebugMenuEnabled(): boolean {
   return _runtime.debugMenu;
+}
+
+export function clientBuildId(): string {
+  return _runtime.buildId;
 }
 
 function checkOnBuildMismatch(res: Response): void {
@@ -44,18 +47,6 @@ export async function apiFetch(
   }
   const res = await fetch(lbFetchUrl(url), init);
   checkOnBuildMismatch(res);
-
-  if (res.status === 401) {
-    try {
-      const clone = res.clone();
-      const data = await clone.json();
-      if (data?.client_invalid) {
-        session.invalidate();
-      }
-    } catch {
-      // ignore JSON parse errors
-    }
-  }
 
   return res;
 }

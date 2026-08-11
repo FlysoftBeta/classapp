@@ -250,13 +250,18 @@ async function launchChrome(
   });
   const browserWs = await waitForDevtools(browser);
   const debugPort = new URL(browserWs).port;
-  const targets = (await fetch(`http://127.0.0.1:${debugPort}/json/list`).then(
-    (response) => response.json(),
-  )) as Array<{
-    type: string;
-    webSocketDebuggerUrl: string;
-  }>;
-  const page = targets.find((target) => target.type === "page");
+  let page: { type: string; webSocketDebuggerUrl: string } | undefined;
+  const deadline = Date.now() + 10_000;
+  while (!page && Date.now() < deadline) {
+    const targets = (await fetch(
+      `http://127.0.0.1:${debugPort}/json/list`,
+    ).then((response) => response.json())) as Array<{
+      type: string;
+      webSocketDebuggerUrl: string;
+    }>;
+    page = targets.find((target) => target.type === "page");
+    if (!page) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   if (!page) throw new Error("Chrome did not expose a page target");
   return { browser, cdp: await connectCdp(page.webSocketDebuggerUrl) };
 }
@@ -355,6 +360,14 @@ async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
       })`,
     "admin maintenance tab",
   );
+  await waitForExpression(
+    cdp,
+    `Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'))
+      .some(function (candidate) {
+        return candidate.textContent.trim() === "Incidents";
+      })`,
+    "admin incidents tab",
+  );
   await cdp.evaluate(`(function () {
     var tabs = Array.prototype.slice.call(
       document.querySelectorAll('[role="tab"]')
@@ -377,19 +390,152 @@ async function inspectHttpsAdminPanel(cdp: CdpClient): Promise<void> {
     return !!(input && input.checked);
   })()`);
   assert.equal(redirectEnabled, true, "HTTPS redirect switch is not enabled");
+
+  await cdp.evaluate(`(function () {
+    var tabs = Array.prototype.slice.call(
+      document.querySelectorAll('[role="tab"]')
+    );
+    var tab = tabs.find(function (candidate) {
+      return candidate.textContent.trim() === "Incidents";
+    });
+    if (!tab) throw new Error("Incidents tab not found");
+    tab.click();
+  })()`);
+  await waitForText(cdp, "触发 Server Incident");
+  await waitForText(cdp, "触发 Client Incident");
+  await waitForText(cdp, "下载当前 Build 日志");
+  await cdp.evaluate(`(function () {
+    var buttons = Array.prototype.slice.call(document.querySelectorAll("button"));
+    var button = buttons.find(function (candidate) {
+      return candidate.textContent.indexOf("触发 Server Incident") !== -1;
+    });
+    if (!button) throw new Error("Server Incident test button not found");
+    button.click();
+  })()`);
+  await waitForText(cdp, "Server Incident: I_");
+  const serverIncidentId = await cdp.evaluate<string>(`(function () {
+    var match = document.body.innerText.match(/Server Incident: (I_[A-Za-z0-9_-]{22})/);
+    return match ? match[1] : "";
+  })()`);
+  assert.match(serverIncidentId, /^I_[A-Za-z0-9_-]{22}$/);
+
+  await cdp.evaluate(`(function () {
+    var buttons = Array.prototype.slice.call(document.querySelectorAll("button"));
+    var button = buttons.find(function (candidate) {
+      return candidate.textContent.indexOf("触发 Client Incident") !== -1;
+    });
+    if (!button) throw new Error("Client Incident test button not found");
+    button.click();
+  })()`);
+  await waitForText(cdp, "Client Incident 已上报");
 }
 
 async function indexedBundleCount(cdp: CdpClient): Promise<number> {
   return cdp.evaluate<number>(`new Promise(function (resolve, reject) {
-    var request = indexedDB.open("classapp-runtime", 5);
+    var request = indexedDB.open("classapp-runtime");
     request.onerror = function () { reject(request.error); };
     request.onsuccess = function () {
       var count = request.result
-        .transaction("bundles")
-        .objectStore("bundles")
+        .transaction("shell_bundles")
+        .objectStore("shell_bundles")
         .count();
       count.onerror = function () { reject(count.error); };
       count.onsuccess = function () { resolve(count.result); };
+    };
+  })`);
+}
+
+async function seedYankedDatabase(
+  cdp: CdpClient,
+  secureUrl: string,
+): Promise<void> {
+  await cdp.send("Page.navigate", { url: `${secureUrl}manifest.webmanifest` });
+  await waitForExpression(
+    cdp,
+    `location.origin === ${JSON.stringify(new URL(secureUrl).origin)}`,
+    "legacy database seed origin",
+  );
+  await cdp.evaluate(`(async function () {
+    var manifest = await fetch("/app/manifest.json", { cache: "no-store" })
+      .then(function (response) { return response.json(); });
+    var bundle = await fetch(manifest.bundle.url, { cache: "no-store" })
+      .then(function (response) { return response.arrayBuffer(); });
+    await new Promise(function (resolve, reject) {
+      var deletion = indexedDB.deleteDatabase("classapp-runtime");
+      deletion.onsuccess = function () { resolve(); };
+      deletion.onerror = function () { reject(deletion.error); };
+    });
+    await new Promise(function (resolve, reject) {
+      var request = indexedDB.open("classapp-runtime", 6);
+      request.onupgradeneeded = function () {
+        var db = request.result;
+        db.createObjectStore("bundles", { keyPath: "build_id" });
+        db.createObjectStore("globals", { keyPath: "key" });
+        db.createObjectStore("posts", { keyPath: "id" });
+        db.createObjectStore("users", { keyPath: "id" });
+        db.createObjectStore("domain_users", { keyPath: "id" });
+      };
+      request.onerror = function () { reject(request.error); };
+      request.onsuccess = function () {
+        var db = request.result;
+        var transaction = db.transaction(
+          ["bundles", "globals", "posts", "users", "domain_users"],
+          "readwrite"
+        );
+        transaction.objectStore("bundles").put({
+          build_id: manifest.buildId,
+          entrypoint_code: bundle,
+          installed_at: Date.now()
+        });
+        transaction.objectStore("globals").put({
+          key: "active-bundle",
+          value: manifest.buildId
+        });
+        transaction.objectStore("globals").put({
+          key: "legacy-only",
+          value: true
+        });
+        transaction.objectStore("posts").put({ id: "legacy-post" });
+        transaction.objectStore("users").put({ id: "legacy-user" });
+        transaction.objectStore("domain_users").put({
+          id: "legacy-poison",
+          handle: "poison",
+          name: "poison"
+        });
+        transaction.oncomplete = function () {
+          db.close();
+          resolve();
+        };
+        transaction.onerror = function () { reject(transaction.error); };
+        transaction.onabort = function () { reject(transaction.error); };
+      };
+    });
+  })()`);
+}
+
+async function inspectMigratedDatabase(cdp: CdpClient): Promise<{
+  stores: string[];
+  legacyGlobal: unknown;
+  poisonedUser: unknown;
+}> {
+  return cdp.evaluate(`new Promise(function (resolve, reject) {
+    var request = indexedDB.open("classapp-runtime");
+    request.onerror = function () { reject(request.error); };
+    request.onsuccess = function () {
+      var db = request.result;
+      var stores = Array.prototype.slice.call(db.objectStoreNames);
+      var transaction = db.transaction(["globals", "domain_users"]);
+      var legacyGlobal = transaction.objectStore("globals").get("legacy-only");
+      var poisonedUser = transaction.objectStore("domain_users").get("legacy-poison");
+      transaction.oncomplete = function () {
+        db.close();
+        resolve({
+          stores: stores,
+          legacyGlobal: legacyGlobal.result || null,
+          poisonedUser: poisonedUser.result || null
+        });
+      };
+      transaction.onerror = function () { reject(transaction.error); };
     };
   })`);
 }
@@ -491,6 +637,8 @@ async function main(): Promise<void> {
       cdp.send("Security.enable"),
     ]);
 
+    await seedYankedDatabase(cdp, secureUrl);
+
     await cdp.send("Page.navigate", { url: legacyUrl });
     await waitForExpression(
       cdp,
@@ -520,6 +668,14 @@ async function main(): Promise<void> {
       30_000,
     );
     assert.equal(await indexedBundleCount(cdp), 1);
+    const migrated = await inspectMigratedDatabase(cdp);
+    assert.equal(migrated.stores.includes("shell_bundles"), true);
+    assert.equal(migrated.stores.includes("shell_kv"), true);
+    assert.equal(migrated.stores.includes("bundles"), false);
+    assert.equal(migrated.stores.includes("posts"), false);
+    assert.equal(migrated.stores.includes("users"), false);
+    assert.equal(migrated.legacyGlobal, null);
+    assert.equal(migrated.poisonedUser, null);
     const endpoints = await cdp.evaluate<string[]>(
       `fetch("/api/endpoints").then(function (response) {
         return response.json();
@@ -565,13 +721,13 @@ async function main(): Promise<void> {
       bundleCount: number;
       body: string;
     }>(`(async function () {
-      var request = indexedDB.open("classapp-runtime", 5);
+      var request = indexedDB.open("classapp-runtime");
       var bundleCount = await new Promise(function (resolve, reject) {
         request.onerror = function () { reject(request.error); };
         request.onsuccess = function () {
           var count = request.result
-            .transaction("bundles")
-            .objectStore("bundles")
+            .transaction("shell_bundles")
+            .objectStore("shell_bundles")
             .count();
           count.onerror = function () { reject(count.error); };
           count.onsuccess = function () { resolve(count.result); };

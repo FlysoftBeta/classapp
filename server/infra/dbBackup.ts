@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { getDb } from "./db";
 import { zipSingleFile } from "./archive";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 
 const ROOT = process.cwd();
 const BACKUP_DIR = path.join(ROOT, "backups");
@@ -34,13 +34,12 @@ export function listBackupFiles(): {
     );
 }
 
-/** Resolve and validate a backup filename; throws ServiceError if invalid or missing. */
+/** Resolve and validate a backup filename; throws PublicError if invalid or missing. */
 export function resolveBackupFile(name: string): string {
-  if (!name || !BACKUP_NAME_RE.test(name))
-    throw new ServiceError("文件名无效", 400);
+  if (!name || !BACKUP_NAME_RE.test(name)) throw new PublicError("文件名无效");
 
   const filePath = path.join(BACKUP_DIR, name);
-  if (!fs.existsSync(filePath)) throw new ServiceError("备份不存在", 404);
+  if (!fs.existsSync(filePath)) throw new PublicError("备份不存在");
 
   return filePath;
 }
@@ -62,8 +61,7 @@ export async function createDbBackup(): Promise<string | null> {
     const db = getDb();
     await db.backup(dest);
   } catch (e) {
-    console.error("[Backups] SQLite backup 失败:", e);
-    throw new ServiceError("数据库备份失败", 500);
+    throw new PublicError("数据库备份失败", "SQLite backup failed", e);
   }
 
   for (const extra of listBackupFiles().slice(MAX_BACKUPS)) {
@@ -87,7 +85,6 @@ export function buildBackupDownload(name: string): {
       zipData: zipSingleFile(filePath, name),
     };
   } catch (e) {
-    console.error("[Backups] 打包失败:", e);
-    throw new ServiceError("打包失败", 500);
+    throw new PublicError("打包失败", "Backup archive creation failed", e);
   }
 }

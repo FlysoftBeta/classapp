@@ -1,5 +1,5 @@
 import { withActionSession, expectBoolean, expectString } from "./_base";
-import { MalformedRequestError } from "@/shared/protocol/errors";
+import { ContractViolationError } from "@/server/services/incidentService";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 type ConversationRef = ActionInput<"fetchConversationDraftAction">;
@@ -7,7 +7,7 @@ type ConversationRef = ActionInput<"fetchConversationDraftAction">;
 function expectConversation(input: ConversationRef): ConversationRef {
   const type = input?.type;
   if (type !== "group" && type !== "dm") {
-    throw new MalformedRequestError("非法会话类型");
+    throw new ContractViolationError("非法会话类型");
   }
   return {
     type,
@@ -77,7 +77,7 @@ export async function setConversationMutedAction(
 
 function expectTimestamp(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0)
-    throw new MalformedRequestError("配置时间戳无效");
+    throw new ContractViolationError("配置时间戳无效");
   return value;
 }
 
@@ -98,7 +98,7 @@ export async function saveConversationDraftAction(
       trim: false,
     });
     if (!Number.isFinite(input.updatedAt) || input.updatedAt < 0) {
-      throw new MalformedRequestError("草稿时间戳无效");
+      throw new ContractViolationError("草稿时间戳无效");
     }
     return await (
       await (await session.asActor()).conversations()

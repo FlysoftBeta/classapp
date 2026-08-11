@@ -18,6 +18,7 @@ function emptyGroupEntry(g: { id: string; name: string }): ConvEntry {
     conv_id: groupConvId(g.id),
     revision: 0,
     type: "group",
+    group_type: null,
     id: g.id,
     name: g.name,
     handle: null,

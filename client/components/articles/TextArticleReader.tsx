@@ -21,6 +21,7 @@ import type { Provider } from "@infini-scroll/core";
 import { useInfini } from "@infini-scroll/react";
 import { InfiniId } from "@/client/components/debug/InfiniId";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -153,7 +154,9 @@ export default function TextArticleReader({
       lastSavedIdRef.current = clamped;
       saveArticleProgress(articleId, clamped)
         .then(() => onProgressChange?.(clamped))
-        .catch(() => {});
+        .catch((error) => {
+          captureDetachedClientIncident("article.text-progress", error);
+        });
     },
     [articleId, onProgressChange],
   );

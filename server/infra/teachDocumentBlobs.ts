@@ -3,7 +3,10 @@ import path from "node:path";
 import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { DATA_ROOT } from "@/server/infra/env";
-import { ServiceError } from "@/server/services/errors";
+import {
+  attachSuppressedError,
+  PublicError,
+} from "@/server/services/incidentService";
 
 const BLOB_ROOT = path.join(DATA_ROOT, "blobs");
 const TEACH_BLOB_DIR = "teach";
@@ -18,7 +21,7 @@ export async function copyTeachDocument(
   sourcePath: string,
 ): Promise<StoredTeachDocument> {
   const source = await stat(sourcePath);
-  if (!source.isFile()) throw new ServiceError("源文档不是文件", 400);
+  if (!source.isFile()) throw new PublicError("源文档不是文件");
 
   const id = crypto.randomUUID();
   const sourceExtension = path.extname(sourcePath);
@@ -36,8 +39,10 @@ export async function copyTeachDocument(
   } catch (error) {
     try {
       await unlink(absolutePath);
-    } catch {
-      // The copy may have failed before creating its destination.
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
+        attachSuppressedError(error, cleanupError);
+      }
     }
     throw error;
   }
@@ -53,7 +58,7 @@ export function resolveTeachDocumentBlobPath(relativePath: string): string {
     /^[A-Za-z]:\//.test(normalized) ||
     !normalized.startsWith(`${TEACH_BLOB_DIR}/`)
   ) {
-    throw new ServiceError("无效文档 blob 路径", 400);
+    throw new PublicError("无效文档 blob 路径");
   }
   return path.join(BLOB_ROOT, ...normalized.split("/"));
 }

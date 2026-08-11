@@ -21,12 +21,48 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 17;
+const CURRENT_SCHEMA_VERSION = 18;
 
 type SchemaMigration = (db: Database) => void;
 
-// Add [sourceVersion, migration] entries when CURRENT_SCHEMA_VERSION advances.
-const MIGRATIONS = new Map<number, SchemaMigration>();
+const INCIDENT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS incident_groups (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    environment         TEXT NOT NULL CHECK (environment IN ('server', 'client')),
+    build_id            TEXT NOT NULL,
+    fingerprint         TEXT NOT NULL,
+    top_frame           TEXT NOT NULL,
+    occurrence_count    INTEGER NOT NULL DEFAULT 0,
+    stored_detail_count INTEGER NOT NULL DEFAULT 0,
+    first_at            TEXT NOT NULL,
+    last_at             TEXT NOT NULL,
+    UNIQUE (environment, build_id, fingerprint)
+  );
+  CREATE INDEX IF NOT EXISTS idx_incident_groups_last_at
+    ON incident_groups(last_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_incident_groups_filter
+    ON incident_groups(environment, build_id, last_at DESC);
+
+  CREATE TABLE IF NOT EXISTS incidents (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_id                TEXT UNIQUE,
+    group_id                 INTEGER NOT NULL REFERENCES incident_groups(id) ON DELETE CASCADE,
+    occurred_at              TEXT NOT NULL,
+    error_name               TEXT,
+    message                  TEXT,
+    stack                    TEXT,
+    context_json             TEXT CHECK (context_json IS NULL OR json_valid(context_json)),
+    related_incident_ids_json TEXT CHECK (
+      related_incident_ids_json IS NULL OR json_valid(related_incident_ids_json)
+    )
+  );
+  CREATE INDEX IF NOT EXISTS idx_incidents_group
+    ON incidents(group_id, id DESC);
+`;
+
+const MIGRATIONS = new Map<number, SchemaMigration>([
+  [17, (db) => db.exec(INCIDENT_SCHEMA)],
+]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
 function runMigrations(db: Database): void {
@@ -323,6 +359,8 @@ function installSchema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_convs_user_read_post ON convs_user(last_read_post_id);
   `);
+
+  db.exec(INCIDENT_SCHEMA);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_groups_handle ON groups(handle);

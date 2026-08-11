@@ -6,7 +6,7 @@ import {
   listBackupFiles,
 } from "@/server/infra/dbBackup";
 import { updateManager } from "@/server/infra/updateManager";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 
 export type AdminSystemToolAction = "kill-wps" | "shutdown";
@@ -29,7 +29,7 @@ export class AdminSystemService {
 
   async createBackup() {
     if (!(await createDbBackup())) {
-      throw new ServiceError("数据库文件不存在", 404);
+      throw new PublicError("数据库文件不存在");
     }
     return this.listBackups();
   }
@@ -73,7 +73,7 @@ export class AdminSystemService {
 
   runTool(action: AdminSystemToolAction): { ok: true; message: string } {
     if (process.platform !== "win32") {
-      throw new ServiceError("仅支持 Windows", 400);
+      throw new PublicError("仅支持 Windows");
     }
     if (action === "kill-wps") {
       runBackground("taskkill", [
@@ -93,7 +93,7 @@ export class AdminSystemService {
       runBackground("shutdown", ["/s", "/t", "0"]);
       return { ok: true, message: "已发送关机命令" };
     }
-    throw new ServiceError("未知操作", 400);
+    throw new PublicError("未知操作");
   }
 }
 

@@ -29,6 +29,7 @@ import initZstd, {
   decompress,
   decompress_with_dictionary,
 } from "@/lib/zstd-web/pkg/zstd_web.js";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 const { openArticleBundleAction, fetchArticleBundleItemsAction } =
   client.actions;
@@ -97,8 +98,12 @@ async function readCatalog(
       JSON.parse(textDecoder.decode(bytes)),
     );
     if (parsed.success) return parsed.data;
-  } catch {
-    // Treat a torn or obsolete local catalog as a cache miss.
+    captureDetachedClientIncident(
+      "bundle.catalog-contract",
+      new Error("Stored Bundle catalog does not match its schema"),
+    );
+  } catch (error) {
+    captureDetachedClientIncident("bundle.catalog-read", error);
   }
   // A concurrent publisher may already have replaced the corrupt generation;
   // leave cleanup to the next successful replace or quota collection.
@@ -212,8 +217,9 @@ class ResponseByteReader {
     if (this.released) return;
     try {
       await this.reader.cancel(reason);
-    } catch {
+    } catch (error) {
       // The network stream may already have failed or closed.
+      captureDetachedClientIncident("bundle.stream-cancel", error);
     } finally {
       this.release();
     }
@@ -222,7 +228,11 @@ class ResponseByteReader {
   private release(): void {
     if (this.released) return;
     this.released = true;
-    this.reader.releaseLock();
+    try {
+      this.reader.releaseLock();
+    } catch (error) {
+      captureDetachedClientIncident("bundle.stream-release", error);
+    }
   }
 }
 
@@ -398,7 +408,9 @@ function scheduleResourcePrefetch(
     articleId,
     setTimeout(() => {
       articlePrefetchTimers.delete(articleId);
-      void ensureResources(articleId, resources).catch(() => {});
+      void ensureResources(articleId, resources).catch((error) =>
+        captureDetachedClientIncident("bundle.resource-prefetch", error),
+      );
     }, 0),
   );
 }

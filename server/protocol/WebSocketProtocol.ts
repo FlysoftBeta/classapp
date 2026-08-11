@@ -28,105 +28,199 @@ import {
   type RequestFrame,
   type ResponseFrame,
 } from "@/shared/protocol/wire";
-import { MalformedRequestError } from "@/shared/protocol/errors";
+import {
+  ContractViolationError,
+  PublicError,
+  createIncidentService,
+} from "@/server/services/incidentService";
 import { dispatchAction } from "./registry";
 import { ServerResultCodec } from "./errorCodec";
 import {
   identifyClientRequest,
   type ClientIdentity,
 } from "@/server/infra/clientIdentity";
+import type { User } from "@/shared/types/api";
+import { BUILD_ID } from "@/server/infra/env";
 
 function send(socket: WebSocket, frame: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
 }
 
-function channelsFor(token: string, identity: ClientIdentity): string[] {
+function userChannels(userId: string): string[] {
   const db = getDb();
-  const channels = [systemChannel()];
-  const user = token ? getUserFromToken(token) : null;
-  if (!user || isUserBanned(user.id)) {
-    channels.push(clientChannel(getOrCreateClient(db, identity)));
-    return channels;
+  const channels = [userChannel(userId), userConvChannel(userId)];
+  for (const groupId of listEventGroupIds(db, userId)) {
+    channels.push(groupPostChannel(groupId), groupArticleChannel(groupId));
   }
-  const clientId = getClientIdFromToken(db, token);
-  if (clientId) channels.push(clientChannel(clientId));
-  channels.push(userChannel(user.id), userConvChannel(user.id));
-  for (const groupId of listEventGroupIds(db, user.id)) {
-    channels.push(groupPostChannel(groupId));
-    channels.push(groupArticleChannel(groupId));
-  }
-  for (const partnerId of listEventDmPartnerIds(db, user.id)) {
-    channels.push(dmPostChannel(user.id, partnerId));
+  for (const partnerId of listEventDmPartnerIds(db, userId)) {
+    channels.push(dmPostChannel(userId, partnerId));
   }
   return channels;
 }
 
-/** Stateful server-side protocol session for one WebSocket connection. */
+interface AuthenticatedBinding {
+  userId: string;
+  token: string;
+  clientId: string | null;
+  unsubscribe: () => void;
+}
+
+/** One physical WebSocket can carry several immutable authenticated actors. */
 class ProtocolSession {
-  private token = "";
-  private unsubscribe = () => {};
+  private readonly bindings = new Map<string, AuthenticatedBinding>();
+  private readonly anonymousClientId: string;
+  private readonly unsubscribeBase: () => void;
 
   constructor(
     private readonly socket: WebSocket,
     private readonly identity: ClientIdentity,
   ) {
-    this.resubscribe();
+    this.anonymousClientId = getOrCreateClient(getDb(), identity);
+    this.unsubscribeBase = subscribe(
+      [systemChannel(), clientChannel(this.anonymousClientId)],
+      (event) => this.sendEvent(null, event),
+    );
   }
 
-  authenticate(token: string): void {
-    this.token = token.trim();
-    this.resubscribe();
+  async authenticate(claimedUserId: string, token: string): Promise<void> {
+    const result = await ServerResultCodec.capture(
+      async () => {
+        const normalized = token.trim();
+        const user = normalized ? getUserFromToken(normalized) : null;
+        if (!user) throw new PublicError("会话认证失败");
+        if (user.id !== claimedUserId) {
+          throw new ContractViolationError("认证用户与 token 不匹配");
+        }
+        if (isUserBanned(user.id)) throw new PublicError("当前用户已被封禁");
+        this.bind(user, normalized);
+        return undefined;
+      },
+      {
+        action: "remote.authenticate",
+        userId: claimedUserId,
+      },
+    );
+    send(this.socket, {
+      v: PROTOCOL_VERSION,
+      kind: "authenticated",
+      user: claimedUserId,
+      result: result.ok ? { ok: true } : { ok: false, error: result.error },
+    });
   }
 
   async dispatch(frame: RequestFrame): Promise<void> {
-    await this.respond(frame.id, async () => {
-      const action = actionNameSchema.safeParse(frame.action);
-      if (!action.success) {
-        throw new MalformedRequestError("未知 Action", action.error.issues);
-      }
-      return withRequestContext(
-        { token: this.token || null, ...this.identity },
-        () => dispatchAction(action.data, frame.args),
-      );
+    const binding = frame.user === null ? null : this.bindings.get(frame.user);
+    let dispatchedAction: string | null = null;
+    const succeeded = await this.respond(
+      frame.id,
+      frame.user,
+      async () => {
+        if (frame.user !== null && !binding) {
+          throw new PublicError("用户会话尚未完成认证");
+        }
+        const action = actionNameSchema.safeParse(frame.action);
+        if (!action.success) {
+          throw new ContractViolationError("未知 Action", action.error.issues);
+        }
+        dispatchedAction = action.data;
+        return withRequestContext(
+          {
+            token: binding?.token ?? null,
+            userId: binding?.userId ?? null,
+            clientId: binding?.clientId ?? this.anonymousClientId,
+            ...this.identity,
+          },
+          () => dispatchAction(action.data, frame.args),
+        );
+      },
+      frame.action,
+    );
+    if (
+      succeeded &&
+      dispatchedAction === "logoutAction" &&
+      frame.user !== null
+    ) {
+      this.unbind(frame.user);
+    }
+  }
+
+  async rejectMalformed(
+    id: string,
+    user: string | null,
+    issues: unknown[],
+  ): Promise<void> {
+    await this.respond(
+      id,
+      user,
+      async () => {
+        throw new ContractViolationError("请求帧格式错误", issues);
+      },
+      "protocol.request",
+    );
+  }
+
+  recordProtocolViolation(error: unknown): string {
+    return createIncidentService(getDb(), BUILD_ID).capture({
+      environment: "server",
+      error,
+      context: { transport: "websocket", phase: "frame" },
+    }).incidentId;
+  }
+
+  close(): void {
+    this.unsubscribeBase();
+    for (const binding of this.bindings.values()) binding.unsubscribe();
+    this.bindings.clear();
+  }
+
+  private bind(user: User, token: string): void {
+    this.bindings.get(user.id)?.unsubscribe();
+    const clientId = getClientIdFromToken(getDb(), token) ?? null;
+    const unsubscribe = subscribe(userChannels(user.id), (event) =>
+      this.sendEvent(user.id, event),
+    );
+    this.bindings.set(user.id, {
+      userId: user.id,
+      token,
+      clientId,
+      unsubscribe,
     });
   }
 
-  async rejectMalformed(id: string, issues: unknown[]): Promise<void> {
-    await this.respond(id, async () => {
-      throw new MalformedRequestError("请求帧格式错误", issues);
-    });
+  private unbind(userId: string): void {
+    this.bindings.get(userId)?.unsubscribe();
+    this.bindings.delete(userId);
   }
 
   private async respond(
     id: string,
+    user: string | null,
     operation: () => Promise<unknown>,
-  ): Promise<void> {
-    const result = await ServerResultCodec.capture(operation);
+    action?: string,
+  ): Promise<boolean> {
+    const result = await ServerResultCodec.capture(operation, {
+      action,
+      requestId: id,
+      userId: user,
+    });
     send(this.socket, {
       v: PROTOCOL_VERSION,
       kind: "response",
       id,
+      user,
       result,
     } satisfies ResponseFrame);
+    return result.ok;
   }
 
-  close(): void {
-    this.unsubscribe();
-  }
-
-  private resubscribe(): void {
-    this.unsubscribe();
-    this.unsubscribe = subscribe(
-      channelsFor(this.token, this.identity),
-      (event: BusEvent) => {
-        send(this.socket, {
-          v: PROTOCOL_VERSION,
-          kind: "event",
-          event: event.kind,
-          data: event.data,
-        });
-      },
-    );
+  private sendEvent(user: string | null, event: BusEvent): void {
+    send(this.socket, {
+      v: PROTOCOL_VERSION,
+      kind: "event",
+      user,
+      event: event.kind,
+      data: event.data,
+    });
   }
 }
 
@@ -163,42 +257,70 @@ export class WebSocketProtocol {
       let raw: unknown;
       try {
         raw = JSON.parse(bytes.toString());
-      } catch {
-        socket.close(1003, "invalid JSON");
+      } catch (error) {
+        const id = session.recordProtocolViolation(
+          new ContractViolationError("WebSocket frame 不是合法 JSON", error),
+        );
+        socket.close(1003, `invalid JSON ${id}`);
         return;
       }
 
       if (!raw || typeof raw !== "object" || !("kind" in raw)) {
-        socket.close(1008, "invalid protocol frame");
+        const id = session.recordProtocolViolation(
+          new ContractViolationError("WebSocket frame 缺少 kind"),
+        );
+        socket.close(1008, `invalid frame ${id}`);
         return;
       }
 
       if (raw.kind === "authenticate") {
         const authentication = authenticateFrameSchema.safeParse(raw);
         if (!authentication.success) {
-          socket.close(1008, "invalid authentication frame");
+          const id = session.recordProtocolViolation(
+            new ContractViolationError(
+              "认证 frame 不符合协议",
+              authentication.error.issues,
+            ),
+          );
+          socket.close(1008, `invalid authentication ${id}`);
           return;
         }
-        session.authenticate(authentication.data.token);
+        void session.authenticate(
+          authentication.data.user,
+          authentication.data.token,
+        );
         return;
       }
 
       if (raw.kind === "request") {
-        const request = requestFrameSchema.safeParse(raw);
-        if (request.success) {
-          void session.dispatch(request.data);
+        const parsed = requestFrameSchema.safeParse(raw);
+        if (parsed.success) {
+          void session.dispatch(parsed.data);
           return;
         }
         const id = "id" in raw && typeof raw.id === "string" ? raw.id : "";
+        const user =
+          "user" in raw && (typeof raw.user === "string" || raw.user === null)
+            ? raw.user
+            : null;
         if (id.length > 0 && id.length <= 128) {
-          void session.rejectMalformed(id, request.error.issues);
+          void session.rejectMalformed(id, user, parsed.error.issues);
         } else {
-          socket.close(1008, "invalid request frame");
+          const incidentId = session.recordProtocolViolation(
+            new ContractViolationError(
+              "请求 frame 不符合协议",
+              parsed.error.issues,
+            ),
+          );
+          socket.close(1008, `invalid request ${incidentId}`);
         }
         return;
       }
 
-      socket.close(1008, "unknown protocol frame");
+      const id = session.recordProtocolViolation(
+        new ContractViolationError("未知 WebSocket frame kind"),
+      );
+      socket.close(1008, `unknown frame ${id}`);
     });
     socket.on("close", () => session.close());
   }

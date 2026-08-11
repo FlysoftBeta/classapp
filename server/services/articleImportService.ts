@@ -5,6 +5,8 @@ import { ClientBusyError, createTomatoClientPool } from "@/lib/tomato";
 import type { SearchBook } from "@/lib/tomato";
 import { createArticleService } from "./articlesService";
 import { assertCanCreateArticle } from "@/server/domain/policy/articles";
+import { BUILD_ID } from "@/server/infra/env";
+import { recordContainedServerIncident } from "./incidentService";
 
 export interface NetworkArticleResult {
   source: "tomato";
@@ -156,6 +158,12 @@ export class ArticleImportService {
       task.error = error instanceof Error ? error.message : String(error);
       task.eta_ms = 0;
       task.updated_at = Date.now();
+      recordContainedServerIncident(this.db, BUILD_ID, error, {
+        component: "article-import",
+        task_id: task.id,
+        book_id: task.book_id,
+        user_id: task.user_id,
+      });
     }
   }
 
@@ -172,8 +180,12 @@ export class ArticleImportService {
   }
 }
 
-let singleton: ArticleImportService | null = null;
+const services = new WeakMap<Database, ArticleImportService>();
 export function createArticleImportService(db: Database): ArticleImportService {
-  singleton ??= new ArticleImportService(db);
-  return singleton;
+  let service = services.get(db);
+  if (!service) {
+    service = new ArticleImportService(db);
+    services.set(db, service);
+  }
+  return service;
 }

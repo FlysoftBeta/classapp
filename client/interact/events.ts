@@ -1,4 +1,5 @@
 import type { PostStreamEvent, UserConfigChangedEvent } from "./types";
+import { reportDetachedClientFailure } from "./incidentContext";
 
 type Listener<T> = (event: T) => void;
 
@@ -9,8 +10,9 @@ function createEventStream<T>() {
       for (const listener of listeners) {
         try {
           listener(event);
-        } catch {
+        } catch (error) {
           // One rendering consumer cannot break the global data subscriber.
+          reportDetachedClientFailure("local-event.listener", error);
         }
       }
     },

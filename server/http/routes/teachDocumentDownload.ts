@@ -3,7 +3,7 @@ import { getDb } from "@/server/infra/db";
 import { findTeachDocument } from "@/server/data/teachDocuments";
 import { readTeachDocumentBlob } from "@/server/infra/teachDocumentBlobs";
 import { requireActiveAdmin } from "@/server/domain/policy/auth";
-import { handleServiceError, ServiceError } from "@/server/services/errors";
+import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 const MIME_TYPES: Record<string, string> = {
   ".doc": "application/msword",
@@ -38,7 +38,7 @@ export async function GET(
   try {
     const { id } = await params;
     const document = findTeachDocument(getDb(), id);
-    if (!document) throw new ServiceError("文档不存在", 404);
+    if (!document) throw new PublicError("文档不存在");
     const body = await readTeachDocumentBlob(document.blob_path);
     const arrayBuffer = new ArrayBuffer(body.byteLength);
     new Uint8Array(arrayBuffer).set(body);
@@ -53,6 +53,6 @@ export async function GET(
       },
     });
   } catch (error) {
-    return handleServiceError(error);
+    return handleHttpError(error);
   }
 }

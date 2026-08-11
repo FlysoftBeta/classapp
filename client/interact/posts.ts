@@ -9,7 +9,8 @@ const {
   updatePostAction,
 } = client.actions;
 import { client } from "@/client/interact/remote/client";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 export type PostMutationData = {
   post?: Post;
@@ -145,23 +146,28 @@ export async function fetchRemotePosts(
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  if (data.posts?.length) {
-    if (params.changed_after_revision) {
-      // Revision pages contain changed rows, not a contiguous history page.
-      await offlineRepository.savePosts(conv, data.posts, {
-        extendCoverage: false,
-      });
-    } else {
-      const limit = Math.max(1, Number(params.limit) || 50);
-      await offlineRepository.reconcilePostPage(conv, data.posts, {
-        ...(params.before_id ? { beforeId: params.before_id } : {}),
-        ...(params.after_id ? { afterId: params.after_id } : {}),
-        exhausted: data.posts.length < limit,
-      });
+  try {
+    if (data.posts?.length) {
+      if (params.changed_after_revision) {
+        // Revision pages contain changed rows, not a contiguous history page.
+        await offlineRepository.savePosts(conv, data.posts, {
+          extendCoverage: false,
+        });
+      } else {
+        const limit = Math.max(1, Number(params.limit) || 50);
+        await offlineRepository.reconcilePostPage(conv, data.posts, {
+          ...(params.before_id ? { beforeId: params.before_id } : {}),
+          ...(params.after_id ? { afterId: params.after_id } : {}),
+          exhausted: data.posts.length < limit,
+        });
+      }
     }
-  }
-  if (!params.changed_after_revision && conv.revision !== undefined) {
-    await offlineRepository.advancePostRevision(conv.conv_id, conv.revision);
+    if (!params.changed_after_revision && conv.revision !== undefined) {
+      await offlineRepository.advancePostRevision(conv.conv_id, conv.revision);
+    }
+  } catch (error) {
+    // Post rows remain usable even if their evictable projection cannot commit.
+    captureDetachedClientIncident("post.page-cache", error);
   }
   return data;
 }
@@ -170,8 +176,14 @@ export function commitPostRevisionRange(
   conv: Pick<Conversation, "type" | "id" | "conv_id">,
   posts: Post[],
   revision: number,
+  revisionSum?: string,
 ) {
-  return offlineRepository.reconcilePostRevisions(conv, posts, revision);
+  return offlineRepository.reconcilePostRevisions(
+    conv,
+    posts,
+    revision,
+    revisionSum,
+  );
 }
 
 export async function fetchPost(postId: string) {

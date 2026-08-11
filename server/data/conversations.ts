@@ -29,7 +29,7 @@ export function listConversations(
 ): Conversation[] {
   const groups = db
     .prepare(
-      `SELECT g.id, g.conv_id, g.revision, g.handle, g.name,
+      `SELECT g.id, g.conv_id, g.revision, g.handle, g.name, g.type AS group_type,
          (g.password_hash IS NOT NULL) AS has_password,
          g.members_hidden, g.admin_only, g.no_leave,
          (COALESCE(me.is_muted, 0) = 0 AND
@@ -68,7 +68,7 @@ export function listConversations(
 
   const dms = db
     .prepare(
-      `SELECT d.conv_id, d.revision,
+      `SELECT d.conv_id, d.revision, NULL AS group_type,
          CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END AS id,
          COALESCE(u.username, du.username, '已注销') AS name,
          u.handle,
@@ -138,17 +138,24 @@ export function listConversations(
 export function listConversationRevisions(
   db: Database,
   userId: string,
-): Array<{ conv_id: string; revision: number }> {
+): Array<{ conv_id: string; revision: number; revision_sum: string }> {
   return db
     .prepare(
-      `SELECT g.conv_id, g.revision FROM group_members gm
+      `SELECT g.conv_id, g.revision,
+              CAST(COALESCE((SELECT SUM(p.revision) FROM posts p
+                             WHERE p.conv_id = g.conv_id), 0) AS TEXT) AS revision_sum
+       FROM group_members gm
        JOIN groups g ON g.id = gm.group_id WHERE gm.user_id = ?
        UNION ALL
-       SELECT d.conv_id, d.revision FROM dms d WHERE d.peer_a = ? OR d.peer_b = ?`,
+       SELECT d.conv_id, d.revision,
+              CAST(COALESCE((SELECT SUM(p.revision) FROM posts p
+                             WHERE p.conv_id = d.conv_id), 0) AS TEXT) AS revision_sum
+       FROM dms d WHERE d.peer_a = ? OR d.peer_b = ?`,
     )
     .all(userId, userId, userId) as Array<{
     conv_id: string;
     revision: number;
+    revision_sum: string;
   }>;
 }
 

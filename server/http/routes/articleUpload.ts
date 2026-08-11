@@ -4,10 +4,11 @@ import {
   removeArticleBundle,
   storeArticleBundle,
 } from "@/server/infra/articleArtifacts";
-import { handleServiceError } from "@/server/services/errors";
+import { handleHttpError } from "@/server/http/errorResponse";
 import { requireActiveAuth } from "@/server/domain/policy/auth";
 import { assertCanCreateArticle } from "@/server/domain/policy/articles";
 import { hasFeature } from "@/shared/features";
+import { attachSuppressedError } from "@/server/services/incidentService";
 
 export async function POST(req: Request) {
   const auth = requireActiveAuth(req);
@@ -60,12 +61,14 @@ export async function POST(req: Request) {
       });
       return Response.json({ article: result.article }, { status: 201 });
     } catch (e) {
-      await removeArticleBundle(stored.sourcePath, stored.archivePath).catch(
-        () => {},
-      );
+      try {
+        await removeArticleBundle(stored.sourcePath, stored.archivePath);
+      } catch (cleanupError) {
+        attachSuppressedError(e, cleanupError);
+      }
       throw e;
     }
   } catch (e) {
-    return handleServiceError(e);
+    return handleHttpError(e);
   }
 }

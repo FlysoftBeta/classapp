@@ -1,5 +1,5 @@
 import { expectBoolean, expectString, withActionSession } from "./_base";
-import { MalformedRequestError } from "@/shared/protocol/errors";
+import { ContractViolationError } from "@/server/services/incidentService";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function fetchWordStatsAction(
@@ -42,7 +42,7 @@ export async function recordWordPracticeAction(
   return withActionSession(async (session) => {
     const wordId = expectString(input.wordId, "wordId 无效");
     if (typeof input.correct !== "boolean") {
-      throw new MalformedRequestError("correct 参数无效");
+      throw new ContractViolationError("correct 参数无效");
     }
     const mastered =
       input.mastered === undefined

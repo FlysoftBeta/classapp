@@ -78,12 +78,11 @@ export async function joinGroupAction(input: ActionInput<"joinGroupAction">) {
             type: "group",
             groupId: expectString(input.source.groupId, "群组发现来源无效"),
           } as const);
-    const group = await groups.join(
+    return groups.join(
       expectString(input.groupId, "群组不存在"),
       source,
       typeof input.password === "string" ? input.password : undefined,
     );
-    return { ok: true as const, group };
   });
 }
 

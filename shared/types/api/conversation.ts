@@ -7,6 +7,8 @@ export const conversationSchema = z
     /** Monotonic awareness revision for post appends/edits/tombstones. */
     revision: z.number().int().nonnegative(),
     type: z.enum(["group", "dm"]),
+    /** Stable server classification; null for DMs. */
+    group_type: z.string().nullable(),
     /** Group id (UUID) or peer user id. */
     id: z.string(),
     /** Group handle (for groups) or DM peer handle (for DMs). */

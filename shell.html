@@ -51,115 +51,116 @@
             });
         }
         var DB = "classapp-runtime";
-        var DB_VERSION = 5;
+        var BUNDLES = "shell_bundles";
+        var KV = "shell_kv";
         var ACTIVE_BUILD_KEY = "active-bundle";
-        function createSchema(db) {
-          db.createObjectStore("files");
-          var heads = db.createObjectStore("file_heads", { keyPath: "id" });
-          heads.createIndex("by-state-created", ["state", "created_at"]);
-          if (!db.objectStoreNames.contains("globals")) {
-            db.createObjectStore("globals", { keyPath: "key" });
-          }
-          if (!db.objectStoreNames.contains("bundles")) {
-            db.createObjectStore("bundles", { keyPath: "build_id" });
-          }
+        function installShellSchema(request) {
+          var db = request.result;
+          var transaction = request.transaction;
+          var bundles = db.objectStoreNames.contains(BUNDLES)
+            ? transaction.objectStore(BUNDLES)
+            : db.createObjectStore(BUNDLES, { keyPath: "build_id" });
+          var kv = db.objectStoreNames.contains(KV)
+            ? transaction.objectStore(KV)
+            : db.createObjectStore(KV, { keyPath: "key" });
+          kv.put({ key: "schema-version", value: 1 });
 
-          var groups = db.createObjectStore("domain_groups", { keyPath: "id" });
-          groups.createIndex("by-conv", "conv_id", { unique: true });
-          groups.createIndex("by-handle", "handle", { unique: true });
-          var dms = db.createObjectStore("domain_dms", { keyPath: "conv_id" });
-          dms.createIndex("by-peer-a", "peer_a");
-          dms.createIndex("by-peer-b", "peer_b");
-          var posts = db.createObjectStore("domain_posts", { keyPath: "id" });
-          posts.createIndex(
-            "by-conversation-sequence",
-            ["conv_id", "sequence"],
-            { unique: true },
-          );
-          posts.createIndex("by-conversation-revision", [
-            "conv_id",
-            "revision",
-          ]);
-          posts.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
-          var articles = db.createObjectStore("domain_articles", {
-            keyPath: "id",
-          });
-          articles.createIndex("by-group-created", [
-            "group_id",
-            "created_at",
-            "id",
-          ]);
-          articles.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
-          var segments = db.createObjectStore("domain_article_segments", {
-            keyPath: ["article_id", "start_offset"],
-          });
-          segments.createIndex("by-article", "article_id");
-          segments.createIndex(
-            "by-article-start",
-            ["article_id", "start_offset"],
-            { unique: true },
-          );
-          segments.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
-          var users = db.createObjectStore("domain_users", { keyPath: "id" });
-          users.createIndex("by-handle", "handle", { unique: true });
-
-          db.createObjectStore("domain_me", { keyPath: "me_id" });
-          var access = db.createObjectStore("domain_me_access", {
-            keyPath: ["me_id", "kind", "object_id"],
-          });
-          access.createIndex("by-me-kind", ["me_id", "kind"]);
-          access.createIndex("by-object", ["kind", "object_id"]);
-          var convState = db.createObjectStore("domain_me_conv_state", {
-            keyPath: ["me_id", "conv_id"],
-          });
-          convState.createIndex("by-me", "me_id");
-          convState.createIndex("by-pending", ["me_id", "pending"]);
-          var articleState = db.createObjectStore("domain_me_article_state", {
-            keyPath: ["me_id", "article_id"],
-          });
-          articleState.createIndex("by-me", "me_id");
-          articleState.createIndex("by-pending", ["me_id", "pending"]);
-          var meState = db.createObjectStore("domain_me_state", {
-            keyPath: ["me_id", "key"],
-          });
-          meState.createIndex("by-me", "me_id");
-          meState.createIndex("by-pending", ["me_id", "pending"]);
-          var save = db.createObjectStore("domain_save", {
-            keyPath: ["claimant", "kind", "object_id"],
-          });
-          save.createIndex("by-resource", ["kind", "object_id"]);
-          save.createIndex("by-expiry", ["kind", "protected_until"]);
-          var sync = db.createObjectStore("domain_sync", { keyPath: "scope" });
-          sync.createIndex("by-kind", "kind");
-        }
-        function open() {
-          return new Promise(function (resolve, reject) {
-            var request = indexedDB.open(DB, DB_VERSION);
-            request.onupgradeneeded = function (event) {
-              var db = request.result;
-              if (event.oldVersion > 0) {
-                var names = Array.prototype.slice.call(db.objectStoreNames);
-                for (var index = 0; index < names.length; index += 1) {
-                  if (
-                    event.oldVersion < 4 ||
-                    (names[index] !== "globals" && names[index] !== "bundles")
-                  ) {
-                    db.deleteObjectStore(names[index]);
-                  }
-                }
+          // Preserve the bootable Bundle before app migration nukes every
+          // yanked application store from the historical schema.
+          if (db.objectStoreNames.contains("bundles")) {
+            var legacyBundles = transaction.objectStore("bundles").getAll();
+            legacyBundles.onsuccess = function () {
+              for (
+                var index = 0;
+                index < legacyBundles.result.length;
+                index += 1
+              ) {
+                bundles.put(legacyBundles.result[index]);
               }
-              createSchema(db);
+            };
+          }
+          if (db.objectStoreNames.contains("globals")) {
+            var legacyActive = transaction
+              .objectStore("globals")
+              .get(ACTIVE_BUILD_KEY);
+            legacyActive.onsuccess = function () {
+              if (legacyActive.result && legacyActive.result.value) {
+                kv.put({
+                  key: ACTIVE_BUILD_KEY,
+                  value: legacyActive.result.value,
+                });
+              }
+            };
+          }
+        }
+        function openAt(version) {
+          return new Promise(function (resolve, reject) {
+            var settled = false;
+            var blockedTimer = null;
+            var request = version
+              ? indexedDB.open(DB, version)
+              : indexedDB.open(DB);
+            request.onupgradeneeded = function () {
+              installShellSchema(request);
             };
             request.onsuccess = function () {
+              if (settled) {
+                request.result.close();
+                return;
+              }
+              settled = true;
+              if (blockedTimer !== null) clearTimeout(blockedTimer);
               request.result.onversionchange = function () {
                 request.result.close();
               };
               resolve(request.result);
             };
             request.onerror = function () {
+              if (settled) return;
+              settled = true;
+              if (blockedTimer !== null) clearTimeout(blockedTimer);
               reject(request.error);
             };
+            request.onblocked = function () {
+              if (blockedTimer !== null) return;
+              blockedTimer = setTimeout(function () {
+                if (settled) return;
+                settled = true;
+                reject(new Error("IndexedDB Shell upgrade is blocked"));
+              }, 5000);
+            };
           });
+        }
+        function open() {
+          return openAt().then(function (db) {
+            var hasSchema =
+              db.objectStoreNames.contains(BUNDLES) &&
+              db.objectStoreNames.contains(KV);
+            if (hasSchema) {
+              return idb(
+                db.transaction(KV).objectStore(KV).get("schema-version"),
+              ).then(function (schema) {
+                if (schema && schema.value === 1) return db;
+                return upgradeShell(db);
+              });
+            }
+            return upgradeShell(db);
+          });
+        }
+        function upgradeShell(db) {
+          var nextVersion = db.version + 1;
+          db.close();
+          return openAt(nextVersion)
+            .then(function (upgraded) {
+              // The app owner may have won this physical-version race. Reopen
+              // and verify the shell marker before using either schema.
+              upgraded.close();
+              return open();
+            })
+            .catch(function (error) {
+              if (error && error.name === "VersionError") return open();
+              throw error;
+            });
         }
         function idb(request) {
           return new Promise(function (resolve, reject) {
@@ -173,16 +174,13 @@
         }
         function storeBundle(db, buildId, body) {
           return new Promise(function (resolve, reject) {
-            var transaction = db.transaction(
-              ["bundles", "globals"],
-              "readwrite",
-            );
-            transaction.objectStore("bundles").put({
+            var transaction = db.transaction([BUNDLES, KV], "readwrite");
+            transaction.objectStore(BUNDLES).put({
               build_id: buildId,
               entrypoint_code: body,
               installed_at: Date.now(),
             });
-            transaction.objectStore("globals").put({
+            transaction.objectStore(KV).put({
               key: ACTIVE_BUILD_KEY,
               value: buildId,
             });
@@ -231,24 +229,20 @@
             .then(function (opened) {
               db = opened;
               return idb(
-                db
-                  .transaction("globals")
-                  .objectStore("globals")
-                  .get(ACTIVE_BUILD_KEY),
+                db.transaction(KV).objectStore(KV).get(ACTIVE_BUILD_KEY),
               );
             })
             .then(function (activeRecord) {
               if (!activeRecord || !activeRecord.value) return null;
               return idb(
                 db
-                  .transaction("bundles")
-                  .objectStore("bundles")
+                  .transaction(BUNDLES)
+                  .objectStore(BUNDLES)
                   .get(activeRecord.value),
               );
             })
             .then(function (stored) {
               record = stored;
-              if (record) return;
               return fetch("/app/manifest.json", {
                 cache: "no-store",
               })
@@ -258,6 +252,7 @@
                   return response.json();
                 })
                 .then(function (manifest) {
+                  if (record && record.build_id === manifest.buildId) return;
                   return fetch(manifest.bundle.url, {
                     cache: "no-store",
                   })
@@ -273,6 +268,18 @@
                       };
                       return storeBundle(db, manifest.buildId, body);
                     });
+                })
+                .catch(function (error) {
+                  // An already-active bundle is the offline bootstrap. Network
+                  // refresh failure must not make a bootable installation fail.
+                  if (record) {
+                    console.warn(
+                      "Bundle refresh failed; using active bundle",
+                      error,
+                    );
+                    return;
+                  }
+                  throw error;
                 });
             })
             .then(function () {

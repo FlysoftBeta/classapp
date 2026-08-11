@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { availableParallelism } from "node:os";
 import path from "node:path";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 
 const MAX_RENDER_PROCESSES = 2;
 const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
@@ -83,19 +83,16 @@ export async function renderPdfArchive(
           ? `pdfrender 被 ${signal} 终止`
           : `pdfrender 退出码 ${code ?? "unknown"}`;
         reject(
-          new ServiceError(
+          new PublicError(
+            "文档渲染失败",
             diagnostic.trim() ? `${reason}: ${diagnostic.trim()}` : reason,
-            422,
           ),
         );
       });
     });
   } catch (error) {
-    if (error instanceof ServiceError) throw error;
-    throw new ServiceError(
-      `无法启动 pdfrender: ${error instanceof Error ? error.message : String(error)}`,
-      500,
-    );
+    if (error instanceof PublicError) throw error;
+    throw new PublicError("无法启动文档渲染器", "pdfrender failed", error);
   } finally {
     release();
   }

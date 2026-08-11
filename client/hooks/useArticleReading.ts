@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { reportArticleReading } from "@/client/interact/articles";
 import { READING_HEARTBEAT_SECONDS } from "@/shared/types/api/article";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 export function useArticleReading(articleId: string, online = true) {
   useEffect(() => {
@@ -8,13 +9,17 @@ export function useArticleReading(articleId: string, online = true) {
     reportArticleReading(articleId, {
       seconds: 0,
       active: true,
-    }).catch(() => {});
+    }).catch((error) => {
+      captureDetachedClientIncident("article.reading-start", error);
+    });
 
     const id = window.setInterval(() => {
       reportArticleReading(articleId, {
         seconds: READING_HEARTBEAT_SECONDS,
         active: true,
-      }).catch(() => {});
+      }).catch((error) => {
+        captureDetachedClientIncident("article.reading-heartbeat", error);
+      });
     }, READING_HEARTBEAT_SECONDS * 1000);
 
     return () => {
@@ -22,7 +27,9 @@ export function useArticleReading(articleId: string, online = true) {
       reportArticleReading(articleId, {
         seconds: 0,
         active: false,
-      }).catch(() => {});
+      }).catch((error) => {
+        captureDetachedClientIncident("article.reading-stop", error);
+      });
     };
   }, [articleId, online]);
 }

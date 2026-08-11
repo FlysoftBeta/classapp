@@ -3,9 +3,10 @@ import {
   fetchConversationAccess,
   fetchConversations,
 } from "@/client/interact/conversations";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { session } from "./remote/session";
 import { useApplicationStore } from "./appStore";
+import { captureDetachedClientIncident } from "./clientIncidents";
 
 class RefreshCoordinator {
   private generation = 0;
@@ -51,7 +52,8 @@ const conversations = new RefreshCoordinator(async (generation) => {
     if (conversations.isCurrent(generation)) {
       useApplicationStore.getState().setConversations(entries);
     }
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("resource.conversations", error);
     // The local snapshot remains the usable projection.
   }
 });
@@ -63,7 +65,8 @@ const conversationAccess = new RefreshCoordinator(async (generation) => {
     if (conversationAccess.isCurrent(generation)) {
       useApplicationStore.getState().setConversations(entries);
     }
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("resource.conversation-access", error);
     // The previous access projection remains usable until the next recovery.
   }
 });
@@ -87,7 +90,8 @@ const articleSidebar = new RefreshCoordinator(async (generation) => {
     if (payload && articleSidebar.isCurrent(generation)) {
       useApplicationStore.getState().setArticleSidebar(payload);
     }
-  } catch {
+  } catch (error) {
+    captureDetachedClientIncident("resource.article-sidebar", error);
     // The local snapshot remains the usable projection.
   }
 });

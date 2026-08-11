@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 import type { User } from "@/shared/types/api";
 import {
   assertCanPostToGroup,
@@ -23,7 +23,7 @@ function assertConversationAccess(
 ): void {
   const parsed = parseConvId(convId);
   if (!parsed || !conversationExists(db, convId)) {
-    throw new ServiceError("对话不存在", 404);
+    throw new PublicError("对话不存在");
   }
   if (hasFeature(user, "admin")) return;
   if (parsed.type === "group") {
@@ -31,7 +31,7 @@ function assertConversationAccess(
     return;
   }
   if (parsed.peerA !== user.id && parsed.peerB !== user.id) {
-    throw new ServiceError("无权访问", 403);
+    throw new PublicError("无权访问");
   }
 }
 
@@ -41,7 +41,7 @@ export function assertCanAccessPost(
   postId: string,
 ): PostAccessRow {
   const post = findPostAccessRow(db, postId);
-  if (!post) throw new ServiceError("帖子不存在", 404);
+  if (!post) throw new PublicError("帖子不存在");
   assertConversationAccess(db, user, post.conv_id);
   return post;
 }
@@ -53,10 +53,10 @@ function assertReplyContext(
 ): void {
   if (!params.reply_to) return;
   const reply = findPostAccessRow(db, params.reply_to);
-  if (!reply) throw new ServiceError("被引用的帖子不存在", 404);
-  if (reply.deleted_at) throw new ServiceError("被引用的帖子已删除", 400);
+  if (!reply) throw new PublicError("被引用的帖子不存在");
+  if (reply.deleted_at) throw new PublicError("被引用的帖子已删除");
   if (reply.conv_id !== params.conv_id)
-    throw new ServiceError("引用帖与目标会话不匹配", 400);
+    throw new PublicError("引用帖与目标会话不匹配");
   assertCanAccessPost(db, user, params.reply_to);
 }
 
@@ -67,7 +67,7 @@ export function assertCanCreatePost(
 ): void {
   assertUserNotMuted(user);
   const parsed = parseConvId(params.conv_id);
-  if (!parsed) throw new ServiceError("会话 ID 无效", 400);
+  if (!parsed) throw new PublicError("会话 ID 无效");
   if (parsed.type === "group") assertCanPostToGroup(db, user, parsed.groupId);
   else assertConversationAccess(db, user, params.conv_id);
   assertReplyContext(db, user, params);
@@ -80,10 +80,10 @@ export function assertCanEditPost(
 ): PostAccessRow {
   const post = assertCanAccessPost(db, user, postId);
   if (!isStoredEditable(parseStoredPostContent(post.content_json))) {
-    throw new ServiceError("此类型消息不能编辑", 403);
+    throw new PublicError("此类型消息不能编辑");
   }
-  if (post.deleted_at) throw new ServiceError("帖子已删除", 400);
-  if (post.user_id !== user.id) throw new ServiceError("无权修改此帖", 403);
+  if (post.deleted_at) throw new PublicError("帖子已删除");
+  if (post.user_id !== user.id) throw new PublicError("无权修改此帖");
   const parsed = parseConvId(post.conv_id);
   if (parsed?.type === "group") assertCanPostToGroup(db, user, parsed.groupId);
   assertUserNotMuted(user);
@@ -97,7 +97,7 @@ export function assertCanDeletePost(
 ): PostAccessRow {
   const post = assertCanAccessPost(db, user, postId);
   if (post.user_id !== user.id && !hasFeature(user, "admin")) {
-    throw new ServiceError("无权删除此帖", 403);
+    throw new PublicError("无权删除此帖");
   }
   return post;
 }

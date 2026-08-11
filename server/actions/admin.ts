@@ -1,7 +1,7 @@
 import { getDb } from "@/server/infra/db";
 import { createAdminSystemService } from "@/server/services/adminSystemService";
 import { createClientService } from "@/server/services/clientsService";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 import { createAppStateService } from "@/server/services/appStateService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 import { createAnnouncementService } from "@/server/services/announcementService";
@@ -20,14 +20,14 @@ function parseOffset(value: unknown): number {
       return parsed;
     }
   }
-  throw new ServiceError("offset 参数无效", 400);
+  throw new PublicError("offset 参数无效");
 }
 
 function parsePositiveHours(value: unknown, field: string): number {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return value;
   }
-  throw new ServiceError(`${field} 参数无效`, 400);
+  throw new PublicError(`${field} 参数无效`);
 }
 
 export async function adminFetchUsersAction(
@@ -230,13 +230,14 @@ export async function adminToggleClientLockAction(
       try {
         clients.unlock(id);
       } catch (error) {
-        throw new ServiceError(
-          error instanceof Error ? error.message : "无法加入白名单",
-          400,
+        throw new PublicError(
+          "无法加入白名单",
+          "client promotion failed",
+          error,
         );
       }
     } else {
-      throw new ServiceError("无效 action", 400);
+      throw new PublicError("无效 action");
     }
     return { ok: true as const };
   });
@@ -252,7 +253,7 @@ export async function adminDeleteClientAction(
       expectString(id, "缺少 id"),
     );
     if (!deleted) {
-      throw new ServiceError("客户端不存在", 404);
+      throw new PublicError("客户端不存在");
     }
     return { ok: true as const };
   });
@@ -267,10 +268,7 @@ export async function adminPromoteClientAction(
     try {
       createClientService(getDb()).promote(expectString(id, "缺少 id"));
     } catch (error) {
-      throw new ServiceError(
-        error instanceof Error ? error.message : "无法保留客户端",
-        400,
-      );
+      throw new PublicError("无法保留客户端", "client promotion failed", error);
     }
     return { ok: true as const };
   });
@@ -292,9 +290,10 @@ export async function adminUpdateClientAction(
         },
       );
     } catch (error) {
-      throw new ServiceError(
-        error instanceof Error ? error.message : "客户端属性保存失败",
-        400,
+      throw new PublicError(
+        "客户端属性保存失败",
+        "client update failed",
+        error,
       );
     }
     return { ok: true as const };
@@ -307,17 +306,14 @@ export async function adminWhitelistCurrentClientAction() {
     await actor.requireAdmin();
     const clientId = await actor.clientId();
     if (!clientId) {
-      throw new ServiceError("无法识别当前设备，请刷新页面后重试", 400);
+      throw new PublicError("无法识别当前设备，请刷新页面后重试");
     }
     try {
       const clients = createClientService(getDb());
       clients.promote(clientId);
       clients.whitelist(clientId);
     } catch (error) {
-      throw new ServiceError(
-        error instanceof Error ? error.message : "无法加入白名单",
-        400,
-      );
+      throw new PublicError("无法加入白名单", "client whitelist failed", error);
     }
     return { ok: true as const, client_id: clientId };
   });

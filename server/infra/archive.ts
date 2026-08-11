@@ -21,3 +21,8 @@ export function zipSingleFile(srcPath: string, entryName: string): Uint8Array {
   const data = fs.readFileSync(srcPath);
   return zipSync({ [entryName]: [new Uint8Array(data), { level: 6 }] });
 }
+
+/** Pack already-materialized files without exposing archive mechanics to services. */
+export function zipFiles(files: Record<string, Uint8Array>): Uint8Array {
+  return zipSync(files, { level: 6 });
+}

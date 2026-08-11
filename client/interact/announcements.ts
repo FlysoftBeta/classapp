@@ -7,11 +7,7 @@ import { client } from "./remote/client";
 /** Announcements have no useful offline authority; absence is the local view. */
 export async function fetchAnnouncement() {
   if (!client.isConnected()) return null;
-  try {
-    return await fetchRemoteAnnouncement();
-  } catch {
-    return null;
-  }
+  return fetchRemoteAnnouncement();
 }
 
 export async function acknowledgeAnnouncement(revision: number) {

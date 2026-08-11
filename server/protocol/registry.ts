@@ -5,6 +5,7 @@ import * as articles from "@/server/actions/articles";
 import * as auth from "@/server/actions/auth";
 import * as conversations from "@/server/actions/conversations";
 import * as groups from "@/server/actions/groups";
+import * as incidents from "@/server/actions/incidents";
 import * as notificationConfig from "@/server/actions/notification-config";
 import * as posts from "@/server/actions/posts";
 import * as stickers from "@/server/actions/stickers";
@@ -17,10 +18,7 @@ import {
   type ActionHandlerFunctions,
   type ActionName,
 } from "@/shared/protocol/actions";
-import {
-  MalformedRequestError,
-  UncheckedError,
-} from "@/shared/protocol/errors";
+import { ContractViolationError } from "@/server/services/incidentService";
 
 const handlers = {
   ...admin,
@@ -30,6 +28,7 @@ const handlers = {
   ...auth,
   ...conversations,
   ...groups,
+  ...incidents,
   ...notificationConfig,
   ...posts,
   ...stickers,
@@ -56,7 +55,7 @@ export async function dispatchAction<K extends ActionName>(
   const contract = actionContracts[action];
   const parsedArgs = contract.args.safeParse(rawArgs);
   if (!parsedArgs.success) {
-    throw new MalformedRequestError("请求格式错误", parsedArgs.error.issues);
+    throw new ContractViolationError("请求格式错误", parsedArgs.error.issues);
   }
 
   const rawOutput = await invoke(action, parsedArgs.data as ActionArgs<K>);
@@ -66,7 +65,10 @@ export async function dispatchAction<K extends ActionName>(
       `[ActionDispatcher] ${action} 返回值不符合契约`,
       parsedOutput.error.issues,
     );
-    throw UncheckedError.internal();
+    throw new ContractViolationError(
+      `${action} 返回值不符合契约`,
+      parsedOutput.error.issues,
+    );
   }
   return parsedOutput.data as ActionData<K>;
 }

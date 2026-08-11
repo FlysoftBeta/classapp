@@ -1,23 +1,22 @@
-import { getUserFromToken } from "@/server/infra/auth";
 import { getDb } from "@/server/infra/db";
-import { getClientIdFromToken } from "@/server/data/clients";
 import type { User } from "@/shared/types/api";
-import { CheckedError } from "@/shared/protocol/errors";
+import { PublicError } from "@/server/services/incidentService";
 import { requestContext } from "@/server/session/requestContext";
 import { hasFeature, type FeatureGate } from "@/shared/features";
+import { getUser, getUserBanStatus } from "@/server/data/users";
 
 export class Session {
-  private userPromise?: Promise<User | null>;
-  private clientIdPromise?: Promise<string | null>;
+  constructor(
+    private readonly token: string | null,
+    private readonly authenticatedUserId: string | null,
+    private readonly authenticatedClientId: string | null,
+  ) {}
 
-  constructor(private readonly token: string | null) {}
-
-  static fromToken(token: string | null | undefined): Session {
-    return new Session(token?.trim() || null);
-  }
+  private userSnapshot: User | null | undefined;
 
   static async fromActionContext(): Promise<Session> {
-    return Session.fromToken(requestContext().token);
+    const context = requestContext();
+    return new Session(context.token, context.userId, context.clientId);
   }
 
   tokenValue(): string | null {
@@ -25,18 +24,20 @@ export class Session {
   }
 
   async user(): Promise<User | null> {
-    if (!this.userPromise) {
-      this.userPromise = Promise.resolve(
-        this.token ? getUserFromToken(this.token) : null,
-      );
-    }
-    return this.userPromise;
+    if (this.userSnapshot !== undefined) return this.userSnapshot;
+    this.userSnapshot = this.authenticatedUserId
+      ? getUser(getDb(), this.authenticatedUserId)
+      : null;
+    return this.userSnapshot;
   }
 
   async requireUser(): Promise<User> {
     const user = await this.user();
     if (!user) {
-      throw new CheckedError("SESSION_EXPIRED", "会话已过期", 401, true);
+      throw new PublicError("请先登录");
+    }
+    if (getUserBanStatus(getDb(), user.id).banned) {
+      throw new PublicError("当前用户已被封禁");
     }
     return user;
   }
@@ -47,12 +48,7 @@ export class Session {
   }
 
   async clientId(): Promise<string | null> {
-    if (!this.clientIdPromise) {
-      this.clientIdPromise = Promise.resolve(
-        this.token ? (getClientIdFromToken(getDb(), this.token) ?? null) : null,
-      );
-    }
-    return this.clientIdPromise;
+    return this.authenticatedClientId;
   }
 
   async asActor(): Promise<Actor> {
@@ -81,7 +77,7 @@ export class Actor {
   async requireFeature(gate: FeatureGate): Promise<User> {
     const user = await this.requireUser();
     if (!hasFeature(user, gate)) {
-      throw new CheckedError("FORBIDDEN", "无权限", 403);
+      throw new PublicError("无权限");
     }
     return user;
   }

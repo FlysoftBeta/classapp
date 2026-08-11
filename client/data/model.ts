@@ -1,4 +1,5 @@
 import type { ArticleWithMeta, Group, Post, User } from "@/shared/types/api";
+import type { ContinuousCoverage } from "./coverage";
 
 export type EvictionTier = 0 | 1 | 2;
 
@@ -44,6 +45,8 @@ export interface ObjectiveArticle {
     | "last_read_at"
     | "list_sort_at"
     | "content"
+    | "username"
+    | "handle"
   >;
   group_id: string;
   created_at: string;
@@ -161,13 +164,15 @@ export interface MeStateRow<T = unknown> {
   pending: 0 | 1;
 }
 
-export interface PostCoverage {
+export interface PostCoverage extends ContinuousCoverage<{
+  id: string;
+  order: number;
+}> {
   scope: string;
   kind: "posts";
   conv_id: string;
   known_revision: number;
-  lower: { id: string; sequence: number } | null;
-  upper: { id: string; sequence: number } | null;
+  revision_sum: string;
   reached_oldest: boolean;
   reached_newest: boolean;
   updated_at: number;

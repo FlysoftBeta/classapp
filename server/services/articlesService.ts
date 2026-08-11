@@ -27,7 +27,10 @@ import {
   upsertArticleProgressOffset,
   purgeArticlesForUser,
 } from "@/server/data/articles";
-import { CheckedError, MalformedRequestError } from "@/shared/protocol/errors";
+import {
+  PublicError,
+  ContractViolationError,
+} from "@/server/services/incidentService";
 import { publishGroupArticle, publishUser } from "@/server/services/eventBus";
 import {
   deleteUserConfig,
@@ -67,7 +70,7 @@ export interface CreateBundleArticleInput {
 
 function requireTrimmed(value: string, message: string): string {
   const trimmed = value.trim();
-  if (!trimmed) throw new MalformedRequestError(message);
+  if (!trimmed) throw new ContractViolationError(message);
   return trimmed;
 }
 
@@ -131,9 +134,9 @@ export class ArticleService {
   ): { article: ArticleWithMeta } {
     assertCanCreateArticle(this.db, user, input.group_id);
     if (!input.source_path || !input.archive_path)
-      throw new MalformedRequestError("文件保存失败");
+      throw new ContractViolationError("文件保存失败");
     if (input.source_mime !== "application/pdf")
-      throw new MalformedRequestError("仅支持 PDF 文件");
+      throw new ContractViolationError("仅支持 PDF 文件");
     const id = crypto.randomUUID();
     insertBundleArticle(this.db, {
       id,
@@ -156,7 +159,7 @@ export class ArticleService {
   getMeta(user: User, articleId: string): { article: ArticleWithMeta } {
     assertCanAccessArticle(this.db, user, articleId);
     const article = findArticleForUser(this.db, articleId, user.id);
-    if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    if (!article) throw new PublicError("文章不存在");
     return { article };
   }
 
@@ -167,9 +170,9 @@ export class ArticleService {
       input.articleId,
       input.offset,
     );
-    if (!segment) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    if (!segment) throw new PublicError("文章不存在");
     if (segment.content_kind === "bundle")
-      throw new MalformedRequestError("二进制文章不支持文本分段");
+      throw new ContractViolationError("二进制文章不支持文本分段");
     return {
       content: segment.content,
       offset: segment.clamped_offset,
@@ -247,7 +250,7 @@ export class ArticleService {
   ) {
     assertCanAccessArticle(this.db, user, articleId);
     const article = findArticleRecord(this.db, articleId);
-    if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    if (!article) throw new PublicError("文章不存在");
     const safe =
       article.content_kind === "bundle"
         ? Math.max(
@@ -358,7 +361,7 @@ export class ArticleService {
       article.content_kind !== "bundle" ||
       !article.archive_path
     ) {
-      throw new CheckedError("NOT_FOUND", "文档资源不存在", 404);
+      throw new PublicError("文档资源不存在");
     }
     return loadRenderArchive(article.archive_path);
   }
@@ -391,13 +394,13 @@ export class ArticleService {
   }
   private requireOwned(id: string, userId: string) {
     const article = findArticleForUser(this.db, id, userId);
-    if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    if (!article) throw new PublicError("文章不存在");
     return article;
   }
   private notifyCreated(userId: string, articleId: string) {
     this.publishList(userId, articleId, true);
     const article = findArticleRecord(this.db, articleId);
-    if (!article) throw new CheckedError("NOT_FOUND", "文章不存在", 404);
+    if (!article) throw new PublicError("文章不存在");
     publishGroupArticle(article.group_id, {
       kind: "article.list_updated",
       data: { refresh: true },

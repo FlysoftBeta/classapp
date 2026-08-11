@@ -25,7 +25,7 @@ import {
   userHasPinHash,
   revokeUserCredentials,
 } from "@/server/data/users";
-import { ServiceError } from "./errors";
+import { PublicError } from "@/server/services/incidentService";
 import { toDbTimestamp } from "@/shared/time";
 import { publishUser } from "./eventBus";
 import type { User } from "@/shared/types/api";
@@ -88,7 +88,7 @@ export class UserService {
       ? findUserPinOwnerIdExcept(this.db, pinHash, excludeUserId)
       : findUserPinOwnerId(this.db, pinHash);
     if (userConflict || ghostPinHashExists(this.db, pinHash)) {
-      throw new ServiceError("该 PIN 已被使用", 409);
+      throw new PublicError("该 PIN 已被使用");
     }
   }
 
@@ -102,27 +102,27 @@ export class UserService {
   get(userId: string): User {
     const user = getUser(this.db, userId);
     if (!user) {
-      throw new ServiceError("干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
     return user;
   }
 
   create(params: CreateUserParams): User {
     if (!params.handle || !/^[a-zA-Z0-9_]{1,20}$/.test(params.handle)) {
-      throw new ServiceError("ID 只能包含字母、数字、下划线，最多 20 位");
+      throw new PublicError("ID 只能包含字母、数字、下划线，最多 20 位");
     }
     if (!params.pin || !/^\d{6}$/.test(params.pin)) {
-      throw new ServiceError("PIN 必须为 6 位数字");
+      throw new PublicError("PIN 必须为 6 位数字");
     }
     if (
       params.feature_mask !== undefined &&
       !isValidFeatureMask(params.feature_mask)
     ) {
-      throw new ServiceError("feature_mask 无效");
+      throw new PublicError("feature_mask 无效");
     }
 
     if (findUserIdByHandle(this.db, params.handle)) {
-      throw new ServiceError("该 ID 已存在", 409);
+      throw new PublicError("该 ID 已存在");
     }
 
     const pinHash = this.deps.hashPinValue(params.pin);
@@ -144,15 +144,15 @@ export class UserService {
 
   update(id: string, params: UpdateUserParams): User {
     if (!userExists(this.db, id)) {
-      throw new ServiceError("干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
 
     if (params.handle !== undefined) {
       if (!/^[a-zA-Z0-9_]{1,20}$/.test(params.handle)) {
-        throw new ServiceError("ID 只能包含字母、数字、下划线，最多 20 位");
+        throw new PublicError("ID 只能包含字母、数字、下划线，最多 20 位");
       }
       if (findUserIdByHandleExcept(this.db, params.handle, id)) {
-        throw new ServiceError("该 ID 已被占用", 409);
+        throw new PublicError("该 ID 已被占用");
       }
       updateUserHandle(this.db, id, params.handle);
     }
@@ -160,14 +160,14 @@ export class UserService {
     if (params.username !== undefined) {
       const name = params.username.trim();
       if (!name || name.length > 30) {
-        throw new ServiceError("显示名称不能为空，最多 30 个字符");
+        throw new PublicError("显示名称不能为空，最多 30 个字符");
       }
       updateUserUsername(this.db, id, name);
     }
 
     if (params.feature_mask !== undefined) {
       if (!isValidFeatureMask(params.feature_mask)) {
-        throw new ServiceError("feature_mask 无效");
+        throw new PublicError("feature_mask 无效");
       }
       updateUserFeatureMask(this.db, id, params.feature_mask);
       // Keep the legacy column synchronized for old database tooling only.
@@ -180,7 +180,7 @@ export class UserService {
 
     if (params.pin !== undefined) {
       if (!/^\d{6}$/.test(params.pin)) {
-        throw new ServiceError("PIN 必须为 6 位数字");
+        throw new PublicError("PIN 必须为 6 位数字");
       }
       const pinHash = this.deps.hashPinValue(params.pin);
       this.assertPinHashAvailable(pinHash, id);
@@ -203,7 +203,7 @@ export class UserService {
     mode: UserRemovalMode,
   ): Promise<void> {
     if (id === selfId) {
-      throw new ServiceError("不能删除自己");
+      throw new PublicError("不能删除自己");
     }
     const user = this.get(id);
     if (mode === "deactivate") {
@@ -243,10 +243,10 @@ export class UserService {
 
   ban(id: string, hours: number): void {
     if (!userExists(this.db, id)) {
-      throw new ServiceError("干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
     if (getUserBanStatus(this.db, id).banned) {
-      throw new ServiceError("请先解除封禁，再重新配置时长", 409);
+      throw new PublicError("请先解除封禁，再重新配置时长");
     }
     const until = toDbTimestamp(this.deps.now() + hours * 3600_000);
     this.db.transaction(() => {
@@ -266,10 +266,10 @@ export class UserService {
 
   mute(id: string, hours: number): void {
     if (!userExists(this.db, id)) {
-      throw new ServiceError("干员不存在", 404);
+      throw new PublicError("干员不存在");
     }
     if (getUserMuteStatus(this.db, id).muted) {
-      throw new ServiceError("请先解除禁言，再重新配置时长", 409);
+      throw new PublicError("请先解除禁言，再重新配置时长");
     }
     const until = toDbTimestamp(this.deps.now() + hours * 3600_000);
     updateUserMuted(this.db, id, until);
@@ -290,10 +290,10 @@ export class UserService {
   updateSelfProfile(userId: string, params: UpdateSelfProfileParams): User {
     if (params.handle !== undefined) {
       if (!/^[a-zA-Z0-9_]{1,20}$/.test(params.handle)) {
-        throw new ServiceError("ID 只能包含字母、数字、下划线，最多 20 位");
+        throw new PublicError("ID 只能包含字母、数字、下划线，最多 20 位");
       }
       if (findUserIdByHandleExcept(this.db, params.handle, userId)) {
-        throw new ServiceError("该 ID 已被占用", 409);
+        throw new PublicError("该 ID 已被占用");
       }
       updateUserHandle(this.db, userId, params.handle);
     }
@@ -301,7 +301,7 @@ export class UserService {
     if (params.username !== undefined) {
       const name = params.username.trim();
       if (!name || name.length > 30) {
-        throw new ServiceError("显示名称不能为空，最多 30 个字符");
+        throw new PublicError("显示名称不能为空，最多 30 个字符");
       }
       updateUserUsername(this.db, userId, name);
     }
@@ -319,26 +319,26 @@ export class UserService {
     { current_pin, new_pins }: ResetPinParams,
   ): void {
     if (!current_pin || !/^\d{6}$/.test(current_pin)) {
-      throw new ServiceError("需要输入当前 PIN 进行验证");
+      throw new PublicError("需要输入当前 PIN 进行验证");
     }
     if (
       !Array.isArray(new_pins) ||
       new_pins.length === 0 ||
       new_pins.length > 2
     ) {
-      throw new ServiceError("请提供 1~2 个新 PIN");
+      throw new PublicError("请提供 1~2 个新 PIN");
     }
     for (const pin of new_pins) {
       if (!/^\d{6}$/.test(pin)) {
-        throw new ServiceError("PIN 必须为 6 位数字");
+        throw new PublicError("PIN 必须为 6 位数字");
       }
     }
     if (new_pins.length === 2 && new_pins[0] === new_pins[1]) {
-      throw new ServiceError("两个新 PIN 不能相同");
+      throw new PublicError("两个新 PIN 不能相同");
     }
 
     if (!userHasPinHash(this.db, userId, this.deps.hashPinValue(current_pin))) {
-      throw new ServiceError("当前 PIN 不正确", 401);
+      throw new PublicError("当前 PIN 不正确");
     }
 
     const nextPinHashes = new_pins.map((pin) => this.deps.hashPinValue(pin));

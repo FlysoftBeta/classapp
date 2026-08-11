@@ -1,16 +1,14 @@
-import {
-  RUNTIME_DATABASE,
-  RUNTIME_DATABASE_VERSION,
-  upgradeRuntimeDatabase,
-  type StoreName,
-} from "./schema";
+import { type StoreName } from "./schema";
+import type { ShellStoreName } from "./shellSchema";
+import { openApplicationDatabase } from "./migration";
 
 export interface DatabaseLease {
   readonly db: IDBDatabase;
   release(): void;
 }
 
-type ChangeListener = (stores: ReadonlySet<StoreName>) => void;
+type RuntimeStoreName = StoreName | ShellStoreName;
+type ChangeListener = (stores: ReadonlySet<RuntimeStoreName>) => void;
 
 class RuntimeDatabase {
   private connection: IDBDatabase | null = null;
@@ -31,14 +29,18 @@ class RuntimeDatabase {
     return () => this.listeners.delete(listener);
   }
 
-  notify(stores: Iterable<StoreName>): void {
+  notify(stores: Iterable<RuntimeStoreName>): void {
     const changed = new Set(stores);
     for (const listener of this.listeners) {
       try {
         listener(changed);
-      } catch {
+      } catch (error) {
         // A post-commit observer cannot turn a committed transaction into an
-        // apparent failure for its caller.
+        // apparent failure for its caller. Re-throw on a detached task so the
+        // global Incident boundary can retain the original observer panic.
+        setTimeout(() => {
+          throw error;
+        }, 0);
       }
     }
   }
@@ -77,45 +79,32 @@ class RuntimeDatabase {
     const epoch = this.openEpoch;
     const opening = new Promise<IDBDatabase>((resolve, reject) => {
       let settled = false;
-      let blockedTimer: number | null = null;
-      const request = indexedDB.open(
-        RUNTIME_DATABASE,
-        RUNTIME_DATABASE_VERSION,
-      );
-      request.onupgradeneeded = (event) =>
-        upgradeRuntimeDatabase(request, event.oldVersion);
-      request.onblocked = () => {
-        blockedTimer = window.setTimeout(() => {
+      void openApplicationDatabase().then(
+        (db) => {
+          if (settled || epoch !== this.openEpoch) {
+            db.close();
+            if (!settled) {
+              settled = true;
+              reject(
+                new Error("IndexedDB connection was closed while opening"),
+              );
+            }
+            return;
+          }
+          settled = true;
+          db.onversionchange = () => this.closeNow();
+          db.onclose = () => {
+            if (this.connection === db) this.connection = null;
+          };
+          this.connection = db;
+          resolve(db);
+        },
+        (error) => {
           if (settled) return;
           settled = true;
-          reject(new Error("IndexedDB upgrade is blocked by another page"));
-        }, 5_000);
-      };
-      request.onerror = () => {
-        if (settled) return;
-        settled = true;
-        if (blockedTimer !== null) clearTimeout(blockedTimer);
-        reject(request.error);
-      };
-      request.onsuccess = () => {
-        const db = request.result;
-        if (settled || epoch !== this.openEpoch) {
-          db.close();
-          if (!settled) {
-            settled = true;
-            reject(new Error("IndexedDB connection was closed while opening"));
-          }
-          return;
-        }
-        settled = true;
-        if (blockedTimer !== null) clearTimeout(blockedTimer);
-        db.onversionchange = () => this.closeNow();
-        db.onclose = () => {
-          if (this.connection === db) this.connection = null;
-        };
-        this.connection = db;
-        resolve(db);
-      };
+          reject(error);
+        },
+      );
     });
     this.opening = opening;
     const clearOpening = () => {
@@ -154,27 +143,29 @@ export function transactionResult(tx: IDBTransaction): Promise<void> {
 }
 
 export async function runTransaction<T>(
-  stores: StoreName | StoreName[],
+  stores: RuntimeStoreName | RuntimeStoreName[],
   mode: IDBTransactionMode,
   run: (tx: IDBTransaction) => Promise<T> | T,
 ): Promise<T> {
   const names = typeof stores === "string" ? [stores] : stores;
   const lease = await runtimeDatabase.acquire();
-  const tx = lease.db.transaction(names, mode);
-  const done = transactionResult(tx);
   try {
-    const value = await run(tx);
-    await done;
-    if (mode === "readwrite") runtimeDatabase.notify(names);
-    return value;
-  } catch (error) {
+    const tx = lease.db.transaction(names, mode);
+    const done = transactionResult(tx);
     try {
-      tx.abort();
-    } catch {
-      // The transaction may already have aborted or committed.
+      const value = await run(tx);
+      await done;
+      if (mode === "readwrite") runtimeDatabase.notify(names);
+      return value;
+    } catch (error) {
+      try {
+        tx.abort();
+      } catch {
+        // The transaction may already have aborted or committed.
+      }
+      await done.catch(() => undefined);
+      throw error;
     }
-    await done.catch(() => undefined);
-    throw error;
   } finally {
     lease.release();
   }

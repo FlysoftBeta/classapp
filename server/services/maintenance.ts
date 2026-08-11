@@ -15,6 +15,8 @@ import {
 import { createClientService } from "@/server/services/clientsService";
 import { createTeachDocumentsService } from "@/server/services/teachDocumentsService";
 import { startOfficeDocumentMonitor } from "./officeDocumentMonitor";
+import { recordContainedServerIncident } from "./incidentService";
+import { BUILD_ID } from "@/server/infra/env";
 
 /** Temporary client records with no recent activity are removed after this many days. */
 const CLIENT_TTL_DAYS = 1;
@@ -63,16 +65,14 @@ async function runMaintenance(db: BetterSqlite3.Database): Promise<void> {
 
 export function startMaintenance(db: BetterSqlite3.Database): () => void {
   const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
-  void runMaintenance(db).catch((error) =>
-    console.error("[Maintenance] 定期维护失败", error),
-  );
-  const timer = setInterval(
-    () =>
-      void runMaintenance(db).catch((error) =>
-        console.error("[Maintenance] 定期维护失败", error),
-      ),
-    MAINTENANCE_INTERVAL_MS,
-  );
+  const run = () =>
+    void runMaintenance(db).catch((error) => {
+      recordContainedServerIncident(db, BUILD_ID, error, {
+        component: "maintenance",
+      });
+    });
+  run();
+  const timer = setInterval(run, MAINTENANCE_INTERVAL_MS);
   timer.unref();
   return () => {
     clearInterval(timer);

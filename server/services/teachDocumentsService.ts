@@ -10,6 +10,8 @@ import {
   copyTeachDocument,
   removeTeachDocumentBlob,
 } from "@/server/infra/teachDocumentBlobs";
+import { recordContainedServerIncident } from "@/server/services/incidentService";
+import { BUILD_ID } from "@/server/infra/env";
 
 export interface OpenOfficeDocument {
   application: string;
@@ -39,7 +41,16 @@ export class TeachDocumentsService {
         file_size: stored.fileSize,
       });
     } catch (error) {
-      await removeTeachDocumentBlob(stored.relativePath);
+      try {
+        await removeTeachDocumentBlob(stored.relativePath);
+      } catch (cleanupError) {
+        recordContainedServerIncident(this.db, BUILD_ID, cleanupError, {
+          component: "teach-documents",
+          phase: "rollback-capture",
+          original_error:
+            error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
   }
@@ -61,10 +72,11 @@ export class TeachDocumentsService {
         await removeTeachDocumentBlob(document.blob_path);
         removedIds.push(document.id);
       } catch (error) {
-        console.error(
-          `[TeachDocuments] 无法删除 blob ${document.blob_path}`,
-          error,
-        );
+        recordContainedServerIncident(this.db, BUILD_ID, error, {
+          component: "teach-documents",
+          phase: "cleanup",
+          blob_path: document.blob_path,
+        });
       }
     }
     return deleteTeachDocuments(this.db, removedIds);

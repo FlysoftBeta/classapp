@@ -1,19 +1,16 @@
 export const RUNTIME_DATABASE = "classapp-runtime";
 
-// Version 5 removes every pre-Bundle domain/cache row while preserving the
-// Shell's active application bundle across the hard data boundary.
-export const RUNTIME_DATABASE_VERSION = 5;
+export const APP_SCHEMA_VERSION = 1;
 
 export const GLOBAL_KEYS = {
   ACTIVE_ME: "active-me",
-  ACTIVE_BUNDLE: "active-bundle",
+  APP_SCHEMA_VERSION: "app-schema-version",
 } as const;
 
 export const STORES = {
   FILES: "files",
   FILE_HEADS: "file_heads",
   GLOBALS: "globals",
-  BUNDLES: "bundles",
   GROUPS: "domain_groups",
   DMS: "domain_dms",
   POSTS: "domain_posts",
@@ -34,7 +31,7 @@ export type StoreName = (typeof STORES)[keyof typeof STORES];
 function createObjectiveStores(db: IDBDatabase): void {
   const groups = db.createObjectStore(STORES.GROUPS, { keyPath: "id" });
   groups.createIndex("by-conv", "conv_id", { unique: true });
-  groups.createIndex("by-handle", "handle", { unique: true });
+  groups.createIndex("by-handle", "handle");
 
   const dms = db.createObjectStore(STORES.DMS, { keyPath: "conv_id" });
   dms.createIndex("by-peer-a", "peer_a");
@@ -61,7 +58,7 @@ function createObjectiveStores(db: IDBDatabase): void {
   segments.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
 
   const users = db.createObjectStore(STORES.USERS, { keyPath: "id" });
-  users.createIndex("by-handle", "handle", { unique: true });
+  users.createIndex("by-handle", "handle");
 }
 
 function createActorStores(db: IDBDatabase): void {
@@ -101,29 +98,13 @@ function createActorStores(db: IDBDatabase): void {
   sync.createIndex("by-kind", "kind");
 }
 
-/** Schema upgrades are hard domain-cache boundaries; no old domain row moves. */
-export function upgradeRuntimeDatabase(
-  request: IDBOpenDBRequest,
-  oldVersion: number,
-): void {
-  const db = request.result;
-  const runtimeStores = new Set<string>([STORES.GLOBALS, STORES.BUNDLES]);
-  for (const name of Array.from(db.objectStoreNames)) {
-    if (oldVersion < 4 || !runtimeStores.has(name)) {
-      db.deleteObjectStore(name);
-    }
-  }
-
+/** Install only the application-owned stores in a versionchange transaction. */
+export function createApplicationStores(db: IDBDatabase): void {
   db.createObjectStore(STORES.FILES);
   const heads = db.createObjectStore(STORES.FILE_HEADS, { keyPath: "id" });
   heads.createIndex("by-state-created", ["state", "created_at"]);
 
-  if (!db.objectStoreNames.contains(STORES.GLOBALS)) {
-    db.createObjectStore(STORES.GLOBALS, { keyPath: "key" });
-  }
-  if (!db.objectStoreNames.contains(STORES.BUNDLES)) {
-    db.createObjectStore(STORES.BUNDLES, { keyPath: "build_id" });
-  }
+  db.createObjectStore(STORES.GLOBALS, { keyPath: "key" });
   createObjectiveStores(db);
   createActorStores(db);
 }

@@ -10,7 +10,10 @@ import {
 } from "@/server/infra/stickerLoader";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
 import type { StickerRecentItem } from "@/shared/types/api";
-import { CheckedError, MalformedRequestError } from "@/shared/protocol/errors";
+import {
+  PublicError,
+  ContractViolationError,
+} from "@/server/services/incidentService";
 import { getUserConfig, setUserConfig } from "@/server/services/userConfig";
 
 export class StickerService {
@@ -30,11 +33,11 @@ export class StickerService {
   getPack(packId: string) {
     const safeId = sanitizeStickerPackId(packId);
     if (!safeId) {
-      throw new CheckedError("NOT_FOUND", "贴纸包不存在", 404);
+      throw new PublicError("贴纸包不存在");
     }
     const pack = loadStickerPack(safeId);
     if (!pack) {
-      throw new CheckedError("NOT_FOUND", "贴纸包不存在", 404);
+      throw new PublicError("贴纸包不存在");
     }
     return pack;
   }
@@ -47,10 +50,10 @@ export class StickerService {
     const safePack = sanitizeStickerPackId(pack);
     const safeId = sanitizeStickerId(stickerId);
     if (!safePack || !safeId) {
-      throw new MalformedRequestError("贴纸参数无效");
+      throw new ContractViolationError("贴纸参数无效");
     }
     if (!getStickerEntry(safePack, safeId)) {
-      throw new CheckedError("NOT_FOUND", "贴纸不存在", 404);
+      throw new PublicError("贴纸不存在");
     }
     const existing = parseRecentStickers(
       getUserConfig(this.db, userId, USER_CONFIG.RECENT_STICKERS),

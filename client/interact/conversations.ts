@@ -11,12 +11,13 @@ const {
 } = client.actions;
 import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
-import { offlineRepository } from "@/client/data/repository";
+import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { collectRevisionRange } from "@/client/interact/consistency";
 import {
   commitPostRevisionRange,
   fetchRemotePosts,
 } from "@/client/interact/posts";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 export async function syncConversationPostRevisions(): Promise<void> {
   const cached = await offlineRepository.getConversations();
@@ -32,7 +33,12 @@ export async function syncConversationPostRevisions(): Promise<void> {
     const knownRevision = await offlineRepository.getKnownPostRevision(
       remote.conv_id,
     );
-    if (remote.revision <= knownRevision) continue;
+    const knownRevisionSum = await offlineRepository.getKnownPostRevisionSum(
+      remote.conv_id,
+    );
+    // The sum is the cheap change detector; the monotonic revision remains the
+    // cursor used to transfer only changed rows.
+    if (knownRevisionSum === remote.revision_sum) continue;
     const rows = await collectRevisionRange(
       knownRevision,
       remote.revision,
@@ -46,7 +52,12 @@ export async function syncConversationPostRevisions(): Promise<void> {
         return page.posts;
       },
     );
-    await commitPostRevisionRange(conversation, rows, remote.revision);
+    await commitPostRevisionRange(
+      conversation,
+      rows,
+      remote.revision,
+      remote.revision_sum,
+    );
   }
 }
 
@@ -55,8 +66,13 @@ export async function fetchConversationAccess(): Promise<ConvEntry[]> {
   const result = await fetchConversationsAction();
   observeActionResult(result);
   if (!result.ok) return offlineRepository.getConversations();
-  await offlineRepository.saveConversations(result.data);
-  return sortConversations(await offlineRepository.getConversations());
+  try {
+    await offlineRepository.saveConversations(result.data);
+    return sortConversations(await offlineRepository.getConversations());
+  } catch (error) {
+    captureDetachedClientIncident("conversation.snapshot-cache", error);
+    return sortConversations([...result.data]);
+  }
 }
 
 function sortConversations(entries: ConvEntry[]): ConvEntry[] {
@@ -71,13 +87,14 @@ function sortConversations(entries: ConvEntry[]): ConvEntry[] {
 
 export async function fetchConversations(): Promise<ConvEntry[]> {
   if (!client.isConnected()) return offlineRepository.getConversations();
+  const entries = await fetchConversationAccess();
   try {
-    const entries = await fetchConversationAccess();
     await syncConversationPostRevisions();
-    return entries;
-  } catch {
-    return offlineRepository.getConversations();
+  } catch (error) {
+    // Revision recovery is secondary to the valid access snapshot.
+    captureDetachedClientIncident("conversation.revision-recovery", error);
   }
+  return entries;
 }
 
 export async function markConversationRead(body: {
@@ -105,20 +122,20 @@ export async function markConversationRead(body: {
       { buildId: client.buildId },
     );
   if (!local.changed || !client.isConnected()) return localResult();
-  try {
-    const result = await markConversationReadAction({
-      ...body,
-      updatedAt: local.version.updatedAt,
-      merge: "override",
-    });
-    const response = observeActionResult(result);
-    if (result.ok) {
+  const result = await markConversationReadAction({
+    ...body,
+    updatedAt: local.version.updatedAt,
+    merge: "override",
+  });
+  const response = observeActionResult(result);
+  if (result.ok) {
+    try {
       await offlineRepository.reconcileConversationRead(ref, result.data);
+    } catch (error) {
+      captureDetachedClientIncident("conversation.read-marker-cache", error);
     }
-    return response;
-  } catch {
-    return localResult();
   }
+  return response;
 }
 
 export async function setConversationPinned(body: {
@@ -137,23 +154,23 @@ export async function setConversationPinned(body: {
       { buildId: client.buildId },
     );
   if (!client.isConnected()) return localResult();
-  try {
-    const result = await setConversationPinnedAction({
-      ...body,
-      updatedAt: local.updatedAt,
-    });
-    const response = observeActionResult(result);
-    if (result.ok) {
+  const result = await setConversationPinnedAction({
+    ...body,
+    updatedAt: local.updatedAt,
+  });
+  const response = observeActionResult(result);
+  if (result.ok) {
+    try {
       await offlineRepository.reconcileConversationFlag(
         body,
         "pinned",
         result.data,
       );
+    } catch (error) {
+      captureDetachedClientIncident("conversation.pin-cache", error);
     }
-    return response;
-  } catch {
-    return localResult();
   }
+  return response;
 }
 
 export async function setConversationMuted(body: {
@@ -172,23 +189,23 @@ export async function setConversationMuted(body: {
       { buildId: client.buildId },
     );
   if (!client.isConnected()) return localResult();
-  try {
-    const result = await setConversationMutedAction({
-      ...body,
-      updatedAt: local.updatedAt,
-    });
-    const response = observeActionResult(result);
-    if (result.ok) {
+  const result = await setConversationMutedAction({
+    ...body,
+    updatedAt: local.updatedAt,
+  });
+  const response = observeActionResult(result);
+  if (result.ok) {
+    try {
       await offlineRepository.reconcileConversationFlag(
         body,
         "muted",
         result.data,
       );
+    } catch (error) {
+      captureDetachedClientIncident("conversation.mute-cache", error);
     }
-    return response;
-  } catch {
-    return localResult();
   }
+  return response;
 }
 
 export async function syncPendingConversationConfig() {
@@ -243,7 +260,8 @@ export async function syncPendingConversationConfig() {
           );
         }
       } else continue;
-    } catch {
+    } catch (error) {
+      captureDetachedClientIncident("conversation.pending-mutation", error);
       /* retry on reconnect */
     }
   }
@@ -255,38 +273,42 @@ export async function fetchConversationDraft(query: {
 }): Promise<string> {
   const local = await offlineRepository.getDraft(query);
   if (!client.isConnected()) return local?.content ?? "";
-  try {
-    if (local && local.syncedAt === null) {
-      const result = await saveConversationDraftAction({
-        ...query,
-        draft: local.content,
-        updatedAt: local.updatedAt,
-      });
-      observeActionResult(result);
-      if (result.ok) {
-        const canonical = result.data;
+  if (local && local.syncedAt === null) {
+    const result = await saveConversationDraftAction({
+      ...query,
+      draft: local.content,
+      updatedAt: local.updatedAt,
+    });
+    observeActionResult(result);
+    if (result.ok) {
+      const canonical = result.data;
+      try {
         await offlineRepository.saveDraft(query, canonical.draft, {
           updatedAt: canonical.updatedAt,
           synced: true,
         });
-        return canonical.draft;
+      } catch (error) {
+        captureDetachedClientIncident("conversation.draft-cache", error);
       }
-      return local.content;
+      return canonical.draft;
     }
-    const result = await fetchConversationDraftAction(query);
-    observeActionResult(result);
-    const remote = result.ok
-      ? result.data
-      : { draft: local?.content ?? "", updatedAt: local?.updatedAt ?? 0 };
-    if (local && local.updatedAt > remote.updatedAt) return local.content;
+    return local.content;
+  }
+  const result = await fetchConversationDraftAction(query);
+  observeActionResult(result);
+  const remote = result.ok
+    ? result.data
+    : { draft: local?.content ?? "", updatedAt: local?.updatedAt ?? 0 };
+  if (local && local.updatedAt > remote.updatedAt) return local.content;
+  try {
     await offlineRepository.saveDraft(query, remote.draft ?? "", {
       updatedAt: remote.updatedAt,
       synced: true,
     });
-    return remote.draft ?? "";
-  } catch {
-    return local?.content ?? "";
+  } catch (error) {
+    captureDetachedClientIncident("conversation.draft-cache", error);
   }
+  return remote.draft ?? "";
 }
 
 export async function saveConversationDraft(body: {
@@ -301,19 +323,20 @@ export async function saveConversationDraft(body: {
       { buildId: client.buildId },
     );
   if (!client.isConnected()) return localResult();
-  try {
-    const result = await saveConversationDraftAction({
-      ...body,
-      updatedAt: local.updatedAt,
-    });
-    const response = observeActionResult(result);
-    if (result.ok)
+  const result = await saveConversationDraftAction({
+    ...body,
+    updatedAt: local.updatedAt,
+  });
+  const response = observeActionResult(result);
+  if (result.ok) {
+    try {
       await offlineRepository.saveDraft(body, result.data.draft, {
         updatedAt: result.data.updatedAt,
         synced: true,
       });
-    return response;
-  } catch {
-    return localResult();
+    } catch (error) {
+      captureDetachedClientIncident("conversation.draft-cache", error);
+    }
   }
+  return response;
 }

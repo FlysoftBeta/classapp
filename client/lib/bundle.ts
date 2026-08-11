@@ -1,11 +1,11 @@
 import { client } from "@/client/interact/remote/client";
 import { requestResult, runTransaction } from "@/client/data/idb";
-import { GLOBAL_KEYS, STORES } from "@/client/data/schema";
+import { SHELL_KEYS, SHELL_STORES } from "@/client/data/shellSchema";
 import {
   type RuntimeAsset,
   type RuntimeManifest,
 } from "@/shared/runtimeManifest";
-import { ensureEndpointsReady, lbAssetUrl } from "./loadBalancer";
+import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 
 type WorkerReply = {
   ok: boolean;
@@ -75,8 +75,8 @@ async function sendWorkerMessage(
 }
 
 async function stageBundle(buildId: string, body: ArrayBuffer): Promise<void> {
-  await runTransaction(STORES.BUNDLES, "readwrite", (tx) => {
-    tx.objectStore(STORES.BUNDLES).put({
+  await runTransaction(SHELL_STORES.BUNDLES, "readwrite", (tx) => {
+    tx.objectStore(SHELL_STORES.BUNDLES).put({
       build_id: buildId,
       entrypoint_code: body,
       installed_at: Date.now(),
@@ -86,15 +86,15 @@ async function stageBundle(buildId: string, body: ArrayBuffer): Promise<void> {
 
 async function activateBundle(buildId: string): Promise<void> {
   await runTransaction(
-    [STORES.BUNDLES, STORES.GLOBALS],
+    [SHELL_STORES.BUNDLES, SHELL_STORES.KV],
     "readwrite",
     async (tx) => {
       const bundle = await requestResult(
-        tx.objectStore(STORES.BUNDLES).get(buildId),
+        tx.objectStore(SHELL_STORES.BUNDLES).get(buildId),
       );
       if (!bundle) throw new Error(`Cannot activate missing bundle ${buildId}`);
-      tx.objectStore(STORES.GLOBALS).put({
-        key: GLOBAL_KEYS.ACTIVE_BUNDLE,
+      tx.objectStore(SHELL_STORES.KV).put({
+        key: SHELL_KEYS.ACTIVE_BUNDLE,
         value: buildId,
       });
     },
@@ -102,9 +102,9 @@ async function activateBundle(buildId: string): Promise<void> {
 }
 
 async function activeBundleBuildId(): Promise<string | null> {
-  return runTransaction(STORES.GLOBALS, "readonly", async (tx) => {
+  return runTransaction(SHELL_STORES.KV, "readonly", async (tx) => {
     const record = (await requestResult(
-      tx.objectStore(STORES.GLOBALS).get(GLOBAL_KEYS.ACTIVE_BUNDLE),
+      tx.objectStore(SHELL_STORES.KV).get(SHELL_KEYS.ACTIVE_BUNDLE),
     )) as { value?: unknown } | undefined;
     return typeof record?.value === "string" ? record.value : null;
   });
@@ -161,7 +161,7 @@ export class BundleManager {
     try {
       await this.check();
     } catch (error) {
-      console.warn("[BundleManager] 启动更新检查失败，使用已安装构建", error);
+      captureDetachedClientIncident("bundle-manager.start", error);
     }
     this.offHello = client.subscribe("remote.hello", () => this.requestCheck());
     window.addEventListener("classapp:update-check", this.onRequested);
@@ -172,7 +172,7 @@ export class BundleManager {
 
   requestCheck(): void {
     void this.check().catch((error) => {
-      console.warn("[BundleManager] 后台更新检查失败", error);
+      captureDetachedClientIncident("bundle-manager.check", error);
     });
   }
 

@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import { ServiceError } from "@/server/services/errors";
+import { PublicError } from "@/server/services/incidentService";
 import type { User } from "@/shared/types/api";
 import {
   assertCanPostToGroup,
@@ -24,7 +24,7 @@ export function assertCanMutateArticle(
   articleId: string,
 ): { user_id: string | null; group_id: string } {
   const row = findArticleAccessRow(db, articleId);
-  if (!row) throw new ServiceError("文章不存在", 404);
+  if (!row) throw new PublicError("文章不存在");
   assertGroupMember(db, user.id, row.group_id);
   return row;
 }
@@ -38,6 +38,6 @@ export function assertCanDeleteArticle(
 ): void {
   const article = assertCanMutateArticle(db, user, articleId);
   if (article.user_id !== user.id && !hasFeature(user, "admin")) {
-    throw new ServiceError("无权删除此文章", 403);
+    throw new PublicError("无权删除此文章");
   }
 }

@@ -1,6 +1,6 @@
 import { requireActiveAdmin } from "@/server/domain/policy/auth";
 import { buildBackupDownload } from "@/server/infra/dbBackup";
-import { handleServiceError } from "@/server/services/errors";
+import { handleHttpError } from "@/server/http/errorResponse";
 
 export async function GET(
   req: Request,
@@ -23,6 +23,6 @@ export async function GET(
       },
     });
   } catch (e) {
-    return handleServiceError(e);
+    return handleHttpError(e);
   }
 }
