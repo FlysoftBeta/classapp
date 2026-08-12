@@ -126,34 +126,47 @@ export class UpdateManager {
   }
 
   async deployUpdate(zipBytes: Uint8Array): Promise<void> {
+    // staging/ belongs to the pending deployment. Remove any stale contents
+    // left by an interrupted or failed previous deployment before extracting
+    // the new update.
+    fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
     fs.mkdirSync(this.config.stagingDir, { recursive: true });
-    let extractionFailed = false;
-    let extractionError: unknown;
+
     try {
       extractZipToDir(zipBytes, this.config.stagingDir);
     } catch (error) {
-      extractionFailed = true;
-      extractionError = error;
-      throw error;
-    } finally {
+      // A partially extracted staging tree must never be consumed by the
+      // launcher. Best-effort cleanup while preserving the extraction error.
       try {
-        fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+        fs.rmSync(this.config.stagingDir, {
+          recursive: true,
+          force: true,
+        });
       } catch (cleanupError) {
-        if (!extractionFailed) throw cleanupError;
-        attachSuppressedError(extractionError, cleanupError);
+        attachSuppressedError(error, cleanupError);
       }
+      throw error;
     }
 
+    // Keep staging/ intact after successful extraction. The launcher/runtime
+    // controller consumes it after the process exits.
     const dbBackup = await createDbBackup();
-    if (!dbBackup) throw new PublicError("数据库不存在，无法创建回滚备份");
+    if (!dbBackup) {
+      // No deployment will be requested, so the successfully extracted but
+      // now unusable staging tree should not be left behind.
+      fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+      throw new PublicError("数据库不存在，无法创建回滚备份");
+    }
 
     this.setPendingUpdate();
+
     const controller = runtimeController();
     if (controller) {
       controller.requestUpdate(dbBackup);
       controller.restart(1000, 0);
       return;
     }
+
     setTimeout(() => process.exit(0), 1000);
   }
 
@@ -172,12 +185,14 @@ export class UpdateManager {
         phase: "clear-pending-before-rollback",
       });
     }
+
     const controller = runtimeController();
     if (controller) {
       controller.requestRollback();
       controller.restart(500, 0);
       return;
     }
+
     setTimeout(() => process.exit(0), 500);
   }
 }
