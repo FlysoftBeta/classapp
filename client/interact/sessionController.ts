@@ -27,6 +27,7 @@ async function refreshInitialData(): Promise<void> {
   await Promise.all([
     resourceQueries.refreshConversations(),
     resourceQueries.refreshArticleSidebar(),
+    resourceQueries.refreshAiSidebar(),
   ]);
 }
 

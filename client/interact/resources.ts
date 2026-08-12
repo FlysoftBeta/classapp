@@ -7,6 +7,8 @@ import { currentActorRepository as offlineRepository } from "@/client/interact/a
 import { session } from "./remote/session";
 import { useApplicationStore } from "./appStore";
 import { captureDetachedClientIncident } from "./clientIncidents";
+import { fetchAiSidebar } from "@/client/interact/ai";
+import { hasFeature } from "@/shared/features";
 
 class RefreshCoordinator {
   private generation = 0;
@@ -96,15 +98,39 @@ const articleSidebar = new RefreshCoordinator(async (generation) => {
   }
 });
 
+const aiSidebar = new RefreshCoordinator(async (generation) => {
+  if (!session.getToken()) return;
+  const store = useApplicationStore.getState();
+  if (!hasFeature(store.user, "ai")) {
+    store.setAiSidebar({
+      conversations: [],
+      credits: { balance: 0, reserved: 0 },
+      status: { available: false, error: "未启用 AI 功能" },
+    });
+    return;
+  }
+  try {
+    const payload = await fetchAiSidebar();
+    if (aiSidebar.isCurrent(generation)) {
+      useApplicationStore.getState().setAiSidebar(payload);
+    }
+  } catch (error) {
+    captureDetachedClientIncident("resource.ai-sidebar", error);
+  }
+});
+
 export const resourceQueries = {
   refreshConversations: () => conversations.refresh(),
   refreshConversationAccess: () => conversationAccess.refresh(),
   refreshArticleSidebar: () => articleSidebar.refresh(),
+  refreshAiSidebar: () => aiSidebar.refresh(),
   scheduleConversations: () => conversations.schedule(),
   scheduleArticleSidebar: () => articleSidebar.schedule(),
+  scheduleAiSidebar: () => aiSidebar.schedule(),
   invalidate: () => {
     conversations.invalidate();
     conversationAccess.invalidate();
     articleSidebar.invalidate();
+    aiSidebar.invalidate();
   },
 };

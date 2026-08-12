@@ -121,16 +121,19 @@ export class Client {
     }
     const id = `${Date.now().toString(36)}-${++this.sequence}`;
     const result = new Promise<unknown>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const item = this.pending.get(id);
-        if (!item) return;
-        this.pending.delete(id);
-        this.timedOut.set(id, {
-          context: item.context,
-          expiresAt: Date.now() + 60_000,
-        });
-        item.reject(new RemoteProtocolError("TIMEOUT", "请求超时"));
-      }, 5_000);
+      const timeout = setTimeout(
+        () => {
+          const item = this.pending.get(id);
+          if (!item) return;
+          this.pending.delete(id);
+          this.timedOut.set(id, {
+            context: item.context,
+            expiresAt: Date.now() + 60_000,
+          });
+          item.reject(new RemoteProtocolError("TIMEOUT", "请求超时"));
+        },
+        action === "searchAiConversationsAction" ? 300_000 : 5_000,
+      );
       this.pending.set(id, {
         action,
         authEpoch: session.getCredentialEpoch(context.actorId),

@@ -1,5 +1,6 @@
 import type { PostStreamEvent, UserConfigChangedEvent } from "./types";
 import { reportDetachedClientFailure } from "./incidentContext";
+import type { AiRunUpdatedPayload } from "@/shared/types/events";
 
 type Listener<T> = (event: T) => void;
 
@@ -26,3 +27,4 @@ function createEventStream<T>() {
 export const postEvents = createEventStream<PostStreamEvent>();
 export const configEvents = createEventStream<UserConfigChangedEvent>();
 export const announcementEvents = createEventStream<{ revision: number }>();
+export const aiRunEvents = createEventStream<AiRunUpdatedPayload>();

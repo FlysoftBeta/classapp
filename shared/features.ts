@@ -6,6 +6,7 @@ export const FEATURE_GATES = [
   "ebook_reader",
   "learning",
   "article_download",
+  "ai",
 ] as const;
 
 export type FeatureGate = (typeof FEATURE_GATES)[number];
@@ -18,6 +19,7 @@ export const FEATURE_GATE_LABELS: Record<FeatureGate, string> = {
   ebook_reader: "电子书阅读器",
   learning: "学习功能",
   article_download: "文章下载",
+  ai: "AI 对话",
 };
 
 export const MAX_FEATURE_MASK = 2 ** FEATURE_GATES.length - 1;

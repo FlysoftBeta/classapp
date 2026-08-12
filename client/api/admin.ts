@@ -37,6 +37,8 @@ const {
   adminFetchIncidentGroupsAction,
   adminFetchIncidentDetailsAction,
   adminTestIncidentAction,
+  adminFetchAiCreditsAction,
+  adminTopUpAiCreditsAction,
 } = client.actions;
 
 export type AdminMutationData = {
@@ -96,6 +98,25 @@ export async function adminSearchUsers(query: string) {
   const result = await adminFetchUsersAction({ q: query });
   observeActionResult(result);
   return result.ok ? result.data : null;
+}
+
+export async function adminFetchAiCredits(userId: string) {
+  const result = await adminFetchAiCreditsAction({ userId });
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+export async function adminTopUpAiCredits(input: {
+  userId: string;
+  amount: number;
+  idempotencyKey: string;
+  note: string;
+}) {
+  const result = await adminTopUpAiCreditsAction(input);
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.credits;
 }
 
 // ── Ghost users ─────────────────────────────────────────────────────────────

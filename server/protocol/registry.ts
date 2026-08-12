@@ -11,6 +11,7 @@ import * as posts from "@/server/actions/posts";
 import * as stickers from "@/server/actions/stickers";
 import * as userConfig from "@/server/actions/user-config";
 import * as words from "@/server/actions/words";
+import * as ai from "@/server/actions/ai";
 import {
   actionContracts,
   type ActionArgs,
@@ -34,6 +35,7 @@ const handlers = {
   ...stickers,
   ...userConfig,
   ...words,
+  ...ai,
 } satisfies ActionHandlerFunctions;
 
 function invoke<K extends ActionName>(

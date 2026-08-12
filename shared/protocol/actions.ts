@@ -15,6 +15,10 @@ import {
   wordStatsSchema,
   wordWithLearnedCountSchema,
   wordWithWrongCountSchema,
+  aiConversationSchema,
+  aiConversationDetailSchema,
+  aiCreditBalanceSchema,
+  aiCreditLedgerEntrySchema,
 } from "@/shared/types/api";
 import {
   bundleFetchInputSchema,
@@ -880,6 +884,89 @@ export const actionContracts = {
   adminUpdateSelfDisciplineModeAction: contract(
     one(object({ userId: nonEmptyString, enabled: z.boolean() })),
     object({ enabled: z.boolean() }),
+  ),
+  fetchAiSidebarAction: contract(
+    noArgs,
+    object({
+      conversations: z.array(aiConversationSchema),
+      credits: aiCreditBalanceSchema,
+      status: z.discriminatedUnion("available", [
+        object({ available: z.literal(true), error: z.null() }),
+        object({ available: z.literal(false), error: z.string() }),
+      ]),
+    }),
+  ),
+  fetchAiConversationAction: contract(
+    one(object({ conversationId: z.string().uuid() })),
+    aiConversationDetailSchema,
+  ),
+  searchAiConversationsAction: contract(
+    one(object({ query: z.string().max(500) })),
+    object({ conversations: z.array(aiConversationSchema) }),
+  ),
+  startAiRunAction: contract(
+    one(
+      object({
+        conversationId: z.string().uuid().optional(),
+        content: z.string().trim().min(1).max(100_000),
+        images: z
+          .array(
+            object({
+              name: z.string().min(1).max(200),
+              mime: z.enum([
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "image/gif",
+              ]),
+              data: z.string().min(1).max(7_000_000),
+            }),
+          )
+          .max(4)
+          .optional(),
+        forkFromMessageId: z.string().uuid().optional(),
+      }),
+    ),
+    z.discriminatedUnion("status", [
+      object({
+        status: z.literal("started"),
+        runId: z.string().uuid(),
+        conversationId: z.string().uuid(),
+      }),
+      object({
+        status: z.literal("insufficient_credits"),
+        required: z.number().int().nonnegative(),
+        available: z.number().int().nonnegative(),
+      }),
+      object({ status: z.literal("busy") }),
+      object({ status: z.literal("unavailable"), error: z.string() }),
+    ]),
+  ),
+  cancelAiRunAction: contract(
+    one(object({ runId: z.string().uuid() })),
+    object({ cancelled: z.boolean() }),
+  ),
+  markAiConversationReadAction: contract(
+    one(object({ conversationId: z.string().uuid() })),
+    okSchema,
+  ),
+  adminFetchAiCreditsAction: contract(
+    one(object({ userId: nonEmptyString })),
+    object({
+      credits: aiCreditBalanceSchema,
+      ledger: z.array(aiCreditLedgerEntrySchema),
+    }),
+  ),
+  adminTopUpAiCreditsAction: contract(
+    one(
+      object({
+        userId: nonEmptyString,
+        amount: z.number().int().positive().max(1_000_000_000),
+        idempotencyKey: z.string().uuid(),
+        note: z.string().max(200),
+      }),
+    ),
+    object({ credits: aiCreditBalanceSchema }),
   ),
 } as const;
 

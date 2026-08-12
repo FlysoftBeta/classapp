@@ -1,4 +1,4 @@
-import { useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
@@ -31,7 +31,10 @@ import {
   adminCreateUser,
   adminUpdateUser,
   adminDeleteUser,
+  adminFetchAiCredits,
+  adminTopUpAiCredits,
 } from "@/client/api/admin";
+import type { AiCreditBalance } from "@/shared/types/api";
 import {
   adminFetchSelfDisciplineMode,
   adminUpdateSelfDisciplineMode,
@@ -79,6 +82,13 @@ export function UsersTab() {
   const [editSelfDiscipline, setEditSelfDiscipline] = useState(false);
   const [editErr, setEditErr] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [editAiCredits, setEditAiCredits] = useState<AiCreditBalance | null>(
+    null,
+  );
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpNote, setTopUpNote] = useState("");
+  const [topUpSaving, setTopUpSaving] = useState(false);
+  const editLoadRef = useRef(0);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newHandle, setNewHandle] = useState("");
@@ -96,6 +106,7 @@ export function UsersTab() {
   );
 
   const openEdit = async (u: User) => {
+    const generation = ++editLoadRef.current;
     setEditUser(u);
     setEditHandle(u.handle);
     setEditUsername(u.username);
@@ -108,9 +119,57 @@ export function UsersTab() {
     setEditBanDays(1);
     setEditBanHours(0);
     setEditErr("");
+    setEditAiCredits(null);
+    setTopUpAmount("");
+    setTopUpNote("");
 
-    const data = await adminFetchSelfDisciplineMode(u.id);
-    setEditSelfDiscipline(data.enabled || false);
+    try {
+      const [discipline, credits] = await Promise.all([
+        adminFetchSelfDisciplineMode(u.id),
+        adminFetchAiCredits(u.id),
+      ]);
+      if (editLoadRef.current !== generation) return;
+      setEditSelfDiscipline(discipline.enabled || false);
+      setEditAiCredits(credits.credits);
+    } catch (error) {
+      if (editLoadRef.current === generation) {
+        setEditErr(error instanceof Error ? error.message : "加载用户信息失败");
+      }
+    }
+  };
+
+  const createIdempotencyKey = (): string => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  };
+
+  const handleTopUp = async () => {
+    if (!editUser) return;
+    const amount = Number(topUpAmount);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      setEditErr("充值数量必须是正整数");
+      return;
+    }
+    setTopUpSaving(true);
+    setEditErr("");
+    try {
+      const credits = await adminTopUpAiCredits({
+        userId: editUser.id,
+        amount,
+        idempotencyKey: createIdempotencyKey(),
+        note: topUpNote.trim() || "Admin top-up",
+      });
+      setEditAiCredits(credits);
+      setTopUpAmount("");
+      setTopUpNote("");
+    } catch (error) {
+      setEditErr(error instanceof Error ? error.message : "充值失败");
+    } finally {
+      setTopUpSaving(false);
+    }
   };
 
   const isBanned = (u: User) => isFuture(u.banned_until);
@@ -592,6 +651,43 @@ export function UsersTab() {
             }
             sx={{ mt: 1 }}
           />
+
+          <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5 }}>
+            <Typography variant="subtitle2" fontWeight={700}>
+              AI Credits
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              可用 {editAiCredits?.balance ?? "…"}，预留{" "}
+              {editAiCredits?.reserved ?? "…"}
+            </Typography>
+            <Box sx={{ display: "flex", ...flexGap(1), mt: 1 }}>
+              <TextField
+                label="充值数量"
+                size="small"
+                inputMode="numeric"
+                value={topUpAmount}
+                onChange={(event) =>
+                  setTopUpAmount(event.target.value.replace(/\D/g, ""))
+                }
+                sx={{ width: 130 }}
+              />
+              <TextField
+                label="备注"
+                size="small"
+                value={topUpNote}
+                onChange={(event) =>
+                  setTopUpNote(event.target.value.slice(0, 200))
+                }
+                sx={{ flex: 1 }}
+              />
+              <Button
+                disabled={topUpSaving || !topUpAmount}
+                onClick={() => void handleTopUp()}
+              >
+                充值
+              </Button>
+            </Box>
+          </Paper>
 
           {editErr && (
             <Alert severity="error" sx={{ mt: 1 }}>

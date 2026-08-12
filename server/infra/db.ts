@@ -5,7 +5,11 @@ import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
-import { ADMIN_FEATURE_MASK } from "@/shared/features";
+import {
+  ADMIN_FEATURE_MASK,
+  DEFAULT_FEATURE_MASK,
+  featureBit,
+} from "@/shared/features";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
 
@@ -21,7 +25,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 
 type SchemaMigration = (db: Database) => void;
 
@@ -60,8 +64,161 @@ const INCIDENT_SCHEMA = `
     ON incidents(group_id, id DESC);
 `;
 
+const AI_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS ai_conversations (
+    id                          TEXT PRIMARY KEY,
+    user_id                     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title                       TEXT NOT NULL,
+    title_norm                  TEXT NOT NULL,
+    active_leaf_message_id      TEXT,
+    forked_from_conversation_id TEXT REFERENCES ai_conversations(id) ON DELETE SET NULL,
+    forked_from_message_id      TEXT,
+    last_assistant_sequence     INTEGER NOT NULL DEFAULT 0,
+    last_read_assistant_sequence INTEGER NOT NULL DEFAULT 0,
+    archived_at                 TEXT,
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_updated
+    ON ai_conversations(user_id, archived_at, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_ai_conversations_title
+    ON ai_conversations(user_id, title_norm);
+
+  CREATE TABLE IF NOT EXISTS ai_messages (
+    sequence          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                TEXT NOT NULL UNIQUE,
+    conversation_id   TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+    parent_message_id TEXT REFERENCES ai_messages(id) ON DELETE RESTRICT,
+    role              TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content           TEXT NOT NULL DEFAULT '',
+    attachments_json  TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(attachments_json)),
+    status            TEXT NOT NULL CHECK (
+      status IN ('pending', 'streaming', 'completed', 'failed', 'cancelled')
+    ),
+    run_id            TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation_sequence
+    ON ai_messages(conversation_id, sequence);
+  CREATE INDEX IF NOT EXISTS idx_ai_messages_parent
+    ON ai_messages(parent_message_id);
+
+  CREATE TABLE IF NOT EXISTS ai_runs (
+    id                TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id   TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+    input_message_id  TEXT NOT NULL REFERENCES ai_messages(id) ON DELETE CASCADE,
+    output_message_id TEXT NOT NULL REFERENCES ai_messages(id) ON DELETE CASCADE,
+    status            TEXT NOT NULL CHECK (
+      status IN ('queued', 'routing', 'running', 'completed', 'failed', 'cancelled')
+    ),
+    revision          INTEGER NOT NULL DEFAULT 0,
+    model_placeholder TEXT,
+    provider_model    TEXT,
+    reasoning_effort  TEXT,
+    reserved_credits  INTEGER NOT NULL DEFAULT 0,
+    charged_credits   INTEGER NOT NULL DEFAULT 0,
+    input_tokens      INTEGER NOT NULL DEFAULT 0,
+    cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens     INTEGER NOT NULL DEFAULT 0,
+    cancel_requested  INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+    error             TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_runs_one_active_conversation
+    ON ai_runs(conversation_id)
+    WHERE status IN ('queued', 'routing', 'running');
+  CREATE INDEX IF NOT EXISTS idx_ai_runs_user_updated
+    ON ai_runs(user_id, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS ai_run_attempts (
+    id                  TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL REFERENCES ai_runs(id) ON DELETE CASCADE,
+    attempt             INTEGER NOT NULL,
+    provider_model      TEXT NOT NULL,
+    provider_request_id TEXT,
+    status              TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+    visible_output      INTEGER NOT NULL DEFAULT 0 CHECK (visible_output IN (0, 1)),
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    error               TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (run_id, attempt)
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_conversation_tags (
+    conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+    normalized_tag  TEXT NOT NULL,
+    display_tag     TEXT NOT NULL,
+    prompt_version  INTEGER NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (conversation_id, normalized_tag)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_conversation_tags_lookup
+    ON ai_conversation_tags(normalized_tag, conversation_id);
+
+  CREATE TABLE IF NOT EXISTS ai_context_snapshots (
+    id                 TEXT PRIMARY KEY,
+    conversation_id    TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+    through_message_id TEXT NOT NULL REFERENCES ai_messages(id) ON DELETE CASCADE,
+    summary_json       TEXT NOT NULL CHECK (json_valid(summary_json)),
+    prompt_version     INTEGER NOT NULL,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (conversation_id, through_message_id, prompt_version)
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_credit_accounts (
+    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    balance    INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    reserved   INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_credit_ledger (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL CHECK (kind IN ('top_up', 'reserve', 'settle', 'release')),
+    delta           INTEGER NOT NULL,
+    balance_after   INTEGER NOT NULL CHECK (balance_after >= 0),
+    run_id          TEXT REFERENCES ai_runs(id) ON DELETE SET NULL,
+    admin_id        TEXT REFERENCES users(id) ON DELETE SET NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    note            TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_credit_ledger_user_created
+    ON ai_credit_ledger(user_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS ai_file_operations (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id          TEXT REFERENCES ai_runs(id) ON DELETE SET NULL,
+    call_id         TEXT NOT NULL,
+    before_revision INTEGER NOT NULL,
+    after_revision  INTEGER NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('planned', 'committed', 'failed')),
+    result_json     TEXT CHECK (result_json IS NULL OR json_valid(result_json)),
+    error           TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, call_id)
+  );
+`;
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, (db) => db.exec(INCIDENT_SCHEMA)],
+  [
+    18,
+    (db) => {
+      db.exec(AI_SCHEMA);
+      const aiBit = featureBit("ai");
+      db.prepare("UPDATE users SET feature_mask = feature_mask | ?").run(aiBit);
+    },
+  ],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -123,7 +280,7 @@ function installSchema(db: Database): void {
       handle       TEXT UNIQUE NOT NULL,
       username     TEXT NOT NULL,
       role         TEXT NOT NULL DEFAULT 'user',
-      feature_mask INTEGER NOT NULL DEFAULT 126,
+      feature_mask INTEGER NOT NULL DEFAULT ${DEFAULT_FEATURE_MASK},
       is_muted     INTEGER NOT NULL DEFAULT 0,
       muted_until  TEXT,
       banned_until TEXT,
@@ -361,6 +518,7 @@ function installSchema(db: Database): void {
   `);
 
   db.exec(INCIDENT_SCHEMA);
+  db.exec(AI_SCHEMA);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_groups_handle ON groups(handle);

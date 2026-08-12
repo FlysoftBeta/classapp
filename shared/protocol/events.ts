@@ -8,6 +8,10 @@ import {
   postDeletedPayloadSchema,
   userConfigChangedEventSchema,
 } from "@/shared/types/events";
+import {
+  aiRunUpdatedPayloadSchema,
+  aiSidebarUpdatedPayloadSchema,
+} from "@/shared/types/events/ai";
 
 const emptyPayloadSchema = z.object({}).strict();
 
@@ -65,6 +69,8 @@ export const eventContracts = {
   "article.sidebar_updated": articleSidebarUpdatedPayloadSchema,
   "article.list_updated": articleListUpdatedPayloadSchema,
   "user.config_changed": userConfigChangedEventSchema,
+  "ai.run.updated": aiRunUpdatedPayloadSchema,
+  "ai.sidebar.updated": aiSidebarUpdatedPayloadSchema,
   "remote.resubscribe": z.object({ reason: z.string() }).strict(),
   "remote.hello": z.object({ buildId: z.string() }).strict(),
 } as const satisfies Record<string, z.ZodType>;

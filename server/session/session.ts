@@ -202,6 +202,14 @@ export class Actor {
     ]);
     return new WordsActorFacade(this, createWordsService(getDb()));
   }
+
+  async ai() {
+    const [{ AiActorFacade }, { createAiService }] = await Promise.all([
+      import("@/server/domain/facade/ai"),
+      import("@/server/services/ai/aiService"),
+    ]);
+    return new AiActorFacade(this, createAiService(getDb()));
+  }
 }
 
 export function resolveBearerToken(value: string | null): string | null {

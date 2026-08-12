@@ -224,12 +224,14 @@ export class UserService {
       { createPostService },
       { createClientService },
       { createUserConfigService },
+      { createAiService },
     ] = await Promise.all([
       import("./groupsService"),
       import("./conversationsService"),
       import("./postsService"),
       import("./clientsService"),
       import("./userConfig"),
+      import("./ai/aiService"),
     ]);
     createGroupService(this.db).purgeUser(id);
     createConversationService(this.db).purgeUser(id);
@@ -238,6 +240,7 @@ export class UserService {
     createWordsService(this.db).purgeUser(id);
     createClientService(this.db).purgeUser(id);
     createUserConfigService(this.db).purgeUser(id);
+    await createAiService(this.db).purgeUser(id);
     deleteUserById(this.db, id);
   }
 

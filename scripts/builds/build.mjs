@@ -77,6 +77,19 @@ function copyHttpsFiles(dist) {
   );
 }
 
+function copyModelsFile(dist) {
+  const source = worktreePath("secrets", "models.json");
+  if (!fs.existsSync(source)) {
+    console.warn(
+      "AI models configuration not found; building with AI unavailable.",
+    );
+    return;
+  }
+  const destination = path.join(dist, "models.json");
+  copy(source, destination);
+  fs.chmodSync(destination, 0o600);
+}
+
 function createZip(source, destination) {
   fs.rmSync(destination, { force: true });
   run("zip", ["-rq", destination, "."], { cwd: source });
@@ -155,6 +168,7 @@ function build(targetName) {
   ]);
   fs.writeFileSync(path.join(dist, "build-id.txt"), buildId);
   copyHttpsFiles(dist);
+  copyModelsFile(dist);
 
   copy(path.join(dist, "client"), path.join(current, "client"));
   copy(path.join(dist, "server"), path.join(current, "server"));
@@ -164,6 +178,9 @@ function build(targetName) {
   copy(path.join(dist, "build-id.txt"), path.join(current, "build-id.txt"));
   if (fs.existsSync(path.join(dist, "https"))) {
     copy(path.join(dist, "https"), path.join(current, "https"));
+  }
+  if (fs.existsSync(path.join(dist, "models.json"))) {
+    copy(path.join(dist, "models.json"), path.join(current, "models.json"));
   }
 
   prepareRuntimeDependencies({

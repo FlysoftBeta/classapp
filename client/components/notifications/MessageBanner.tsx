@@ -6,6 +6,7 @@ import Slide from "@mui/material/Slide";
 import IconButton from "@mui/material/IconButton";
 import GroupsIcon from "@mui/icons-material/Groups";
 import PersonIcon from "@mui/icons-material/Person";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import CloseIcon from "@mui/icons-material/Close";
 import type { MessageBannerPayload } from "@/client/hooks/useMessageBanner";
 import { cssMin, flexGap } from "@/client/lib/css";
@@ -13,7 +14,7 @@ import { cssMin, flexGap } from "@/client/lib/css";
 interface MessageBannerProps {
   banner: MessageBannerPayload | null;
   onDismiss: () => void;
-  onOpenConversation: (convType: "group" | "dm", convId: string) => void;
+  onOpen: (banner: MessageBannerPayload) => void;
 }
 
 const SWIPE_DISMISS_THRESHOLD = 48;
@@ -21,15 +22,15 @@ const SWIPE_DISMISS_THRESHOLD = 48;
 export default function MessageBanner({
   banner,
   onDismiss,
-  onOpenConversation,
+  onOpen,
 }: MessageBannerProps) {
   const touchStartYRef = useRef<number | null>(null);
 
   const handleClick = useCallback(() => {
     if (!banner) return;
-    onOpenConversation(banner.convType, banner.convId);
+    onOpen(banner);
     onDismiss();
-  }, [banner, onOpenConversation, onDismiss]);
+  }, [banner, onOpen, onDismiss]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartYRef.current = e.touches[0]?.clientY ?? null;
@@ -48,7 +49,12 @@ export default function MessageBanner({
     [onDismiss],
   );
 
-  const Icon = banner?.convType === "group" ? GroupsIcon : PersonIcon;
+  const Icon =
+    banner?.kind === "ai"
+      ? AutoAwesomeIcon
+      : banner?.convType === "group"
+        ? GroupsIcon
+        : PersonIcon;
 
   return (
     <Box
@@ -109,7 +115,11 @@ export default function MessageBanner({
               {banner?.convName}
             </Typography>
             <Typography variant="body2" color="text.secondary" noWrap>
-              {banner ? `${banner.senderName}：${banner.preview}` : ""}
+              {banner
+                ? banner.kind === "ai"
+                  ? `AI：${banner.preview}`
+                  : `${banner.senderName}：${banner.preview}`
+                : ""}
             </Typography>
           </Box>
 

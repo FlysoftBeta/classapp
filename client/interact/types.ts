@@ -32,6 +32,7 @@ export type AppRoute =
   | { view: "chat"; conversation: SelectedKey | null }
   | { view: "settings" }
   | { view: "admin" }
+  | { view: "ai"; conversationId: string | null }
   | { view: "articles"; conversation?: SelectedKey }
   | {
       view: "reader";

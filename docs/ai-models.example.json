@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "providers": {
+    "primary": {
+      "type": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "token": "REPLACE_WITH_SERVER_SIDE_TOKEN"
+    }
+  },
+  "providerModels": {
+    "default": {
+      "cachedInput": 0,
+      "input": 0,
+      "output": 0,
+      "contextSize": 128000,
+      "maxOutputTokens": 8192,
+      "provider": "primary",
+      "model": "REPLACE_WITH_MODEL_ID",
+      "capabilities": {
+        "input": ["text", "image"],
+        "reasoningEfforts": ["none", "low", "medium", "high"],
+        "functionCalling": true,
+        "structuredOutputs": true,
+        "responsesApi": true
+      }
+    }
+  },
+  "models": {
+    "route_classifier": { "models": ["default"], "maxRetries": 1 },
+    "chat_fast": { "models": ["default"], "maxRetries": 1 },
+    "chat_reasoning": { "models": ["default"], "maxRetries": 1 },
+    "chat_vision": { "models": ["default"], "maxRetries": 1 },
+    "writing": { "models": ["default"], "maxRetries": 1 },
+    "metadata": { "models": ["default"], "maxRetries": 1 },
+    "search_tags": { "models": ["default"], "maxRetries": 1 },
+    "context_compactor": { "models": ["default"], "maxRetries": 1 }
+  }
+}

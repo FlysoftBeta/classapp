@@ -18,7 +18,12 @@ import type {
 } from "@/shared/types/events";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
 import { useApplicationStore } from "./appStore";
-import { announcementEvents, configEvents, postEvents } from "./events";
+import {
+  aiRunEvents,
+  announcementEvents,
+  configEvents,
+  postEvents,
+} from "./events";
 import { resourceQueries } from "./resources";
 import { client } from "./remote/client";
 import { session } from "./remote/session";
@@ -121,6 +126,7 @@ class RecoveryCoordinator {
         "recovery.article-sidebar",
         resourceQueries.refreshArticleSidebar(),
       ),
+      continueAfter("recovery.ai-sidebar", resourceQueries.refreshAiSidebar()),
       continueAfter("recovery.offline-content", syncOfflineContent()),
     ]);
 
@@ -245,6 +251,15 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     ),
     client.subscribe("article.list_updated", callbacks.onArticleListUpdated),
     client.subscribe("user.config_changed", onConfig),
+    client.subscribe("ai.run.updated", (data) => {
+      recovery.enqueue(() => {
+        useApplicationStore.getState().applyAiRun(data);
+        aiRunEvents.emit(data);
+      });
+    }),
+    client.subscribe("ai.sidebar.updated", () =>
+      resourceQueries.scheduleAiSidebar(),
+    ),
   ];
 
   useApplicationStore.getState().setOnline(client.isConnected());

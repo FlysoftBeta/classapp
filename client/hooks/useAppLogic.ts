@@ -27,7 +27,11 @@ import {
   submitOobe,
   unlockSession,
 } from "@/client/interact/sessionController";
-import { configEvents, postEvents } from "@/client/interact/events";
+import {
+  aiRunEvents,
+  configEvents,
+  postEvents,
+} from "@/client/interact/events";
 
 export type {
   AppState,
@@ -123,6 +127,10 @@ export function useAppLogic() {
     resourceQueries.scheduleConversations();
   }, []);
 
+  const handleAiSidebarUpdate = useCallback(() => {
+    resourceQueries.scheduleAiSidebar();
+  }, []);
+
   const handleLeftGroup = useCallback(
     (groupId: string) => {
       store.applyConversation({ removed: { type: "group", id: groupId } });
@@ -152,6 +160,9 @@ export function useAppLogic() {
     convDms,
     articleSidebar: store.articleSidebar,
     articleListRevision,
+    aiConversations: store.aiConversations,
+    aiCredits: store.aiCredits,
+    aiStatus: store.aiStatus,
 
     loginLoading: store.loginLoading,
     loginError: store.loginError,
@@ -168,9 +179,11 @@ export function useAppLogic() {
     handleLogout,
     handleNewDm,
     handleConversationUpdate,
+    handleAiSidebarUpdate,
     handleLeftGroup,
     subscribePostEvents: postEvents.subscribe,
     subscribeConfigEvents: configEvents.subscribe,
+    subscribeAiRunEvents: aiRunEvents.subscribe,
 
     lockKonami,
     unlockKonami,

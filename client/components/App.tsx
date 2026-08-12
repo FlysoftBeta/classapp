@@ -13,6 +13,7 @@ import OnboardingFlow from "./auth/OnboardingFlow";
 import AppLockedScreen from "./auth/AppLockedScreen";
 import ConversationList from "./sidebar/Sidebar";
 import ChatView from "./chat/ChatView";
+import AiView from "./ai/AiView";
 import Settings from "./settings/Settings";
 import AdminPanel from "./admin/AdminPanel";
 import ArticleList from "./articles/ArticleList";
@@ -31,7 +32,10 @@ import WifiOffIcon from "@mui/icons-material/WifiOff";
 import DebugMenu from "./debug/DebugMenu";
 
 import { useAppLogic, type ConvEntry } from "../hooks/useAppLogic";
-import { useMessageBanner } from "../hooks/useMessageBanner";
+import {
+  useMessageBanner,
+  type MessageBannerPayload,
+} from "../hooks/useMessageBanner";
 import MessageBanner from "./notifications/MessageBanner";
 import {
   readUserSetting,
@@ -124,6 +128,11 @@ function AppShell({
     articleSidebar,
     articleListRevision,
     subscribeConfigEvents,
+    subscribeAiRunEvents,
+    aiConversations,
+    aiCredits,
+    aiStatus,
+    handleAiSidebarUpdate,
     online,
   } = logic;
 
@@ -133,6 +142,7 @@ function AppShell({
   const articlesEnabled = hasFeature(user, "articles");
   const learningEnabled = hasFeature(user, "learning");
   const articleDownloadEnabled = hasFeature(user, "article_download");
+  const aiEnabled = hasFeature(user, "ai");
   const articleConversation = useMemo(() => {
     const key =
       route.view === "articles" || route.view === "reader"
@@ -188,6 +198,21 @@ function AppShell({
     setMobileShowContent(false);
     navigate({ view: "chat", conversation: null });
   }, [navigate]);
+
+  const handleOpenAi = useCallback(
+    (conversationId: string) => {
+      if (!aiEnabled) return;
+      navigate({ view: "ai", conversationId });
+      if (isMobile) setMobileShowContent(true);
+    },
+    [aiEnabled, isMobile, navigate],
+  );
+
+  const handleNewAi = useCallback(() => {
+    if (!aiEnabled) return;
+    navigate({ view: "ai", conversationId: null });
+    if (isMobile) setMobileShowContent(true);
+  }, [aiEnabled, isMobile, navigate]);
 
   const handleOpenArticle = useCallback(
     (articleId: string) => {
@@ -283,6 +308,7 @@ function AppShell({
 
   const { banner, dismiss: dismissBanner } = useMessageBanner({
     subscribePostEvents,
+    subscribeAiRunEvents,
     currentUserId: user!.id,
     conversations,
     route,
@@ -311,6 +337,17 @@ function AppShell({
       isMobile,
       handleConversationUpdate,
     ],
+  );
+
+  const handleOpenBanner = useCallback(
+    (payload: MessageBannerPayload) => {
+      if (payload.kind === "ai") {
+        handleOpenAi(payload.conversationId);
+        return;
+      }
+      handleOpenConversationFromBanner(payload.convType, payload.convId);
+    },
+    [handleOpenAi, handleOpenConversationFromBanner],
   );
 
   if (!online && !offlineEnabled) {
@@ -375,6 +412,22 @@ function AppShell({
           adminEnabled={adminEnabled}
           articlesEnabled={articlesEnabled}
           learningEnabled={learningEnabled}
+          aiConversations={aiConversations}
+          aiCredits={aiCredits}
+          aiAvailable={aiStatus.available}
+          aiUnavailableReason={aiStatus.error}
+          currentAiConversationId={
+            route.view === "ai" ? route.conversationId : null
+          }
+          initialMode={
+            route.view === "ai"
+              ? "ai"
+              : route.view === "articles" || route.view === "reader"
+                ? "reading"
+                : "conversations"
+          }
+          onOpenAi={handleOpenAi}
+          onNewAi={handleNewAi}
         />
       </Box>
 
@@ -445,6 +498,26 @@ function AppShell({
             online={online}
             offlineEnabled={offlineEnabled}
             articlesEnabled={articlesEnabled}
+          />
+        )}
+        {view === "ai" && aiEnabled && (
+          <AiView
+            key={route.conversationId ?? "new"}
+            conversationId={route.conversationId}
+            credits={aiCredits}
+            available={aiStatus.available}
+            unavailableReason={aiStatus.error}
+            online={online}
+            subscribeRunEvents={subscribeAiRunEvents}
+            onConversationCreated={handleOpenAi}
+            onSidebarRefresh={handleAiSidebarUpdate}
+            onBack={
+              isMobile
+                ? () => {
+                    setMobileShowContent(false);
+                  }
+                : undefined
+            }
           />
         )}
         {view === "settings" && (
@@ -546,6 +619,7 @@ function AppShell({
             "wrong-words",
             "clear-wrong",
             "mastered-words",
+            "ai",
           ].includes(view) && (
             <Box
               sx={{
@@ -602,7 +676,7 @@ function AppShell({
       <MessageBanner
         banner={banner}
         onDismiss={dismissBanner}
-        onOpenConversation={handleOpenConversationFromBanner}
+        onOpen={handleOpenBanner}
       />
       {!online && (
         <Box

@@ -3,12 +3,16 @@ import type {
   User,
   ArticleSidebarPayload,
   Conversation,
+  AiConversation,
+  AiCreditBalance,
 } from "@/shared/types/api";
 import type {
   AppStatePayload,
   ArticleSidebarUpdatedPayload,
   ConvUpdatedPayload,
+  AiRunUpdatedPayload,
 } from "@/shared/types/events";
+import type { ActionData } from "@/shared/protocol/actions";
 import { dmConvId } from "@/shared/conversations/id";
 import {
   appStateFromPayload,
@@ -26,6 +30,9 @@ interface ApplicationStore {
   route: AppRoute;
   conversations: Conversation[];
   articleSidebar: ArticleSidebarPayload;
+  aiConversations: AiConversation[];
+  aiCredits: AiCreditBalance;
+  aiStatus: ActionData<"fetchAiSidebarAction">["status"];
   online: boolean;
   loginLoading: boolean;
   loginError: string;
@@ -47,6 +54,8 @@ interface ApplicationStore {
   setArticleSidebar(payload: ArticleSidebarPayload): void;
   applyArticleSidebar(payload: ArticleSidebarUpdatedPayload): void;
   setCurrentArticle(id: string | null): void;
+  setAiSidebar(payload: ActionData<"fetchAiSidebarAction">): void;
+  applyAiRun(payload: AiRunUpdatedPayload): void;
   setLoginLoading(value: boolean): void;
   setLoginError(value: string): void;
   setOobe(value: OobeState | null): void;
@@ -93,6 +102,14 @@ const EMPTY_SIDEBAR: ArticleSidebarPayload = {
   articles: [],
 };
 
+const EMPTY_AI_CREDITS: AiCreditBalance = { balance: 0, reserved: 0 };
+
+function sortAiConversations(entries: AiConversation[]): AiConversation[] {
+  return [...entries].sort((left, right) =>
+    right.updated_at.localeCompare(left.updated_at),
+  );
+}
+
 /** Application presentation state. Durable entities stay in client/data. */
 export const useApplicationStore = create<ApplicationStore>((set, get) => ({
   appState: "loading",
@@ -103,6 +120,9 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
   route: { view: "chat", conversation: null },
   conversations: [],
   articleSidebar: EMPTY_SIDEBAR,
+  aiConversations: [],
+  aiCredits: EMPTY_AI_CREDITS,
+  aiStatus: { available: false, error: "AI 尚未加载" },
   online: false,
   loginLoading: false,
   loginError: "",
@@ -126,6 +146,9 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
         ? {
             conversations: [],
             articleSidebar: EMPTY_SIDEBAR,
+            aiConversations: [],
+            aiCredits: EMPTY_AI_CREDITS,
+            aiStatus: { available: false, error: "AI 尚未加载" },
             route: { view: "chat", conversation: null } as AppRoute,
           }
         : {}),
@@ -140,6 +163,9 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
       authEpoch: state.authEpoch + 1,
       conversations: [],
       articleSidebar: EMPTY_SIDEBAR,
+      aiConversations: [],
+      aiCredits: EMPTY_AI_CREDITS,
+      aiStatus: { available: false, error: "AI 尚未加载" },
       route: { view: "chat", conversation: null },
       appDisable: { disabled: false, reason: null },
       oobe: null,
@@ -265,6 +291,22 @@ export const useApplicationStore = create<ApplicationStore>((set, get) => ({
     set((state) => ({
       articleSidebar: { ...state.articleSidebar, current_article_id },
     })),
+  setAiSidebar: (payload) =>
+    set({
+      aiConversations: sortAiConversations(payload.conversations),
+      aiCredits: payload.credits,
+      aiStatus: payload.status,
+    }),
+  applyAiRun: (payload) =>
+    set((state) => {
+      const index = state.aiConversations.findIndex(
+        (entry) => entry.id === payload.conversation.id,
+      );
+      const conversations = [...state.aiConversations];
+      if (index < 0) conversations.push(payload.conversation);
+      else conversations[index] = payload.conversation;
+      return { aiConversations: sortAiConversations(conversations) };
+    }),
   setLoginLoading: (loginLoading) => set({ loginLoading }),
   setLoginError: (loginError) => set({ loginError }),
   setOobe: (oobe) => set({ oobe }),

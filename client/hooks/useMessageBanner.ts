@@ -3,8 +3,10 @@ import type { ConvEntry, PostStreamEvent } from "./useAppLogic";
 import type { AppRoute } from "@/client/interact/types";
 import { conversationKeyFromPost } from "@/client/lib/chat/posts";
 import { postPreview } from "@/shared/types/api/post";
+import type { AiRunUpdatedPayload } from "@/shared/types/events";
 
-export interface MessageBannerPayload {
+interface ChatMessageBannerPayload {
+  kind: "chat";
   postId: string;
   convType: "group" | "dm";
   convId: string;
@@ -12,6 +14,17 @@ export interface MessageBannerPayload {
   senderName: string;
   preview: string;
 }
+
+interface AiMessageBannerPayload {
+  kind: "ai";
+  runId: string;
+  conversationId: string;
+  convName: string;
+  preview: string;
+}
+
+export type MessageBannerPayload =
+  ChatMessageBannerPayload | AiMessageBannerPayload;
 
 const AUTO_DISMISS_MS = 4500;
 const PREVIEW_MAX_LEN = 60;
@@ -23,6 +36,7 @@ function truncatePreview(text: string): string {
 
 interface UseMessageBannerOptions {
   subscribePostEvents: (fn: (evt: PostStreamEvent) => void) => () => void;
+  subscribeAiRunEvents: (fn: (evt: AiRunUpdatedPayload) => void) => () => void;
   currentUserId: string;
   conversations: ConvEntry[];
   route: AppRoute;
@@ -33,6 +47,7 @@ interface UseMessageBannerOptions {
 
 export function useMessageBanner({
   subscribePostEvents,
+  subscribeAiRunEvents,
   currentUserId,
   conversations,
   route,
@@ -41,7 +56,7 @@ export function useMessageBanner({
   doNotDisturb,
 }: UseMessageBannerOptions) {
   const [banner, setBanner] = useState<MessageBannerPayload | null>(null);
-  const seenPostIdsRef = useRef(new Set<string>());
+  const seenEventIdsRef = useRef(new Set<string>());
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isViewingConversation = useCallback(
@@ -62,11 +77,12 @@ export function useMessageBanner({
   }, []);
 
   const showBanner = useCallback((payload: MessageBannerPayload) => {
-    if (seenPostIdsRef.current.has(payload.postId)) return;
-    seenPostIdsRef.current.add(payload.postId);
-    if (seenPostIdsRef.current.size > 200) {
-      const recent = [...seenPostIdsRef.current].slice(-100);
-      seenPostIdsRef.current = new Set(recent);
+    const eventId = payload.kind === "chat" ? payload.postId : payload.runId;
+    if (seenEventIdsRef.current.has(eventId)) return;
+    seenEventIdsRef.current.add(eventId);
+    if (seenEventIdsRef.current.size > 200) {
+      const recent = [...seenEventIdsRef.current].slice(-100);
+      seenEventIdsRef.current = new Set(recent);
     }
 
     setBanner(payload);
@@ -98,6 +114,7 @@ export function useMessageBanner({
       const senderName = post.username ?? post.handle ?? "未知用户";
 
       showBanner({
+        kind: "chat",
         postId: post.id,
         convType: key.type,
         convId: key.id,
@@ -113,6 +130,31 @@ export function useMessageBanner({
     isViewingConversation,
     showBanner,
     doNotDisturb,
+  ]);
+
+  useEffect(() => {
+    return subscribeAiRunEvents((event) => {
+      if (doNotDisturb || event.run.status !== "completed") return;
+      const isViewing =
+        route.view === "ai" &&
+        route.conversationId === event.conversation.id &&
+        (!isMobile || mobileShowContent);
+      if (isViewing) return;
+      showBanner({
+        kind: "ai",
+        runId: event.run.id,
+        conversationId: event.conversation.id,
+        convName: event.conversation.title,
+        preview: truncatePreview(event.message.content || "回复已完成"),
+      });
+    });
+  }, [
+    doNotDisturb,
+    isMobile,
+    mobileShowContent,
+    route,
+    showBanner,
+    subscribeAiRunEvents,
   ]);
 
   useEffect(() => {

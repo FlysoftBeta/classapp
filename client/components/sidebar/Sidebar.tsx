@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import Box from "@mui/material/Box";
-import type { User, ArticleWithMeta } from "@/shared/types/api";
+import type {
+  User,
+  ArticleWithMeta,
+  AiConversation,
+  AiCreditBalance,
+} from "@/shared/types/api";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { FindGroupDialog } from "./FindGroupDialog";
 import { SidebarTopProps } from "./SidebarTop";
@@ -12,6 +17,8 @@ import type { ConvEntry } from "@/client/interact/types";
 import { TaskManagerPopover } from "@/client/components/tasks/TaskManagerPopover";
 import { hasFeature } from "@/shared/features";
 import { groupConvId } from "@/shared/conversations/id";
+import { AiSection } from "./AiSection";
+import { SidebarNavigation, type SidebarMode } from "./SidebarNavigation";
 
 function emptyGroupEntry(g: { id: string; name: string }): ConvEntry {
   return {
@@ -60,6 +67,14 @@ interface ConversationListProps {
   adminEnabled: boolean;
   articlesEnabled: boolean;
   learningEnabled: boolean;
+  aiConversations: AiConversation[];
+  aiCredits: AiCreditBalance;
+  aiAvailable: boolean;
+  aiUnavailableReason: string | null;
+  currentAiConversationId: string | null;
+  initialMode: SidebarMode;
+  onOpenAi: (id: string) => void;
+  onNewAi: () => void;
 }
 
 export default function ConversationList({
@@ -79,12 +94,21 @@ export default function ConversationList({
   adminEnabled,
   articlesEnabled,
   learningEnabled,
+  aiConversations,
+  aiCredits,
+  aiAvailable,
+  aiUnavailableReason,
+  currentAiConversationId,
+  initialMode,
+  onOpenAi,
+  onNewAi,
 }: ConversationListProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [convExpanded, setConvExpanded] = useState(true);
   const [articlesExpanded, setArticlesExpanded] = useState(true);
   const [tasksAnchor, setTasksAnchor] = useState<HTMLElement | null>(null);
+  const [mode, setMode] = useState<SidebarMode>(initialMode);
 
   const handleGroupCreated = (g: { id: string; name: string }) => {
     onConversationsChanged();
@@ -114,11 +138,13 @@ export default function ConversationList({
         overflow: "hidden",
       }}
     >
-      <SidebarTopProps
-        onFindGroup={() => setFindOpen(true)}
-        onCreateGroup={() => setCreateOpen(true)}
-        online={online}
-      />
+      {mode === "conversations" && (
+        <SidebarTopProps
+          onFindGroup={() => setFindOpen(true)}
+          onCreateGroup={() => setCreateOpen(true)}
+          online={online}
+        />
+      )}
 
       <Box
         sx={{
@@ -141,20 +167,34 @@ export default function ConversationList({
             width: "100%",
           }}
         >
-          <SidebarSection
-            title="对话"
-            scrollable
-            flexWeight={articlesEnabled ? 2 : 1}
-            expanded={convExpanded}
-            onExpandedChange={setConvExpanded}
-          >
-            <ConversationSection
-              conversations={conversations}
-              selected={selected}
-              onSelect={onSelect}
+          {mode === "conversations" && (
+            <SidebarSection
+              title="对话"
+              scrollable
+              flexWeight={1}
+              expanded={convExpanded}
+              onExpandedChange={setConvExpanded}
+            >
+              <ConversationSection
+                conversations={conversations}
+                selected={selected}
+                onSelect={onSelect}
+              />
+            </SidebarSection>
+          )}
+          {mode === "ai" && (
+            <AiSection
+              conversations={aiConversations}
+              credits={aiCredits}
+              available={aiAvailable}
+              unavailableReason={aiUnavailableReason}
+              selectedId={currentAiConversationId}
+              online={online}
+              onOpen={onOpenAi}
+              onNew={onNewAi}
             />
-          </SidebarSection>
-          {articlesEnabled && (
+          )}
+          {mode === "reading" && articlesEnabled && (
             <ArticleSection
               articles={sidebarArticles}
               currentArticleId={currentArticleId}
@@ -166,6 +206,13 @@ export default function ConversationList({
           )}
         </Box>
       </Box>
+
+      <SidebarNavigation
+        value={mode}
+        onChange={setMode}
+        aiEnabled={hasFeature(currentUser, "ai")}
+        readingEnabled={articlesEnabled}
+      />
 
       <SidebarBottom
         currentUser={currentUser}
