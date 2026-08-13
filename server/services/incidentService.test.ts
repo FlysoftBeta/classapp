@@ -55,5 +55,32 @@ assert.deepEqual(
   { error_name: null, message: null, stack: null },
 );
 
+const blobSymbolicator = {
+  symbolize(
+    _environment: "client" | "server",
+    _buildId: string,
+    stack: string,
+  ) {
+    return stack.replace(
+      /blob:https:\/\/classapp\.test\/[^:]+/,
+      "client/app.ts",
+    );
+  },
+};
+const clientService = new IncidentService(db, "test-build", blobSymbolicator);
+for (const blobId of ["first-random-id", "second-random-id"]) {
+  const error = new Error("same browser failure");
+  error.stack = `Error: same browser failure\n    at a (blob:https://classapp.test/${blobId}:1:42)`;
+  clientService.capture({ environment: "client", error });
+}
+assert.deepEqual(
+  db
+    .prepare(
+      "SELECT occurrence_count FROM incident_groups WHERE environment = 'client'",
+    )
+    .get(),
+  { occurrence_count: 2 },
+);
+
 db.close();
 console.log("incident service tests passed");

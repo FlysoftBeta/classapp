@@ -41,6 +41,9 @@ export default defineConfig(({ command }) => ({
     },
   },
   build: {
+    // Kept out of the browser-facing artifact by scripts/builds/build.mjs.
+    // `hidden` also prevents a sourceMappingURL from being written to app.js.
+    sourcemap: "hidden",
     outDir: "dist/client",
     emptyOutDir: false,
     target: "chrome70",

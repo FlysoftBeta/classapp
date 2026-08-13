@@ -95,6 +95,53 @@ function createZip(source, destination) {
   run("zip", ["-rq", destination, "."], { cwd: source });
 }
 
+function assemblePrivateSourceMaps(dist, buildId) {
+  const directory = path.join(dist, "server", "source-maps");
+  fs.mkdirSync(directory, { recursive: true });
+  const artifacts = [
+    {
+      environment: "client",
+      source: path.join(dist, "client", "app.js.map"),
+      file: "client-app.js.map",
+    },
+    {
+      environment: "server",
+      source: path.join(dist, "server", "main.mjs.map"),
+      file: "server-main.mjs.map",
+    },
+  ];
+  for (const artifact of artifacts) {
+    if (!fs.existsSync(artifact.source)) {
+      throw new Error(`Missing ${artifact.environment} source map`);
+    }
+    const sourceMap = JSON.parse(fs.readFileSync(artifact.source, "utf8"));
+    sourceMap.sourceRoot = "";
+    sourceMap.sources = sourceMap.sources.map((source) => {
+      const absolute = path.resolve(path.dirname(artifact.source), source);
+      const relative = path.relative(root, absolute);
+      if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+        return relative.split(path.sep).join("/");
+      }
+      return path.basename(source);
+    });
+    fs.writeFileSync(
+      path.join(directory, artifact.file),
+      JSON.stringify(sourceMap),
+    );
+    fs.unlinkSync(artifact.source);
+  }
+  fs.writeFileSync(
+    path.join(directory, "manifest.json"),
+    JSON.stringify({
+      format: "classapp-source-maps-v1",
+      buildId,
+      maps: Object.fromEntries(
+        artifacts.map(({ environment, file }) => [environment, file]),
+      ),
+    }),
+  );
+}
+
 function build(targetName) {
   if (process.platform !== "linux" || process.arch !== "x64") {
     throw new Error("Release assembly must run on Linux x64.");
@@ -149,6 +196,7 @@ function build(targetName) {
     "--outDir",
     path.join(dist, "server"),
   ]);
+  assemblePrivateSourceMaps(dist, buildId);
   copy(rendererSource, rendererDestination);
   run(process.execPath, [
     vite,

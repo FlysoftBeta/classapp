@@ -28,6 +28,8 @@ export default defineConfig({
     external: ["better-sqlite3", "ws", "playwright"],
   },
   build: {
+    // Packaged beside the server bundle for private Incident symbolication.
+    sourcemap: "hidden",
     ssr: path.resolve(__dirname, "server/main.ts"),
     outDir: "dist/server",
     emptyOutDir: false,

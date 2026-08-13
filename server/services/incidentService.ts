@@ -7,6 +7,11 @@ import {
   listIncidentsForGroup,
   type IncidentEnvironment,
 } from "@/server/data/incidents";
+import {
+  FileIncidentSourceMaps,
+  type IncidentStackSymbolicator,
+} from "@/server/infra/incidentSourceMaps";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 
 const MAX_STACK_LENGTH = 32_000;
 const MAX_MESSAGE_LENGTH = 4_000;
@@ -128,6 +133,7 @@ export class IncidentService {
   constructor(
     private readonly db: Database,
     private readonly serverBuildId: string,
+    private readonly symbolicator?: IncidentStackSymbolicator,
   ) {}
 
   capture(input: {
@@ -138,12 +144,17 @@ export class IncidentService {
     relatedIncidentIds?: readonly string[];
   }): { incidentId: string; publicMessage: string } {
     const error = asError(input.error);
-    const stack = clipped(
+    const rawStack = clipped(
       error.stack ?? `${error.name}: ${error.message}`,
       MAX_STACK_LENGTH,
     );
-    const topFrame = normalizeTopFrame(stack);
     const buildId = clipped(input.buildId || this.serverBuildId, 256);
+    const stack = clipped(
+      this.symbolicator?.symbolize(input.environment, buildId, rawStack) ??
+        rawStack,
+      MAX_STACK_LENGTH,
+    );
+    const topFrame = normalizeTopFrame(stack);
     const fingerprint = crypto
       .createHash("sha256")
       .update(`${input.environment}\0${buildId}\0${topFrame}`)
@@ -247,6 +258,11 @@ export class IncidentService {
 }
 
 const services = new WeakMap<Database, Map<string, IncidentService>>();
+let sourceMaps: IncidentStackSymbolicator | undefined;
+
+function incidentSourceMaps(): IncidentStackSymbolicator {
+  return (sourceMaps ??= new FileIncidentSourceMaps(runtimeConfig().appDir));
+}
 
 export function createIncidentService(
   db: Database,
@@ -259,7 +275,7 @@ export function createIncidentService(
   }
   let service = byBuild.get(buildId);
   if (!service) {
-    service = new IncidentService(db, buildId);
+    service = new IncidentService(db, buildId, incidentSourceMaps());
     byBuild.set(buildId, service);
   }
   return service;
