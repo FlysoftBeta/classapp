@@ -1,186 +1,164 @@
 # ClassApp
 
-> [!CAUTION]
-> 该项目已停止新功能开发
+ClassApp is an offline-capable communication, reading, learning, and
+administration application for a small school community. It is a React SPA with
+a custom Node.js/SQLite runtime—not a Next.js application and not a generic
+Internet SaaS.
 
-> 一个面向班级、小组与小型社区的沟通和学习空间。
+The deployment premise shapes the architecture:
 
-ClassApp 将群组聊天、文章阅读、词汇学习和成员管理放在同一个应用里。它可以承载日常讨论，也可以安静地记住一篇长文读到了哪里；普通成员不需要学习复杂的工作流，管理员也不必为了改一项权限翻遍配置文件。
+- the client must run on Chrome 70–80 and managed or shared devices;
+- the server lives on a concealed school LAN and may be unreachable for useful
+  periods of time;
+- the stable production entry point must boot an application bundle already
+  stored in IndexedDB;
+- one Node process and SQLite writer are appropriate for the expected scale;
+- updates, HTTPS, version switching, confirmation, and rollback must work
+  without a conventional cloud deployment platform.
 
-这是一个带有真实使用场景的个人开源项目。它并不打算成为一套无所不包的协作平台，只是在解决具体问题的过程中，把一些值得继续研究的想法也认真做了出来。
+Interfaces and schemas are migrated directly while the project evolves. There
+is no general backward-compatibility promise for internal APIs or local data.
 
-这个项目仍在持续变化，接口、数据结构和界面都可能直接演进，大概率不会有什么向前向后兼容性。
+## What the application does
 
-欢迎阅读源码、提出 Issue、提交改进，或者只取走其中某个有用的思路。
+- **Community:** nested discoverable groups, membership policy, group chat,
+  direct conversations, posts, announcements, and articles. A Group represents
+  a community of people and responsibilities, not merely a chat room.
+- **Offline use:** normalized local projections for conversations, articles,
+  access, coverage, drafts, reading state, retention, and pending user intent;
+  reconnect recovery precedes replay of queued live events.
+- **Reading:** segmented long text and server-rendered document bundles with
+  progress, retention, quota-aware eviction, and offline access. The browser
+  does not run PDF.js.
+- **Learning:** word study, review state, mistakes, progress, and discipline
+  prompts.
+- **AI:** server-owned provider harness, per-user conversations and ZIP
+  workspaces, usage accounting, quota, pricing, and billing ledger.
+- **Administration:** responsibility-based authority, users and clients,
+  community policy, Incidents, audit, HTTPS, backups, updates, and host
+  operations.
 
-## 功能
+## Architecture at a glance
 
-### 聊天
+Server dependencies flow inward:
 
-- 支持群组聊天和一对一私信，消息可以回复、编辑和删除
-- 内置贴纸选择器，最近使用的贴纸会自动排在前面
-- 长消息可以进入全屏编辑，未发送的内容会保存为草稿
-- 对话可以置顶、静音，并按时间选择离线保留范围
-- 新消息通过 WebSocket 实时到达；连接中断后会先完整刷新状态，再恢复增量更新
+```text
+WebSocket / HTTP transport
+        → Action or raw HTTP adapter
+        → Facade / ActorFacade
+        → Service
+        → Data
+```
 
-群组并不只有“加入”和“退出”两个选项。每个群组都可以拥有自己的 `@handle`，也可以挂载到父群组下供成员发现。创建者还可以配置：
+- transport owns framing, connection state, streaming, and wire-shape
+  validation;
+- Actions map a valid OneShot request to one public Facade operation;
+- Facades capture the Actor, authorize legitimate paths, and compose Services;
+- Services own objective mechanisms, invariants, events, and side effects;
+- `server/data` exclusively owns SQL and row mapping.
 
-- 是否公开列出，以及加入时是否需要密码
-- 是否隐藏成员列表
-- 是否仅允许管理员发言
-- 是否允许成员主动退出
-- 是否作为公告群使用
+The process `Runtime` owns long-lived resources. Each request gets a cheap
+`Scope` through `AsyncLocalStorage`; it lazily reuses Actor, Facades, Services,
+and request-local `Facts`. A Service that writes a fact must update or
+invalidate its own request-local cache.
 
-### 阅读器
+Client dependencies flow from React through Interact:
 
-文章区支持上传 TXT、PDF，也可以直接粘贴一段笔记。文章会记录收藏状态、阅读位置和累计阅读时间，并在侧边栏展示最近阅读内容。
+```text
+component → hook → client/interact → client/api and/or client/data
+```
 
-文本阅读器会按需加载长文章，而不是一次把全文塞进页面。PDF 阅读器支持翻页、页码跳转、缩放和黑白滤镜。对于希望留在本机的内容，可以选择自动管理，或明确保留 1 天、1 周、半年；网络暂时不可用时，已经保存的部分仍然可以阅读。
+`client/data` contains IndexedDB mechanisms. `client/interact` owns local versus
+remote selection, normalization, consistency, proposals, reconnect recovery,
+retention, and quota. React must not import raw client data or invent its own
+online/offline policy. Zustand is a presentation projection, not another
+persistence layer.
 
-### （单词）学习中心
+Production boot is a separate correctness chain:
 
-学习中心包含背单词、错题本和已掌握单词三个入口，会统计当天学习量与总体进度。答错的词会进入错题本，复习结果也会继续更新。
+```text
+launcher/launcher.js → server.js → server/main.mjs
+stable shell.html → active monolithic bundle in IndexedDB
+```
 
-还可以开启“自律模式”：应用每隔一段时间发起一次小测。它是否真的能提高自律尚待观察，但至少提醒不会缺席。
+The launcher alone owns installed versions, the active pointer, update
+confirmation, rollback, and Windows compatibility. The application stages and
+installs its client bundle through the Shell/Service Worker protocol.
 
-### 管理功能
+The full engineering guide is in [docs/README.md](./docs/README.md).
 
-管理员可以在图形界面中完成大部分维护工作：
+## Repository map
 
-- 创建成员，或生成等待成员自行完成初始设置的账号
-- 修改显示名称、`@handle`、PIN、角色与功能权限
-- 设置定时禁言、封禁和自律模式
-- 管理群组规则、成员关系和历史消息
-- 查看接入过的客户端，添加备注、绑定成员或启用白名单
-- 配置空闲锁屏、系统锁定、HTTPS 升级、数据备份和应用更新
+```text
+client/          browser-only React application
+  api/           typed OneShot facade and raw HTTP clients
+  components/    presentation and interaction
+  hooks/         React adapters
+  data/          raw IndexedDB representation and transactions
+  interact/      browser business logic, sync, recovery, quota
+  runtime/       application bundle update manager
+  store/         Zustand presentation state
+server/          Node.js application runtime
+  actions/       OneShot request adapters
+  data/          all SQLite primitives
+  domain/facade/ public actor-dependent business API
+  http/routes/   uploads, downloads, rendering, discovery
+  infra/         DB, files, configuration, update plumbing
+  protocol/      WebSocket connection/protocol implementation
+  runtime/       Runtime, Scope, Actor, Facts, UnitOfWork
+  services/      domain mechanisms and side effects
+  validation/    semantic validation
+shared/          wire schemas, shared types, pure cross-runtime logic
+shell/           stable production bootstrap document and worker
+launcher/        version/process/update/rollback owner
+scripts/         build, development, operation, and system tests
+docs/            engineering design memory and system guides
+```
 
-ClassApp 使用六位 PIN 登录，并为客户端分配独立身份。管理员可以把某台设备标记为可信客户端，也可以把它绑定给指定成员；这比较适合教室平板、公共电脑一类“设备本身也需要被管理”的场景。
+## Development
 
-## 离线功能
+Prerequisites are Node.js 22 x64, npm, Git submodules, a Rust nightly with
+`rust-src`, and `wasm-pack`. The build also uses ordinary Linux packaging tools
+such as `zip`; release assembly currently runs on Linux x64.
 
-ClassApp 的离线能力分成三层：
-
-1. Service Worker 保存稳定的启动页面，使浏览器在服务器不可达时仍能进入应用。
-2. 完整的前端应用包保存在 IndexedDB 中，启动时不依赖一串零散的静态文件。
-3. 对话、文章、阅读进度、设置和草稿进入规范化的本地领域库，由交互层统一同步。
-
-客观资源与帐号决定分开保存：共同群聊的消息在设备上只存一份，各帐号的已读、静音、收藏等决定则分别合并。空间占用达到配额 90% 时会清理到 80%；先清普通缓存，必要时才淘汰用户要求保留的内容，并明确记录为已淘汰。恢复连接后，应用会先刷新访问资格、合并离线决定并追赶 revision，再继续应用实时事件。
-
-## 关键依赖
-
-### Infini
-
-ClassApp 使用独立维护的 [Infini](https://github.com/infini-scroll/infini) 虚拟滚动引擎，并通过 `lib/infini` Git submodule 固定源码版本。它用于解决聊天记录中的一个常见问题：消息高度不固定、新消息会实时插入、用户还可能从引用直接跳到很远的历史位置，而滚动条最好不要因此突然移动。
-
-Infini 同时用于聊天记录、文章列表、长文本阅读器和贴纸列表。它支持：
-
-- 向前和向后加载，不要求列表只能从顶部开始
-- 可变高度项目的测量与滚动锚点补偿
-- 跳转到远处内容，以及只保留视口附近的数据
-- 在请求进行期间接收插入、删除事件，并按顺序重放
-- `window` 和独立滚动容器，以及 DOM、React 适配层
-
-它的平台无关状态核心使用 Rust 编写并编译为 WebAssembly，异步调度和数据协议由 TypeScript 负责。ClassApp 直接将 submodule 中的 core、DOM support 和 React 源码纳入 Vite 构建。
-
-为兼容不带实验性 flag 的 Chrome 70，`npm run infini:build` 使用固定 nightly、`-Z build-std` 和 WebAssembly MVP target features 重新编译 Infini 及 Rust 标准库。开发和生产构建都会先执行这一步。首次检出需要准备依赖：
+Infini is pinned as a Git submodule and rebuilt for WebAssembly MVP features so
+it works in Chrome 70 without experimental flags:
 
 ```bash
 git submodule update --init --recursive
 rustup toolchain install nightly-2026-05-10 --component rust-src
 cargo install wasm-pack
-```
-
-### 浏览器兼容：Chrome 70+
-
-ClassApp 的浏览器目标是 **Chrome 70 及以上版本**（为了适应老旧的学习平板的内置 webview）。
-
-为此，前端构建会：Rolldown `target` + `core-js@3` + CSS polyfills
-
-仓库中保留了一套固定版本的 Chrome 70 端到端测试。它会启动完整的生产环境，通过真实 HTTPS 证书登录应用，验证 Service Worker 和 IndexedDB 安装；随后关闭服务器，再确认浏览器仍能从离线入口启动，最后重启服务器并检查自动恢复。
-
-```bash
-npm run test:e2e
-```
-
-这项测试需要在 `worktree/chrome.deb` 准备固定版本的浏览器测试包，并在
-`worktree/secrets/https/` 准备 HTTPS 证书，因此不是日常开发的必跑项。
-较新的 Chromium 浏览器通常可以直接使用；其他浏览器目前没有承诺同等程度的测试覆盖。
-
-### HTTPS：让旧入口、证书和离线启动连成一条链
-
-ClassApp 没有把 HTTPS 仅仅视为“在前面放一个反向代理”。生产运行时可以由同一个 Node.js 进程同时监听多个 HTTP 与 HTTPS 端口，并在每个端口上挂载相同的 HTTP 路由和 WebSocket 协议。客户端会读取服务端公布的入口列表，在同协议的多个端口之间分配资源请求。
-
-证书流程使用 Let's Encrypt 与 ACME DNS-01：
-
-```text
-DuckDNS TXT challenge
-        ↓
-Let's Encrypt 签发证书
-        ↓
-校验域名、私钥、有效期与完整证书链
-        ↓
-构建时只带入部署所需的证书和私钥
-        ↓
-Node.js 同时提供 HTTP、HTTPS 与 WebSocket
-```
-
-选择 DNS-01 是因为它不要求签发时占用公网 HTTP 端口。证书脚本会通过 DuckDNS API 写入并清理 TXT challenge，同时优先使用兼容旧客户端的 ISRG Root X1 证书链。DuckDNS token 和 ACME 账户密钥不会进入部署包。
-
-管理员确认 HTTPS 正常后，可以在应用内开启 HTTP 升级。此时只有启动入口会返回可长期缓存的 `301`，把旧地址指向新的 HTTPS 地址；浏览器随后在安全上下文中安装 Service Worker。这个设计还有一个额外效果：入口重定向、启动页面和应用包都缓存完成后，即使服务器暂时离线，从旧地址进入仍能抵达本地应用。
-
-HTTPS 状态页会检查证书域名、有效期、证书链和根证书兼容性。证书配置和
-签发结果统一保存在被忽略的 `worktree/secrets/` 中，可用以下命令检查或续期：
-
-```bash
-npm run https:check
-npm run https:renew
-```
-
-### 应用自己更新自己
-
-生产环境只直接提供一个很小且稳定的 Shell。每个发布只有一个 build id，Shell 与单体客户端 bundle 必须作为同一构建一起切换。首次安装由 Shell 与 Service Worker 各自完成必要下载；此后所有检查、下载、暂存和激活统一由客户端 BundleManager 负责。bundle 保存在 IndexedDB，Shell 由 BundleManager 推送给 Service Worker；两边都完成提交后才刷新，旧版本不会继续发送业务请求。
-
-服务端更新由独立 Launcher 管理。新版本进入 staging 后，Launcher 负责切换目录、重启服务、保存待确认元数据并独占回滚 watchdog；服务端只负责校验/暂存部署包和发送生命周期指令。如果新版本持续崩溃，或者在规定时间内没有收到确认，Launcher 会同时还原应用目录和对应数据库备份。这个启动器同时保留了 Windows 兼容性。
-
-## 技术一览
-
-| 部分           | 实现                      |
-| -------------- | ------------------------- |
-| 前端界面       | React 19、Material UI     |
-| 客户端状态     | Zustand                   |
-| 构建与开发     | Vite、TypeScript          |
-| 服务端         | Node.js                   |
-| 实时通信       | WebSocket                 |
-| 数据存储       | SQLite、better-sqlite3    |
-| 数据校验       | Zod                       |
-| 离线能力       | Service Worker、IndexedDB |
-| PDF 阅读与渲染 | PDF.js、Canvas            |
-| 虚拟滚动       | Infini                    |
-
-ClassApp 是一个 React 单页应用，不依赖全栈式 React 框架。浏览器中的业务请求通过统一的类型化接口发送，实时消息和状态通知共用 WebSocket；只有上传、下载和 PDF 渲染等需要原始文件语义的操作使用 HTTP。
-
-服务端按照单向依赖组织业务：
-
-```text
-WebSocket / HTTP → Action → 身份与权限 → Service → Data
-```
-
-- 传输层负责连接、协议和请求校验
-- Action 将合法请求映射到具体能力
-- 身份与权限层判断“谁可以做什么”
-- Service 负责完整业务流程、事件和副作用
-- Data 层集中处理 SQLite 访问
-
-## 本地运行
-
-```bash
 npm install
 npm run dev
 ```
 
-打开 [http://localhost:3000](http://localhost:3000) 即可进入开发环境。开发环境的初始管理员 PIN 为 `123456`。生产部署时得看控制台的初始密码。
+Open [http://localhost:3000](http://localhost:3000). Vite proxies WebSocket and
+HTTP application traffic to the development server on port 3001. The initial
+development administrator PIN is `123456`; it is a development bootstrap value,
+not a production credential.
 
-生成指定平台的完整生产部署包：
+Useful commands:
+
+| Command                      | Purpose                                                   |
+| ---------------------------- | --------------------------------------------------------- |
+| `npm run lint`               | build native/Wasm prerequisites, type-check, and lint     |
+| `npm run format`             | format the working tree with Prettier                     |
+| `npm run test:e2e`           | build and exercise the fixed Chrome 70 HTTPS/offline path |
+| `npm run test:manual`        | build and start the current manual system harness         |
+| `npm run test:manual-legacy` | run the legacy-browser manual harness                     |
+| `npm run reset`              | reset development data; this is destructive               |
+| `npm run https:check`        | validate configured deployment certificates               |
+| `npm run https:renew`        | renew certificates through the configured DNS flow        |
+| `npm run pdfrender:update`   | fetch and verify supported native renderers               |
+
+The package currently has no unit-test runner for scattered `*.test.ts` files.
+Type-checking those files is not evidence that their assertions ran. New tests
+belong in the owned system/invariant harness until a deliberate unit-test
+architecture is introduced.
+
+## Production builds
+
+Build one amd64 deployment target at a time:
 
 ```bash
 npm run build -- linux-redhat
@@ -188,29 +166,35 @@ npm run build -- linux-debian
 npm run build -- windows
 ```
 
-每次只会生成一个目标平台的 amd64 包，产物位于
-`build/bootstrap-<target>.zip` 和 `build/deploy-<target>.zip`。在生产环境用
-`start.sh`/`start.bat` 启动。不同 target 的产物会保留在 `build/` 中并存；
-Vite 和 deployment 中间产物默认放在 `.cache/`，可用
-`CLASSAPP_BUILD_CACHE` 指定其他缓存目录。构建主机目前要求 Linux x64。
+Artifacts are written to `build/bootstrap-<target>.zip` and
+`build/deploy-<target>.zip`. Intermediate output is kept under `.cache/` unless
+`CLASSAPP_BUILD_CACHE` selects another location. Deployment secrets under
+`worktree/secrets/` are ignored by Git; AI configuration is optional, while a
+build with `CLASSAPP_REQUIRE_HTTPS=1` requires valid HTTPS material.
 
-手动从 `FlysoftBeta/pdf-render` 最新一次成功的 Actions run 更新并校验三平台
-renderer：
+The fixed-browser E2E path additionally expects the controlled Chrome package
+and certificates described by the test harness. A successful Vite session in a
+modern browser does not validate the production Shell, Service Worker,
+IndexedDB activation, offline restart, or Chrome 70 compatibility.
 
-```bash
-npm run pdfrender:update
-```
+## Documentation
 
-常用检查：
+Start with:
 
-```bash
-npm run lint
-npm run test:e2e
-npm run test:manual
-```
+1. [Product context and design philosophy](./docs/product-context.md)
+2. [Current architecture](./docs/architecture.md)
+3. [AI-agent change method](./docs/engineering/agent-method.md)
+4. [Known traps and rejected patterns](./docs/engineering/traps.md)
+
+The documentation index then routes to offline architecture, lifetime/ownership,
+authority, validation, Incidents, AI, billing, updates, document rendering,
+security, privacy, operations, UI state, and domain-specific flows. Historical
+root `ARCHITECTURE.md` and older rewrite notes may explain intent, but they do
+do not override the engineering guide, verified current code, or current
+product premise.
 
 ## License
 
-[Apache License 2.0](./LICENSE) except `public/stickers`
-
-Coauthored by GPT 5.6 Sol + Sonnet 5.
+The main project is licensed under the
+[Apache License 2.0](./LICENSE), except for `public/stickers`. Bundled third-party
+source and native components remain subject to their respective licenses.

@@ -54,15 +54,15 @@ as text and injected by the entrypoint, so there is no separate CSS artifact.
 - WebSocket events are queued during reconnect. Recovery refreshes access,
   flushes proposals, catches up revisions, publishes snapshots, and only then
   replays the queued events.
-- Binary articles use 4 MiB `ArrayBuffer` extents. Published downloads are
-  generation-based; PDF.js reads saved files through range requests without
-  loading the entire document.
+- Binary articles use `ArrayBuffer` extents. Published downloads are
+  generation-based; the browser consumes server-rendered document bundles
+  through the offline binary pipeline.
 
 The complete client model and its invariants are maintained in
-[docs/client-model.md](./docs/client-model.md).
+[docs/offline/README.md](./docs/offline/README.md).
 
 The authoritative server entity schema is maintained in
-[DATA_MODEL_V16.md](./DATA_MODEL_V16.md).
+[docs/foundations/server-data-model.md](./docs/foundations/server-data-model.md).
 
 ## Server runtime
 
@@ -79,7 +79,8 @@ User removal has two explicit service use cases. Deactivation revokes account
 credentials, asks `GroupService` to remove memberships, and records the stable
 identity in `deleted_users`; all other service data remains intact. Purge asks
 every owning Service to remove its own user data and side effects before the
-identity row is physically deleted. See [USER_LIFECYCLE.md](./USER_LIFECYCLE.md).
+identity row is physically deleted. See
+[docs/foundations/privacy-and-data-lifecycle.md](./docs/foundations/privacy-and-data-lifecycle.md).
 
 ## Development
 
