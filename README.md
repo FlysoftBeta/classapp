@@ -96,8 +96,7 @@ client/          browser-only React application
   hooks/         React adapters
   data/          raw IndexedDB representation and transactions
   interact/      browser business logic, sync, recovery, quota
-  runtime/       application bundle update manager
-  store/         Zustand presentation state
+  lib/           bundle manager, readers and browser mechanisms
 server/          Node.js application runtime
   actions/       OneShot request adapters
   data/          all SQLite primitives
@@ -109,7 +108,7 @@ server/          Node.js application runtime
   services/      domain mechanisms and side effects
   validation/    semantic validation
 shared/          wire schemas, shared types, pure cross-runtime logic
-shell/           stable production bootstrap document and worker
+shell.html       stable production bootstrap document
 launcher/        version/process/update/rollback owner
 scripts/         build, development, operation, and system tests
 docs/            engineering design memory and system guides

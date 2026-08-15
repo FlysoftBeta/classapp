@@ -17,13 +17,34 @@ Start with [the documentation index](./docs/README.md). Root
 ## Project and architecture map
 
 ```text
-client/      React UI, IndexedDB, offline/sync logic, bundle runtime
-server/      Node transport, business domain, SQLite, runtime infrastructure
-shared/      wire schemas, types, and pure cross-runtime logic
-shell/       stable production loader and Service Worker
-launcher/    process, version activation, confirmation, and rollback
-scripts/     development, build, operation, and test infrastructure
-docs/        engineering design memory and system guides
+client/
+  components/       React screens and ephemeral interaction, grouped by domain
+  hooks/            React lifecycle/presentation adapters
+  interact/         use cases, resources, Zustand projection, sync and recovery
+  interact/remote/  WebSocket transport, session bindings, remote client
+  api/              typed Action and raw-HTTP adapters
+  data/             IndexedDB schema, migration, repository, coverage and files
+  lib/              browser mechanisms: bundle manager, readers, pure helpers
+server/
+  boot.ts/main.ts    production IPC bootstrap and HTTP/HTTPS runtime assembly
+  protocol/         WebSocket connection, framing, registry and error encoding
+  actions/          thin validated Action-to-Facade adapters
+  domain/facade/    public Actor-dependent business paths
+  services/         domain and operational mechanisms; AI lives in services/ai/
+  data/             all domain SQL and row mapping
+  validation/       semantic input validation shared by entry paths
+  runtime/          Runtime, Scope, Actor, Facts, UnitOfWork and composition
+  http/             raw HTTP handler and generated Service Worker
+  http/routes/      upload, download, rendering, Range and discovery adapters
+  infra/            DB bootstrap, files, renderer, config and update mechanisms
+shared/
+  protocol/         correlated Action/wire/result schemas
+  types/            semantic API and event DTOs
+  */                pure domain primitives for posts, sync, bundles, etc.
+shell.html          stable production loader; Service Worker is served by server
+launcher/           process/version activation, confirmation and rollback
+scripts/            builds/, dev/, operation/ and tests/
+docs/               engineering design memory and system guides
 ```
 
 The basic server direction is:
@@ -72,6 +93,27 @@ stable shell.html → active monolithic client bundle in IndexedDB
 The monolithic bundle is intentional. Shell, HTTPS, ports, WebSocket upgrade,
 client activation, version switching, confirmation, and rollback form one
 production path.
+
+## Quick index for common changes
+
+Use this table as a starting point, then follow imports/callers and adjacent
+documents. The paths are orientation, not a substitute for tracing the flow.
+
+| Change area                                      | Typical code starting points                                                                                                                                                                                          | Read first                                                                                                                                                                                               |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| product premise, new dependency, compatibility   | `package.json`, `vite*.config.ts`, affected client/build code                                                                                                                                                         | [product context](./docs/product-context.md), [coding standards](./docs/engineering/coding-standards.md), [known traps](./docs/engineering/traps.md)                                                     |
+| server schema, SQL, migration, materialized data | `server/infra/db.ts`, `server/data/`, owning Service                                                                                                                                                                  | [server data model](./docs/foundations/server-data-model.md), [transactions and events](./docs/foundations/invariants-and-transactions.md)                                                               |
+| client schema or offline domain data             | `client/data/schema.ts`, `client/data/migration.ts`, `client/data/model.ts`, `client/data/repository.ts`                                                                                                              | [local data model](./docs/offline/local-model.md), [consistency and recovery](./docs/offline/consistency-and-recovery.md), [storage and quota](./docs/offline/storage-and-quota.md)                      |
+| sync, proposals, coverage, reconnect             | `client/interact/sync.ts`, `consistency.ts`, `remoteLifecycle.ts`, domain interact module                                                                                                                             | [consistency and recovery](./docs/offline/consistency-and-recovery.md), [offline overview](./docs/offline/README.md)                                                                                     |
+| Runtime, Scope, Actor, Facts, transactions       | `server/runtime/`, `server/runtime/composition.ts`                                                                                                                                                                    | [lifetimes and ownership](./docs/foundations/lifetimes-and-ownership.md), [transactions and events](./docs/foundations/invariants-and-transactions.md)                                                   |
+| authentication, client trust, roles, validation  | `server/domain/facade/authentication.ts`, `server/services/authService.ts`, `server/services/clientsService.ts`, `server/services/authorityService.ts`, `server/services/roleService.ts`, `server/validation/`        | [authentication](./docs/systems/authentication.md), [authority, validation, and audit](./docs/foundations/authority-validation-audit.md), [security](./docs/foundations/security-threat-model.md)        |
+| Groups, conversations, Posts, Articles           | matching files in `server/domain/facade/`, `server/services/`, `server/data/`, `client/interact/`; UI in `client/components/chat/`, `client/components/articles/`, `client/components/sidebar/`                       | [community and content](./docs/systems/community-and-content.md), plus offline data/consistency docs when cached                                                                                         |
+| React UI, resources, Zustand, large lists        | `client/components/`, `client/hooks/`, `client/interact/resources.ts`, `client/interact/appStore.ts`, `client/lib/`                                                                                                   | [frontend state and UI](./docs/systems/frontend-state-and-ui.md), [infinite scrolling](./docs/systems/infinite-scrolling.md)                                                                             |
+| documents, PDF rendering, offline bundles        | `server/domain/facade/articles.ts`, `server/services/articlesService.ts`, `server/data/articles.ts`, `server/infra/pdfRenderProcess.ts`, `server/infra/renderArchive.ts`, `client/interact/bundles.ts`, `lib/poppler` | [document rendering](./docs/systems/document-rendering.md), [storage and quota](./docs/offline/storage-and-quota.md)                                                                                     |
+| AI conversations, workspace, provider or billing | `server/services/ai/`, `server/domain/facade/ai.ts`, `client/interact/ai.ts`, `client/components/ai/`                                                                                                                 | [AI harness](./docs/systems/ai-harness.md), [AI billing](./docs/systems/ai-billing.md)                                                                                                                   |
+| startup, HTTPS, Shell, bundle or server update   | `shell.html`, `client/lib/bundle.ts`, `client/data/shellSchema.ts`, `server/boot.ts`, `server/main.ts`, `server/infra/update/`, `launcher/`, `scripts/builds/`                                                        | [update and startup](./docs/systems/update-and-startup.md), [Shell and HTTPS](./docs/offline/shell-and-https.md), [repository infrastructure](./docs/engineering/repository-infrastructure.md)           |
+| Incident, audit, operations, administration      | `server/domain/facade/incidents.ts`, `server/domain/facade/audit.ts`, `server/domain/facade/administration.ts`, corresponding Services/Data, `client/components/admin/`                                               | [errors and Incidents](./docs/foundations/errors-and-incidents.md), [observability and operations](./docs/systems/observability-and-operations.md), [admin workbench](./docs/systems/admin-workbench.md) |
+| scripts, build, tests, documentation             | `scripts/`, `package.json`, `vite*.config.ts`, `docs/`                                                                                                                                                                | [repository infrastructure](./docs/engineering/repository-infrastructure.md), [testing](./docs/engineering/testing.md), [documentation maintenance](./docs/engineering/documentation.md)                 |
 
 ## Development, scripts, and tests
 

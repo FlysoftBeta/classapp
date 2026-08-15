@@ -11,7 +11,9 @@ LLM summaries.
 - Root `README.md` introduces the product, architecture, development entry
   points, and documentation to a human contributor.
 - Root `AGENTS.md` gives an agent a fast project map, infrastructure summary,
-  working flow, and recurring design questions.
+  working flow, recurring design questions, and direct links for common change
+  areas. Its paths must name the current modules rather than an idealized or
+  historical directory layout.
 - `docs/README.md` explains how to interpret and navigate the design memory.
 - Topic documents own detailed domain semantics, reasoning, current mechanisms,
   failure analysis, and focused review guidance.
@@ -19,7 +21,10 @@ LLM summaries.
 Do not move subsystem detail into `AGENTS.md` merely because it is important.
 Importance determines whether it should be discoverable; ownership determines
 where its full explanation belongs. AGENTS may keep a one-line orientation and
-link to the owning document.
+link directly to the owning document. Common work such as server/client data
+model changes, offline consistency, authentication, UI state, documents, AI,
+and updates should not require opening only a root index and guessing the next
+document.
 
 ## Classify statements before strengthening them
 
@@ -99,7 +104,7 @@ and implementing:
 5. keep unresolved conflicts explicit instead of editing prose to pretend the
    implementation is already coherent;
 6. revisit AGENTS only when the quick project map, infrastructure entry, working
-   flow, or recurring questions changed.
+   flow, common-change index, or recurring questions changed.
 
 Documentation updates remain within task scope. Do not rewrite unrelated
 documents for style while implementing a local feature. If investigation finds
