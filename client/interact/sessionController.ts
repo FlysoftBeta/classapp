@@ -4,16 +4,16 @@ import {
   getClientMe,
   loginPin,
   logout as apiLogout,
-  patchClientMe,
   probeAppState,
 } from "@/client/api/auth";
 import { sessionRepository } from "@/client/data/repository";
 import type { AppStatePayload } from "@/shared/types/events";
 import { useApplicationStore } from "./appStore";
 import { applyAppState } from "./remoteLifecycle";
+import { flushPendingClientLock } from "./clientLock";
 import { resourceQueries } from "./resources";
 import { session } from "./remote/session";
-import { transport } from "./remote/transport";
+import { transport, TransportUnavailableError } from "./remote/transport";
 import { captureDetachedClientIncident } from "./clientIncidents";
 
 function commitSession(token: string, user: AppStatePayload["user"]): void {
@@ -42,7 +42,15 @@ export async function bootstrapSession(
   let knownKonamiLocked: boolean | null = null;
   if (restored?.session_token) {
     commitSession(restored.session_token, restored.user);
-    useApplicationStore.getState().setAppState("app");
+    const store = useApplicationStore.getState();
+    store.setAppDisable(restored.app_disable);
+    store.setAppState(
+      sessionRepository.konamiLockValue(restored)
+        ? "konami"
+        : restored.app_disable.disabled
+          ? "app_locked"
+          : "app",
+    );
     await refreshInitialData();
   }
 
@@ -85,13 +93,23 @@ export async function bootstrapSession(
         me_id: automatic.user.id,
         user: automatic.user,
         session_token: automatic.token,
+        konami_lock: {
+          base: {
+            value: automatic.konami_locked,
+            updated_at: Date.now(),
+          },
+          proposal: null,
+        },
+        app_disable: { disabled: false, reason: null },
+        system_locked: false,
         updated_at: Date.now(),
       };
       commitSession(automatic.token, automatic.user);
       await refreshInitialData();
     }
+    await flushPendingClientLock();
     const payload = await probeAppState();
-    if (payload) applyAppState(payload);
+    if (payload) await applyAppState(payload);
     else if (!restored) {
       useApplicationStore
         .getState()
@@ -114,29 +132,52 @@ async function clearLocalSession(): Promise<void> {
 }
 
 export async function lockSession(): Promise<void> {
-  await patchClientMe(true);
+  const meId = session.getUserId();
+  if (meId) {
+    await sessionRepository
+      .proposeKonamiLock(meId, true)
+      .catch((error) =>
+        captureDetachedClientIncident("session.lock.persist", error),
+      );
+  }
   useApplicationStore.getState().setAppState("konami");
+  try {
+    await flushPendingClientLock();
+  } catch (error) {
+    if (!(error instanceof TransportUnavailableError)) {
+      captureDetachedClientIncident("session.lock.remote", error);
+    }
+  }
 }
 
 export async function unlockSession(
   setClientId: (clientId: string) => void,
 ): Promise<string | null> {
+  const meId = session.getUserId();
+  if (meId) {
+    await sessionRepository
+      .proposeKonamiLock(meId, false)
+      .catch((error) =>
+        captureDetachedClientIncident("session.unlock.persist", error),
+      );
+  }
+  const store = useApplicationStore.getState();
+  store.setAppState(store.appDisable.disabled ? "app_locked" : "app");
   try {
-    const result = await patchClientMe(false);
-    if (result.ok && !result.data.ok && "access_required" in result.data) {
-      setClientId(result.data.client_id);
-      return result.data.client_id;
+    const result = await flushPendingClientLock();
+    if (result.accessRequired) {
+      if (meId) {
+        await sessionRepository.abandonKonamiLockProposal(meId, false);
+      }
+      useApplicationStore.getState().setAppState("konami");
+      setClientId(result.clientId);
+      return result.clientId;
     }
   } catch (error) {
-    captureDetachedClientIncident("session.unlock", error);
-    return "";
-  }
-  const payload = await probeAppState();
-  if (payload) applyAppState(payload);
-  else {
-    useApplicationStore
-      .getState()
-      .setAppState(session.getToken() ? "app" : "login");
+    if (!(error instanceof TransportUnavailableError)) {
+      captureDetachedClientIncident("session.unlock.remote", error);
+    }
+    return null;
   }
   return null;
 }
@@ -181,7 +222,7 @@ export async function loginWithPin(pin: string): Promise<void> {
     commitSession(data.token as string, data.user as AppStatePayload["user"]);
     await refreshInitialData();
     const payload = await probeAppState();
-    if (payload) applyAppState(payload);
+    if (payload) await applyAppState(payload);
     else store.setAppState("app");
   } catch (error) {
     captureDetachedClientIncident("session.login", error);
@@ -232,7 +273,7 @@ export async function submitOobe(): Promise<void> {
     await refreshInitialData();
     state.setOobe(null);
     const payload = await probeAppState();
-    if (payload) applyAppState(payload);
+    if (payload) await applyAppState(payload);
     else state.setAppState("app");
   } catch (error) {
     captureDetachedClientIncident("session.oobe", error);
@@ -268,7 +309,7 @@ export async function logoutSession(): Promise<void> {
   }
   if (remoteFailed) throw remoteError;
   const payload = await probeAppState();
-  if (payload) applyAppState(payload);
+  if (payload) await applyAppState(payload);
   else useApplicationStore.getState().setAppState("login");
 }
 

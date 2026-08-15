@@ -1,4 +1,5 @@
 import type {
+  AppDisableState,
   ArticleWithMeta,
   Conversation,
   Post,
@@ -773,6 +774,10 @@ async function deviceConversationCutoff(
 }
 
 export const sessionRepository = {
+  konamiLockValue(row: MeRow): boolean {
+    return Values.resolved(row.konami_lock).value;
+  },
+
   async active(): Promise<MeRow | null> {
     return runTransaction(
       [STORES.GLOBALS, STORES.ME],
@@ -791,24 +796,30 @@ export const sessionRepository = {
   },
 
   async save(user: User, token: string): Promise<void> {
-    const row: MeRow = {
-      me_id: user.id,
-      user,
-      session_token: token,
-      updated_at: Date.now(),
-    };
     await runTransaction(
       [STORES.GLOBALS, STORES.ME],
       "readwrite",
       async (tx) => {
         const meStore = tx.objectStore(STORES.ME);
-        for (const previous of (await requestResult(
-          meStore.getAll(),
-        )) as MeRow[]) {
+        const rows = (await requestResult(meStore.getAll())) as MeRow[];
+        for (const previous of rows) {
           if (previous.me_id !== user.id && previous.session_token) {
             meStore.put({ ...previous, session_token: null });
           }
         }
+        const previous = rows.find((entry) => entry.me_id === user.id);
+        const row: MeRow = {
+          me_id: user.id,
+          user,
+          session_token: token,
+          konami_lock: previous?.konami_lock ?? Values.assignment(false),
+          app_disable: previous?.app_disable ?? {
+            disabled: false,
+            reason: null,
+          },
+          system_locked: previous?.system_locked ?? false,
+          updated_at: Date.now(),
+        };
         meStore.put(row);
         tx.objectStore(STORES.GLOBALS).put({
           key: GLOBAL_KEYS.ACTIVE_ME,
@@ -816,6 +827,138 @@ export const sessionRepository = {
         });
       },
     );
+  },
+
+  async saveServerState(
+    user: User,
+    state: {
+      konami_locked: boolean;
+      app_disable: AppDisableState;
+      system_locked: boolean;
+    },
+  ): Promise<void> {
+    await runTransaction(
+      [STORES.GLOBALS, STORES.ME],
+      "readwrite",
+      async (tx) => {
+        const globals = tx.objectStore(STORES.GLOBALS);
+        const pointer = (await requestResult(
+          globals.get(GLOBAL_KEYS.ACTIVE_ME),
+        )) as { key: string; value: string | null } | undefined;
+        if (pointer?.value !== user.id) return;
+
+        const meStore = tx.objectStore(STORES.ME);
+        const current = (await requestResult(meStore.get(user.id))) as
+          MeRow | undefined;
+        if (!current?.session_token) return;
+        const proposal = current.konami_lock.proposal;
+        const konamiLock: Assignment<boolean> = proposal
+          ? state.konami_locked === proposal.value
+            ? {
+                base: {
+                  value: state.konami_locked,
+                  updated_at: proposal.updated_at,
+                },
+                proposal: null,
+              }
+            : {
+                base: {
+                  value: state.konami_locked,
+                  updated_at: Math.min(Date.now(), proposal.updated_at - 1),
+                },
+                proposal,
+              }
+          : Values.assignment(state.konami_locked, Date.now());
+        meStore.put({
+          ...current,
+          user,
+          konami_lock: konamiLock,
+          app_disable: state.app_disable,
+          system_locked: state.system_locked,
+          updated_at: Date.now(),
+        } satisfies MeRow);
+      },
+    );
+  },
+
+  async proposeKonamiLock(meId: string, konamiLocked: boolean): Promise<void> {
+    await runTransaction(
+      [STORES.GLOBALS, STORES.ME],
+      "readwrite",
+      async (tx) => {
+        const pointer = (await requestResult(
+          tx.objectStore(STORES.GLOBALS).get(GLOBAL_KEYS.ACTIVE_ME),
+        )) as { key: string; value: string | null } | undefined;
+        if (pointer?.value !== meId) return;
+
+        const store = tx.objectStore(STORES.ME);
+        const latest = (await requestResult(store.get(meId))) as
+          MeRow | undefined;
+        if (!latest?.session_token) return;
+        store.put({
+          ...latest,
+          konami_lock: Values.propose(latest.konami_lock, konamiLocked),
+          updated_at: Date.now(),
+        } satisfies MeRow);
+      },
+    );
+  },
+
+  async acknowledgeKonamiLock(
+    meId: string,
+    operationId: string,
+    konamiLocked: boolean,
+  ): Promise<void> {
+    await runTransaction(STORES.ME, "readwrite", async (tx) => {
+      const store = tx.objectStore(STORES.ME);
+      const current = (await requestResult(store.get(meId))) as
+        MeRow | undefined;
+      const proposal = current?.konami_lock.proposal;
+      if (!current || proposal?.operation_id !== operationId) return;
+      store.put({
+        ...current,
+        konami_lock: {
+          base: {
+            value: konamiLocked,
+            updated_at: proposal.updated_at,
+          },
+          proposal: null,
+        },
+        updated_at: Date.now(),
+      } satisfies MeRow);
+    });
+  },
+
+  async abandonKonamiLockProposal(
+    meId: string,
+    proposedValue: boolean,
+  ): Promise<void> {
+    await runTransaction(STORES.ME, "readwrite", async (tx) => {
+      const store = tx.objectStore(STORES.ME);
+      const current = (await requestResult(store.get(meId))) as
+        MeRow | undefined;
+      if (current?.konami_lock.proposal?.value !== proposedValue) return;
+      store.put({
+        ...current,
+        konami_lock: { ...current.konami_lock, proposal: null },
+        updated_at: Date.now(),
+      } satisfies MeRow);
+    });
+  },
+
+  async pendingKonamiLock(): Promise<{
+    meId: string;
+    value: boolean;
+    operationId: string;
+  } | null> {
+    const current = await this.active();
+    const proposal = current?.konami_lock.proposal;
+    if (!current?.session_token || !proposal) return null;
+    return {
+      meId: current.me_id,
+      value: proposal.value,
+      operationId: proposal.operation_id,
+    };
   },
 
   async clear(): Promise<void> {

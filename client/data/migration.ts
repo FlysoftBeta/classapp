@@ -39,7 +39,7 @@ const HISTORICAL_APPLICATION_STORES = [
   "domain_sync",
 ] as const;
 
-type MigrationPlan = { kind: "nuke-yanked" };
+type MigrationPlan = { kind: "nuke-yanked" } | { kind: "add-me-gate-state" };
 
 interface OpenedDatabase {
   database: IDBDatabase;
@@ -62,13 +62,36 @@ function openDatabase(
       if (!plan) return;
       planApplied = true;
       const db = request.result;
+      const transaction = request.transaction!;
+      if (plan.kind === "add-me-gate-state") {
+        const meStore = transaction.objectStore(STORES.ME);
+        const rows = meStore.getAll();
+        rows.onsuccess = () => {
+          for (const value of rows.result as Array<Record<string, unknown>>) {
+            meStore.put({
+              ...value,
+              konami_lock: {
+                base: { value: false, updated_at: 0 },
+                proposal: null,
+              },
+              app_disable: { disabled: false, reason: null },
+              system_locked: false,
+            });
+          }
+          transaction.objectStore(STORES.GLOBALS).put({
+            key: GLOBAL_KEYS.APP_SCHEMA_VERSION,
+            value: APP_SCHEMA_VERSION,
+          });
+        };
+        return;
+      }
       // Keep the list explicit: a yanked schema must never leave an unknown
       // historical cache table carrying incompatible rows.
       for (const name of HISTORICAL_APPLICATION_STORES) {
         if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
       }
       createApplicationStores(db);
-      request.transaction!.objectStore(STORES.GLOBALS).put({
+      transaction.objectStore(STORES.GLOBALS).put({
         key: GLOBAL_KEYS.APP_SCHEMA_VERSION,
         value: APP_SCHEMA_VERSION,
       });
@@ -131,9 +154,12 @@ export async function openApplicationDatabase(): Promise<IDBDatabase> {
     const nextPhysicalVersion = current.version + 1;
     current.close();
     try {
-      const { database: upgraded } = await openDatabase(nextPhysicalVersion, {
-        kind: "nuke-yanked",
-      });
+      const { database: upgraded } = await openDatabase(
+        nextPhysicalVersion,
+        schemaVersion === 2
+          ? { kind: "add-me-gate-state" }
+          : { kind: "nuke-yanked" },
+      );
       // Shell and app are independent schema owners. If the other owner won
       // this physical version race, our request opens successfully without a
       // versionchange; verify our marker before publishing the connection.

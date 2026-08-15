@@ -1,6 +1,6 @@
 export const RUNTIME_DATABASE = "classapp-runtime";
 
-export const APP_SCHEMA_VERSION = 2;
+export const APP_SCHEMA_VERSION = 3;
 
 export const GLOBAL_KEYS = {
   ACTIVE_ME: "active-me",

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Typography from "@mui/material/Typography";
 import { adminFetchAuditLog, type AdminAuditEntry } from "@/client/api/admin";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
 import { formatDeviceDateTime } from "@/client/lib/deviceTime";
@@ -60,12 +59,6 @@ export function AuditTab() {
   ];
   return (
     <Box>
-      <Typography variant="h5" fontWeight={700}>
-        管理审计
-      </Typography>
-      <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
-        记录已经成功完成的高影响管理动作。凭据、PIN 与其他秘密不会写入详情。
-      </Typography>
       <AdminDataGrid
         rows={data ?? []}
         columns={columns}

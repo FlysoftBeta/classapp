@@ -22,6 +22,7 @@ import { currentActorRepository as offlineRepository } from "@/client/interact/a
 import { syncPendingUserSettings } from "@/client/interact/versionedSettings";
 import { taskStore } from "@/client/hooks/useTaskStore";
 import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
+import { flushPendingClientLock } from "@/client/interact/clientLock";
 
 async function retryLater<T>(
   label: string,
@@ -182,6 +183,7 @@ export async function downloadArticleForOffline(
 }
 
 export async function syncPendingMutations(): Promise<void> {
+  await retryLater("sync.pending.client-lock", flushPendingClientLock());
   await Promise.all(
     [
       syncPendingUserSettings(),

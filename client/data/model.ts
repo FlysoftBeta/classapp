@@ -1,4 +1,10 @@
-import type { ArticleWithMeta, Group, Post, User } from "@/shared/types/api";
+import type {
+  AppDisableState,
+  ArticleWithMeta,
+  Group,
+  Post,
+  User,
+} from "@/shared/types/api";
 import type { ContinuousCoverage } from "./coverage";
 
 export type EvictionTier = 0 | 1 | 2;
@@ -68,6 +74,9 @@ export interface MeRow {
   me_id: string;
   user: User;
   session_token: string | null;
+  konami_lock: Assignment<boolean>;
+  app_disable: AppDisableState;
+  system_locked: boolean;
   updated_at: number;
 }
 

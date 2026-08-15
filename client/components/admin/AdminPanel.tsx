@@ -54,7 +54,6 @@ interface PageDefinition {
   id: PageId;
   section: string;
   label: string;
-  description: string;
   icon: ComponentType<SvgIconProps>;
   roles?: readonly AdminRole[];
 }
@@ -64,30 +63,26 @@ const PAGES: readonly PageDefinition[] = [
     id: "overview",
     section: "工作台",
     label: "概览",
-    description: "职责与入口",
     icon: DashboardIcon,
   },
   {
     id: "users",
-    section: "人员与准入",
-    label: "人员与权限",
-    description: "资料、角色、功能与状态",
+    section: "干员与准入",
+    label: "干员与权限",
     icon: PeopleIcon,
     roles: ["root", "feature_manager", "access_manager", "community_manager"],
   },
   {
     id: "ghosts",
     section: "人员与准入",
-    label: "待注册人员",
-    description: "创建 OOBE 招募凭据",
+    label: "新干员追加",
     icon: PersonAddIcon,
     roles: ["access_manager"],
   },
   {
     id: "clients",
     section: "人员与准入",
-    label: "客户端准入",
-    description: "设备身份与白名单",
+    label: "设备管理",
     icon: DevicesIcon,
     roles: ["access_manager"],
   },
@@ -95,7 +90,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "groups",
     section: "社区",
     label: "群组",
-    description: "群组资料与成员",
     icon: GroupsIcon,
     roles: ["community_manager"],
   },
@@ -103,7 +97,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "ai",
     section: "产品与计费",
     label: "AI 套餐",
-    description: "额度策略、存量与消耗",
     icon: AutoAwesomeIcon,
     roles: ["feature_manager"],
   },
@@ -111,7 +104,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "global",
     section: "系统",
     label: "系统策略",
-    description: "锁定、公告与运行规则",
     icon: SettingsIcon,
     roles: ["operations_assistant", "advanced_community_manager"],
   },
@@ -119,7 +111,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "operations",
     section: "系统",
     label: "运维",
-    description: "备份、HTTPS 与更新",
     icon: EngineeringIcon,
     roles: ["operations"],
   },
@@ -127,7 +118,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "tools",
     section: "系统",
     label: "协助工具",
-    description: "低风险批处理工具",
     icon: BuildIcon,
     roles: ["operations_assistant"],
   },
@@ -135,7 +125,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "incidents",
     section: "系统",
     label: "Incidents",
-    description: "错误聚合与诊断资料",
     icon: ReportProblemIcon,
     roles: ["operations"],
   },
@@ -143,7 +132,6 @@ const PAGES: readonly PageDefinition[] = [
     id: "audit",
     section: "系统",
     label: "管理审计",
-    description: "高影响动作记录",
     icon: HistoryIcon,
     roles: ["root"],
   },
@@ -286,17 +274,12 @@ export default function AdminPanel({
                           color: selected ? "primary.main" : "text.secondary",
                         }}
                       />
-                      <Box>
-                        <Typography
-                          variant="body2"
-                          fontWeight={selected ? 700 : 500}
-                        >
-                          {page.label}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {page.description}
-                        </Typography>
-                      </Box>
+                      <Typography
+                        variant="body2"
+                        fontWeight={selected ? 700 : 500}
+                      >
+                        {page.label}
+                      </Typography>
                     </ButtonBase>
                   );
                 })}
@@ -374,6 +357,11 @@ export default function AdminPanel({
             },
           }}
         >
+          <Box sx={{ mb: 2.5 }}>
+            <Typography variant="h5" fontWeight={700}>
+              {active.label}
+            </Typography>
+          </Box>
           {content}
         </Box>
       </Box>

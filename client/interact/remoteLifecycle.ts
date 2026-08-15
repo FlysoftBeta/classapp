@@ -29,6 +29,7 @@ import { client } from "./remote/client";
 import { session } from "./remote/session";
 import { captureDetachedClientIncident } from "./clientIncidents";
 import { materializePost } from "./posts";
+import { flushPendingClientLock } from "./clientLock";
 
 type RemoteCallbacks = {
   onArticleListUpdated: () => void;
@@ -150,8 +151,9 @@ const recovery = new RecoveryCoordinator();
 let invalidRecovery: Promise<void> | null = null;
 
 async function refreshState(touch = true): Promise<void> {
+  await flushPendingClientLock();
   const payload = await probeAppState(touch ? undefined : { touch: false });
-  if (payload) applyAppState(payload);
+  if (payload) await applyAppState(payload);
 }
 
 export function recoverInvalidSession(): void {
@@ -297,10 +299,47 @@ export function startHeartbeat(): () => void {
   return () => clearInterval(timer);
 }
 
-export function applyAppState(payload: AppStatePayload): void {
+export async function applyAppState(payload: AppStatePayload): Promise<void> {
   if (payload.client_invalid) {
     session.clearActive();
-    void sessionRepository.clear();
+    await sessionRepository
+      .clear()
+      .catch((error) =>
+        captureDetachedClientIncident("app-state.clear-invalid", error),
+      );
   }
-  useApplicationStore.getState().applyServerState(payload);
+  const cached = await sessionRepository.active().catch((error) => {
+    captureDetachedClientIncident("app-state.read-local", error);
+    return null;
+  });
+  const cachedProposal = cached?.konami_lock.proposal ?? null;
+  const localProposal =
+    !payload.client_invalid &&
+    payload.user?.id === cached?.me_id &&
+    cachedProposal
+      ? cachedProposal.value
+      : null;
+  const effectivePayload =
+    localProposal === null
+      ? payload
+      : { ...payload, konami_locked: localProposal };
+  const store = useApplicationStore.getState();
+  store.applyServerState(effectivePayload);
+  const applied = useApplicationStore.getState();
+  if (
+    payload.session_valid &&
+    payload.user &&
+    applied.user?.id === payload.user.id &&
+    applied.token
+  ) {
+    void sessionRepository
+      .saveServerState(payload.user, {
+        konami_locked: payload.konami_locked,
+        app_disable: payload.app,
+        system_locked: payload.flags.system_locked,
+      })
+      .catch((error) =>
+        captureDetachedClientIncident("app-state.persist", error),
+      );
+  }
 }

@@ -52,19 +52,19 @@ in “settings.”
 
 ## Current store families
 
-| Family                                                                                                      | Purpose                                                 |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `domain_groups`, `domain_dms`, `domain_posts`, `domain_articles`, `domain_article_segments`, `domain_users` | shared objective projection                             |
-| `domain_me`                                                                                                 | locally known authenticated users and session bootstrap |
-| `domain_me_access`                                                                                          | actor access, capability and snapshot projections       |
-| `domain_me_conv_state`                                                                                      | read/pin/mute/draft base + proposal                     |
-| `domain_me_article_state`                                                                                   | bookmark/resume/furthest base + proposal                |
-| `domain_me_state`                                                                                           | versioned user settings                                 |
-| `domain_sync`                                                                                               | coverage/revision/snapshot proofs                       |
-| `domain_save`                                                                                               | per-claimant retention intent and materialization state |
-| `files`, `file_heads`                                                                                       | extent generations                                      |
-| `globals`                                                                                                   | application initialization markers only                 |
-| `shell_bundles`, `shell_kv`                                                                                 | independently owned Shell bootstrap stores              |
+| Family                                                                                                      | Purpose                                                                             |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `domain_groups`, `domain_dms`, `domain_posts`, `domain_articles`, `domain_article_segments`, `domain_users` | shared objective projection                                                         |
+| `domain_me`                                                                                                 | locally known authenticated users, session bootstrap, and last confirmed gate state |
+| `domain_me_access`                                                                                          | actor access, capability and snapshot projections                                   |
+| `domain_me_conv_state`                                                                                      | read/pin/mute/draft base + proposal                                                 |
+| `domain_me_article_state`                                                                                   | bookmark/resume/furthest base + proposal                                            |
+| `domain_me_state`                                                                                           | versioned user settings                                                             |
+| `domain_sync`                                                                                               | coverage/revision/snapshot proofs                                                   |
+| `domain_save`                                                                                               | per-claimant retention intent and materialization state                             |
+| `files`, `file_heads`                                                                                       | extent generations                                                                  |
+| `globals`                                                                                                   | application initialization markers only                                             |
+| `shell_bundles`, `shell_kv`                                                                                 | independently owned Shell bootstrap stores                                          |
 
 The exact schema may change. The classifications and ownership rules are the
 stable design.
@@ -93,6 +93,36 @@ event for the same entity must use the same normalization/merge entry point.
 React receives a presentation DTO assembled from normalized rows. It must not
 persist aggregate screens, because duplicated metadata then drifts and one
 mutable profile change can make an “immutable” object appear changed.
+
+The active `domain_me` row also retains the server's last confirmed client
+lock, effective per-user application disable state, and global system-lock
+flag. Offline warm start restores that gate instead of assuming an unlocked
+application. The effective disable state is stored separately from the global
+flag because administrators may remain allowed through a system lock. These
+values are reconstructible projections: they never authorize server work and
+an online application-state probe replaces them.
+
+A local lock is safety-monotonic: it takes effect and becomes durable without
+waiting for transport. The row stores it through the normal
+`base + proposal + operation_id` assignment model until reconnect sends it to
+the server. Only the response for the proposal it sent may acknowledge that
+operation; a newer proposal survives an older response. Reconnect flushes the
+proposal before probing application state, and a server-unlocked base cannot
+override the proposal. Unlock uses the same offline proposal path: it leaves
+the client lock immediately, while any separately cached effective user/system
+disable state still gates the App. Reconnect later confirms the unlock with the
+server.
+
+Application schema v3 adds these fields to `domain_me`. The v2-to-v3 upgrade
+updates existing user rows and the semantic marker in one versionchange
+transaction without rebuilding other application stores, so drafts, pending
+proposals, retention choices, cached content, and Shell stores survive. Because
+v2 did not retain gate evidence, migrated rows initially use the prior
+unlocked-start behavior; the first successful online state probe replaces those
+defaults. Unknown or yanked semantic versions still use the reconstructible
+application-store rebuild path. The existing physical-version retry handles a
+concurrent Shell upgrade, and the standard blocked-upgrade Incident/UX remains
+the failure boundary.
 
 Missing objective presentation metadata degrades neutrally and is repairable by
 a later side bundle. It must not grant access or manufacture identity.

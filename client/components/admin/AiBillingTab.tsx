@@ -96,14 +96,6 @@ export function AiBillingTab() {
 
   return (
     <Box sx={{ maxWidth: 1100 }}>
-      <Typography variant="h5" fontWeight={700}>
-        AI 套餐与计费
-      </Typography>
-      <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-        日额度与周额度是同时生效的会计窗口，不区分工作日与周末。套餐用量面向用户显示为百分比；额外充值按
-        credits 显示。100 credits 对应 1 CNY。
-      </Typography>
-
       <Box
         sx={{
           display: "grid",

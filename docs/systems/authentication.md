@@ -52,10 +52,14 @@ offline UI can appear. It then waits for the server when possible and performs:
 5. PIN login or OOBE when required;
 6. actor-scoped initial resource refresh.
 
-Local session data is a boot hint, not proof of current server access. A banned,
-deleted, or invalidated identity is cleared when the authoritative gate rejects
-it. Offline startup may show cached actor data but cannot perform server
-mutations.
+Local session data is a boot hint, not proof of current server access. Its
+actor row includes the last confirmed client lock, effective user disable
+state, and global system-lock flag, so an offline warm start preserves the last
+known gate rather than assuming the application is unlocked. The effective
+state remains distinct from the global flag because administrators can bypass
+a system lock. A banned, deleted, or invalidated identity is cleared when the
+authoritative gate rejects it. Offline startup may show cached actor data but
+cannot perform server mutations.
 
 ## PIN and OOBE
 
