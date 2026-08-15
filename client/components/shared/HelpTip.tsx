@@ -3,6 +3,8 @@ import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import Collapse from "@mui/material/Collapse";
+import Paper from "@mui/material/Paper";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import { flexGap } from "@/client/lib/css";
 
@@ -101,6 +103,43 @@ export function LabelWithHelp({
     >
       <Box component="span">{label}</Box>
       <HelpTip title={help} />
+    </Box>
+  );
+}
+
+/** A substantial process explanation that stays behind a help IconButton. */
+export function HelpSection({
+  label = "了解工作原理",
+  children,
+}: {
+  label?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Box sx={{ mb: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", ...flexGap(0.5) }}>
+        <Typography variant="caption" color="text.secondary">
+          {label}
+        </Typography>
+        <IconButton
+          size="small"
+          aria-label={open ? "收起帮助" : "展开帮助"}
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          sx={{ color: open ? "primary.main" : "text.disabled" }}
+        >
+          <HelpOutlineIcon fontSize="small" />
+        </IconButton>
+      </Box>
+      <Collapse in={open}>
+        <Paper
+          variant="outlined"
+          sx={{ mt: 0.75, p: 1.5, bgcolor: "action.hover" }}
+        >
+          {children}
+        </Paper>
+      </Collapse>
     </Box>
   );
 }

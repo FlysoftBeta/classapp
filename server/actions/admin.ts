@@ -47,48 +47,30 @@ export async function adminCreateUserAction(
   });
 }
 
-export async function adminUpdateUserAction(
-  input: ActionInput<"adminUpdateUserAction">,
+export async function adminMutateUsersAction(
+  input: ActionInput<"adminMutateUsersAction">,
 ) {
   return withActionScope(async (scope) => {
     const users = scope.facades().users();
-    return {
-      user: await users.update({
-        userId: expectString(input.userId, "干员不存在"),
-        handle: input.handle,
-        username: input.username,
-        features: input.features,
-        roles: input.roles,
-        pin: input.pin,
-        mute_hours:
-          input.mute_hours !== undefined
-            ? parsePositiveHours(input.mute_hours, "mute_hours")
-            : undefined,
-        unmute: input.unmute,
-        ban_hours:
-          input.ban_hours !== undefined
-            ? parsePositiveHours(input.ban_hours, "ban_hours")
-            : undefined,
-        unban: input.unban,
-      }),
-    };
-  });
-}
-
-export async function adminBatchUpdateUserFeaturesAction(
-  input: ActionInput<"adminBatchUpdateUserFeaturesAction">,
-) {
-  return withActionScope(async (scope) =>
-    scope.facades().users().batchUpdateFeatures(input.updates),
-  );
-}
-
-export async function adminDeleteUserAction(
-  input: ActionInput<"adminDeleteUserAction">,
-) {
-  return withActionScope(async (scope) => {
-    const users = scope.facades().users();
-    await users.remove(expectString(input.userId, "干员不存在"), input.mode);
+    const ids = new Set<string>();
+    for (const { removal, ...change } of input.changes) {
+      if (ids.has(change.userId)) throw new PublicError("请求包含重复干员");
+      ids.add(change.userId);
+      if (removal) await users.remove(change.userId, removal);
+      else {
+        await users.update({
+          ...change,
+          mute_hours:
+            change.mute_hours !== undefined
+              ? parsePositiveHours(change.mute_hours, "mute_hours")
+              : undefined,
+          ban_hours:
+            change.ban_hours !== undefined
+              ? parsePositiveHours(change.ban_hours, "ban_hours")
+              : undefined,
+        });
+      }
+    }
     return { ok: true as const };
   });
 }
@@ -139,51 +121,35 @@ export async function adminCreateGroupAction(
   });
 }
 
-export async function adminUpdateGroupAction(
-  input: ActionInput<"adminUpdateGroupAction">,
+export async function adminMutateGroupsAction(
+  input: ActionInput<"adminMutateGroupsAction">,
 ) {
   return withActionScope(async (scope) => {
     const groups = scope.facades().groups();
-    const groupId = expectString(input.groupId, "群组不存在");
-    if (input.action === "add_member") {
-      await groups.adminAddMember(
-        groupId,
-        expectString(input.user_id, "缺少 user_id"),
-      );
-      return { ok: true as const };
+    const ids = new Set<string>();
+    for (const {
+      groupId,
+      delete: shouldDelete,
+      memberAction,
+      userId,
+      ...changes
+    } of input.changes) {
+      if (ids.has(groupId) && !memberAction)
+        throw new PublicError("请求包含重复群组");
+      ids.add(groupId);
+      if (shouldDelete) await groups.adminDelete(groupId);
+      else if (memberAction === "add") {
+        await groups.adminAddMember(
+          groupId,
+          expectString(userId, "缺少 userId"),
+        );
+      } else if (memberAction === "remove") {
+        await groups.adminRemoveMember(
+          groupId,
+          expectString(userId, "缺少 userId"),
+        );
+      } else await groups.adminUpdate(groupId, changes);
     }
-    if (input.action === "remove_member") {
-      await groups.adminRemoveMember(
-        groupId,
-        expectString(input.user_id, "缺少 user_id"),
-      );
-      return { ok: true as const };
-    }
-    return {
-      group: await groups.adminUpdate(groupId, {
-        handle: input.handle,
-        name: input.name,
-        password: input.password,
-        clearPassword: input.clearPassword,
-        type: input.type,
-        discoverable: input.discoverable,
-        members_hidden: input.members_hidden,
-        admin_only: input.admin_only,
-        no_leave: input.no_leave,
-        parent_group_id: input.parent_group_id,
-      }),
-    };
-  });
-}
-
-export async function adminDeleteGroupAction(
-  groupId: ActionInput<"adminDeleteGroupAction">,
-) {
-  return withActionScope(async (scope) => {
-    await scope
-      .facades()
-      .groups()
-      .adminDelete(expectString(groupId, "群组不存在"));
     return { ok: true as const };
   });
 }
@@ -202,52 +168,36 @@ export async function adminFetchClientsAction(
   });
 }
 
-export async function adminToggleClientLockAction(
-  input: ActionInput<"adminToggleClientLockAction">,
+export async function adminMutateClientsAction(
+  input: ActionInput<"adminMutateClientsAction">,
 ) {
   return withActionScope(async (scope) => {
-    const id = expectString(input.id, "缺少 id");
-    return scope
-      .facades()
-      .administration()
-      .setClientLock(id, input.action === "lock");
-  });
-}
-
-export async function adminDeleteClientAction(
-  id: ActionInput<"adminDeleteClientAction">,
-) {
-  return withActionScope(async (scope) => {
-    return scope
-      .facades()
-      .administration()
-      .deleteClient(expectString(id, "缺少 id"));
-  });
-}
-
-export async function adminPromoteClientAction(
-  id: ActionInput<"adminPromoteClientAction">,
-) {
-  return withActionScope(async (scope) => {
-    return scope
-      .facades()
-      .administration()
-      .promoteClient(expectString(id, "缺少 id"));
-  });
-}
-
-export async function adminUpdateClientAction(
-  input: ActionInput<"adminUpdateClientAction">,
-) {
-  return withActionScope(async (scope) => {
-    return scope
-      .facades()
-      .administration()
-      .updateClient(expectString(input.id, "缺少 id"), {
-        remark: input.remark,
-        whitelisted: input.whitelisted,
-        bound_user_id: input.bound_user_id,
-      });
+    const administration = scope.facades().administration();
+    const ids = new Set<string>();
+    for (const update of input.changes) {
+      if (ids.has(update.id)) throw new PublicError("请求包含重复客户端");
+      ids.add(update.id);
+      if (update.delete) {
+        administration.deleteClient(update.id);
+        continue;
+      }
+      if (update.promote) administration.promoteClient(update.id);
+      if (update.locked !== undefined) {
+        administration.setClientLock(update.id, update.locked);
+      }
+      if (
+        update.remark !== undefined ||
+        update.whitelisted !== undefined ||
+        update.bound_user_id !== undefined
+      ) {
+        administration.updateClient(update.id, {
+          remark: update.remark,
+          whitelisted: update.whitelisted,
+          bound_user_id: update.bound_user_id,
+        });
+      }
+    }
+    return { ok: true as const };
   });
 }
 

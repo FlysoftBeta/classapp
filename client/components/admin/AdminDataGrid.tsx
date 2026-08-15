@@ -6,10 +6,14 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControlLabel from "@mui/material/FormControlLabel";
 import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
+import IconButton from "@mui/material/IconButton";
+import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
-import ViewColumnIcon from "@mui/icons-material/ViewColumn";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
 
 export interface AdminGridColumn<Row> {
   id: string;
@@ -17,6 +21,8 @@ export interface AdminGridColumn<Row> {
   width: number;
   render: (row: Row) => ReactNode;
   hiddenByDefault?: boolean;
+  hideable?: boolean;
+  pinned?: "start" | "end";
   longText?: (row: Row) => string | null | undefined;
 }
 
@@ -27,6 +33,8 @@ export function AdminDataGrid<Row>({
   onRowClick,
   height = 520,
   empty = "暂无数据",
+  selection,
+  bulkActionBar,
 }: {
   rows: readonly Row[];
   columns: readonly AdminGridColumn<Row>[];
@@ -34,6 +42,12 @@ export function AdminDataGrid<Row>({
   onRowClick?: (row: Row) => void;
   height?: number;
   empty?: ReactNode;
+  selection?: {
+    selectedKeys: ReadonlySet<string | number>;
+    onChange: (keys: Set<string | number>) => void;
+    isRowSelectable?: (row: Row) => boolean;
+  };
+  bulkActionBar?: ReactNode;
 }) {
   const [hidden, setHidden] = useState(
     () =>
@@ -43,7 +57,10 @@ export function AdminDataGrid<Row>({
           .map((column) => column.id),
       ),
   );
-  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [menu, setMenu] = useState<{
+    anchor: HTMLElement;
+    columnId: string;
+  } | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [expanded, setExpanded] = useState<{
     title: ReactNode;
@@ -53,18 +70,60 @@ export function AdminDataGrid<Row>({
     () => columns.filter((column) => !hidden.has(column.id)),
     [columns, hidden],
   );
-  const rowHeight = 52;
+  const rowHeight = 44;
   const overscan = 6;
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const count = Math.ceil(height / rowHeight) + overscan * 2;
   const end = Math.min(rows.length, start + count);
-  const template = visible.map((column) => `${column.width}px`).join(" ");
+  const selectableRows = selection
+    ? rows.filter((row) => selection.isRowSelectable?.(row) !== false)
+    : [];
+  const allSelected =
+    selectableRows.length > 0 &&
+    selectableRows.every((row) => selection?.selectedKeys.has(rowKey(row)));
+  const someSelected = selectableRows.some((row) =>
+    selection?.selectedKeys.has(rowKey(row)),
+  );
+  const selectionWidth = selection ? 42 : 0;
+  const template = [
+    ...(selection ? [`${selectionWidth}px`] : []),
+    ...visible.map((column) => `${column.width}px`),
+  ].join(" ");
   const contentWidth = visible.reduce(
     (total, column) => total + column.width,
-    0,
+    selectionWidth,
   );
 
-  const cell = (column: AdminGridColumn<Row>, row: Row, index: number) => {
+  const pinnedStyle = (column: AdminGridColumn<Row>, header = false) => {
+    const pin =
+      column.pinned ??
+      (column.id === columns[0]?.id
+        ? "start"
+        : column.id === "actions"
+          ? "end"
+          : undefined);
+    if (pin === "end") {
+      return {
+        position: "sticky" as const,
+        right: 0,
+        zIndex: header ? 8 : 3,
+        bgcolor: "background.paper",
+        boxShadow: "-2px 0 4px rgba(0,0,0,0.08)",
+      };
+    }
+    if (pin === "start") {
+      return {
+        position: "sticky" as const,
+        left: selectionWidth,
+        zIndex: header ? 7 : 2,
+        bgcolor: "background.paper",
+        boxShadow: "2px 0 4px rgba(0,0,0,0.08)",
+      };
+    }
+    return {};
+  };
+
+  const cell = (column: AdminGridColumn<Row>, row: Row) => {
     const text = column.longText?.(row);
     return (
       <Box
@@ -86,13 +145,7 @@ export function AdminDataGrid<Row>({
           overflow: "hidden",
           borderRight: "1px solid",
           borderColor: "divider",
-          ...(index === 0 && {
-            position: "sticky",
-            left: 0,
-            zIndex: 2,
-            bgcolor: "background.paper",
-            boxShadow: "2px 0 3px rgba(0,0,0,0.05)",
-          }),
+          ...pinnedStyle(column),
           ...(text && { cursor: "zoom-in" }),
         }}
       >
@@ -112,42 +165,39 @@ export function AdminDataGrid<Row>({
   };
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
-        <Button
-          size="small"
-          startIcon={<ViewColumnIcon />}
-          onClick={(event) => setMenuAnchor(event.currentTarget)}
-        >
-          选择列
-        </Button>
-      </Box>
-      <Menu
-        anchorEl={menuAnchor}
-        open={!!menuAnchor}
-        onClose={() => setMenuAnchor(null)}
-      >
-        {columns.map((column, index) => (
-          <FormControlLabel
+    <Box sx={{ position: "relative" }}>
+      <Menu anchorEl={menu?.anchor} open={!!menu} onClose={() => setMenu(null)}>
+        <Typography variant="overline" sx={{ px: 2, color: "text.secondary" }}>
+          显示列
+        </Typography>
+        {columns.map((column) => (
+          <MenuItem
             key={column.id}
-            sx={{ display: "flex", px: 1.25, mx: 0 }}
-            control={
+            dense
+            disabled={
+              column.hideable === false ||
+              column.pinned === "start" ||
+              column.id === columns[0]?.id
+            }
+            onClick={() =>
+              setHidden((current) => {
+                const next = new Set(current);
+                if (next.has(column.id)) next.delete(column.id);
+                else next.add(column.id);
+                return next;
+              })
+            }
+          >
+            <ListItemIcon>
               <Checkbox
                 size="small"
                 checked={!hidden.has(column.id)}
-                disabled={index === 0}
-                onChange={(_, checked) =>
-                  setHidden((current) => {
-                    const next = new Set(current);
-                    if (checked) next.delete(column.id);
-                    else next.add(column.id);
-                    return next;
-                  })
-                }
+                tabIndex={-1}
+                disableRipple
               />
-            }
-            label={column.label}
-          />
+            </ListItemIcon>
+            <ListItemText>{column.label}</ListItemText>
+          </MenuItem>
         ))}
       </Menu>
 
@@ -182,7 +232,37 @@ export function AdminDataGrid<Row>({
             fontWeight: 700,
           }}
         >
-          {visible.map((column, index) => (
+          {selection ? (
+            <Box
+              role="columnheader"
+              sx={{
+                position: "sticky",
+                left: 0,
+                zIndex: 9,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: "background.paper",
+                borderRight: "1px solid",
+                borderColor: "divider",
+              }}
+            >
+              <Checkbox
+                size="small"
+                checked={allSelected}
+                indeterminate={someSelected && !allSelected}
+                inputProps={{ "aria-label": "选择当前页全部条目" }}
+                onChange={(_, checked) =>
+                  selection.onChange(
+                    checked
+                      ? new Set(selectableRows.map((row) => rowKey(row)))
+                      : new Set(),
+                  )
+                }
+              />
+            </Box>
+          ) : null}
+          {visible.map((column) => (
             <Box
               key={column.id}
               role="columnheader"
@@ -192,18 +272,28 @@ export function AdminDataGrid<Row>({
                 alignItems: "center",
                 borderRight: "1px solid",
                 borderColor: "divider",
-                ...(index === 0 && {
-                  position: "sticky",
-                  left: 0,
-                  zIndex: 6,
-                  bgcolor: "background.paper",
-                  boxShadow: "2px 0 3px rgba(0,0,0,0.05)",
-                }),
+                minWidth: 0,
+                ...pinnedStyle(column, true),
               }}
             >
-              <Typography variant="caption" fontWeight={700}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                noWrap
+                sx={{ flex: 1 }}
+              >
                 {column.label}
               </Typography>
+              <IconButton
+                size="small"
+                aria-label={`管理${typeof column.label === "string" ? column.label : "此"}列`}
+                onClick={(event) =>
+                  setMenu({ anchor: event.currentTarget, columnId: column.id })
+                }
+                sx={{ p: 0.25, ml: 0.25 }}
+              >
+                <MoreVertIcon sx={{ fontSize: 16 }} />
+              </IconButton>
             </Box>
           ))}
         </Box>
@@ -239,9 +329,36 @@ export function AdminDataGrid<Row>({
                     },
                   }}
                 >
-                  {visible.map((column, columnIndex) =>
-                    cell(column, row, columnIndex),
-                  )}
+                  {selection ? (
+                    <Box
+                      sx={{
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        bgcolor: "background.paper",
+                        borderRight: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Checkbox
+                        size="small"
+                        disabled={selection.isRowSelectable?.(row) === false}
+                        checked={selection.selectedKeys.has(rowKey(row))}
+                        inputProps={{ "aria-label": "选择此条目" }}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(_, checked) => {
+                          const next = new Set(selection.selectedKeys);
+                          if (checked) next.add(rowKey(row));
+                          else next.delete(rowKey(row));
+                          selection.onChange(next);
+                        }}
+                      />
+                    </Box>
+                  ) : null}
+                  {visible.map((column) => cell(column, row))}
                 </Box>
               );
             })}
@@ -254,6 +371,26 @@ export function AdminDataGrid<Row>({
           </Box>
         )}
       </Box>
+      {bulkActionBar ? (
+        <Paper
+          elevation={6}
+          sx={{
+            position: "absolute",
+            left: 8,
+            bottom: 8,
+            zIndex: 12,
+            display: "inline-flex",
+            alignItems: "center",
+            width: "max-content",
+            maxWidth: "calc(100% - 16px)",
+            overflowX: "auto",
+            px: 1.5,
+            py: 0.75,
+          }}
+        >
+          {bulkActionBar}
+        </Paper>
+      ) : null}
 
       <Dialog
         open={!!expanded}

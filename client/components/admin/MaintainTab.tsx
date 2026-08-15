@@ -32,6 +32,8 @@ import {
 } from "@/client/api/admin";
 import { formatBytes } from "@/shared/bytes";
 import type { ActionData } from "@/shared/protocol/actions";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
+import { SelectionActionBar, SelectionActionIcon } from "./SelectionActionBar";
 
 type BackupFile = ActionData<"adminFetchBackupsAction">["backups"][number];
 type UpdateStatus = ActionData<"adminFetchUpdateStatusAction">;
@@ -46,6 +48,9 @@ export function MaintainTab({ token }: { token: string }) {
   const [backups, setBackups] = useState<BackupFile[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+  const [selectedBackupNames, setSelectedBackupNames] = useState<Set<string>>(
+    new Set(),
+  );
 
   const [deployFile, setDeployFile] = useState<File | null>(null);
   const [deploying, setDeploying] = useState(false);
@@ -133,6 +138,59 @@ export function MaintainTab({ token }: { token: string }) {
     const res = await adminDeleteBackup(name);
     if (res.ok) fetchBackups();
   };
+  const handleDeleteSelectedBackups = async () => {
+    if (!confirm(`确认删除选中的 ${selectedBackupNames.size} 份备份？`)) return;
+    await Promise.all([...selectedBackupNames].map(adminDeleteBackup));
+    setSelectedBackupNames(new Set());
+    await fetchBackups();
+  };
+  const backupColumns: AdminGridColumn<BackupFile>[] = [
+    {
+      id: "name",
+      label: "文件名",
+      width: 360,
+      pinned: "start",
+      hideable: false,
+      render: (backup) => backup.name,
+      longText: (backup) => backup.name,
+    },
+    {
+      id: "size",
+      label: "大小",
+      width: 130,
+      render: (backup) => formatBytes(backup.size),
+    },
+    {
+      id: "created",
+      label: "时间",
+      width: 180,
+      render: (backup) => backup.created_at.slice(0, 16),
+    },
+    {
+      id: "actions",
+      label: "操作",
+      width: 130,
+      pinned: "end",
+      hideable: false,
+      render: (backup) => (
+        <Box sx={{ display: "flex", alignItems: "center" }}>
+          <Button
+            size="small"
+            onClick={() => handleDownloadBackup(backup.name)}
+          >
+            下载
+          </Button>
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() => void handleDeleteBackup(backup.name)}
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      ),
+    },
+  ];
 
   const startRestartPoll = () => {
     const poll = setInterval(async () => {
@@ -374,51 +432,35 @@ export function MaintainTab({ token }: { token: string }) {
         </Box>
         {backupsLoading ? (
           <CircularProgress size={20} />
-        ) : backups.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            暂无备份
-          </Typography>
         ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>文件名</TableCell>
-                <TableCell>大小</TableCell>
-                <TableCell>时间</TableCell>
-                <TableCell align="right">操作</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {backups.map((b) => (
-                <TableRow key={b.name}>
-                  <TableCell sx={{ fontSize: 12, fontFamily: "monospace" }}>
-                    {b.name}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>
-                    {formatBytes(b.size)}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>
-                    {b.created_at.slice(0, 16)}
-                  </TableCell>
-                  <TableCell align="right">
-                    <Button
-                      size="small"
-                      onClick={() => handleDownloadBackup(b.name)}
-                    >
-                      下载
-                    </Button>
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => handleDeleteBackup(b.name)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <AdminDataGrid
+            rows={backups}
+            columns={backupColumns}
+            rowKey={(backup) => backup.name}
+            height={Math.min(360, 44 * Math.max(backups.length, 3) + 44)}
+            empty="暂无备份"
+            selection={{
+              selectedKeys: selectedBackupNames,
+              onChange: (keys) =>
+                setSelectedBackupNames(new Set([...keys].map(String))),
+            }}
+            bulkActionBar={
+              selectedBackupNames.size ? (
+                <SelectionActionBar
+                  label={`已选 ${selectedBackupNames.size} 份备份`}
+                  onClear={() => setSelectedBackupNames(new Set())}
+                >
+                  <SelectionActionIcon
+                    label="删除备份"
+                    color="error"
+                    onClick={() => void handleDeleteSelectedBackups()}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </SelectionActionIcon>
+                </SelectionActionBar>
+              ) : null
+            }
+          />
         )}
       </Box>
 

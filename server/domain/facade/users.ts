@@ -19,7 +19,6 @@ import type { UserConfigService } from "@/server/services/userConfig";
 import type { AiService } from "@/server/services/ai/aiService";
 import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import { PublicError } from "@/server/services/incidentService";
-import type { UserFeatures } from "@/shared/features";
 import type { AuditService } from "@/server/services/auditService";
 import type { UnitOfWork } from "@/server/runtime/unitOfWork";
 
@@ -60,25 +59,6 @@ export class UserActorFacade {
         targetId: user.id,
       });
       return user;
-    });
-  }
-
-  batchUpdateFeatures(
-    updates: Array<{ userId: string; features: UserFeatures }>,
-  ) {
-    const admin = this.actor.requireRole("feature_manager");
-    return this.unitOfWork.run(() => {
-      const users = this.users.updateFeaturesBatch(updates);
-      if (updates.some((update) => update.userId === admin.id)) {
-        this.actor.invalidateFacts();
-      }
-      this.audit.record({
-        actorId: admin.id,
-        action: "user.features.batch_update",
-        targetKind: "user-set",
-        details: { user_ids: users.map((user) => user.id) },
-      });
-      return { users };
     });
   }
 

@@ -8,10 +8,7 @@ const {
   adminCreateGroupAction,
   adminCreateUserAction,
   adminDeleteBackupAction,
-  adminDeleteClientAction,
   adminDeleteGhostUserAction,
-  adminDeleteGroupAction,
-  adminDeleteUserAction,
   adminFetchBackupsAction,
   adminFetchTeachDocumentsAction,
   adminFetchClientsAction,
@@ -21,31 +18,23 @@ const {
   adminFetchHttpsStatusAction,
   adminFetchUpdateStatusAction,
   adminFetchUsersAction,
-  adminPromoteClientAction,
   adminRollbackAction,
   adminRunToolAction,
   adminCleanupTeachDocumentsAction,
-  adminToggleClientLockAction,
-  adminUpdateClientAction,
   adminUpdateConfigAction,
-  adminUpdateGroupAction,
-  adminUpdateUserAction,
-  adminBatchUpdateUserFeaturesAction,
+  adminMutateUsersAction,
+  adminMutateGroupsAction,
+  adminMutateClientsAction,
   adminWhitelistCurrentClientAction,
   adminFetchIncidentGroupsAction,
   adminFetchIncidentDetailsAction,
   adminTestIncidentAction,
   adminFetchAiCreditsAction,
-  adminTopUpAiCreditsAction,
   adminFetchAiBillingAction,
   adminUpdateAiBillingPolicyAction,
-  adminAssignAiPlanAction,
+  adminAssignAiCreditsAction,
   adminFetchAuditLogAction,
 } = client.actions;
-
-export type AdminMutationData = {
-  error?: string;
-};
 
 export type AdminToolData = {
   message?: string;
@@ -84,35 +73,12 @@ export async function adminCreateUser(
   };
 }
 
-export async function adminUpdateUser(
-  userId: string,
-  body: Omit<ActionArgs<"adminUpdateUserAction">[0], "userId">,
+export async function adminMutateUsers(
+  changes: ActionArgs<"adminMutateUsersAction">[0]["changes"],
 ) {
-  const result = await adminUpdateUserAction({
-    userId,
-    ...body,
-  });
-  const res = observeActionResult(result);
-  return {
-    res,
-    data: result.ok ? result.data : { error: result.error.message },
-  };
-}
-
-export async function adminBatchUpdateUserFeatures(
-  updates: ActionArgs<"adminBatchUpdateUserFeaturesAction">[0]["updates"],
-) {
-  const result = await adminBatchUpdateUserFeaturesAction({ updates });
+  const result = await adminMutateUsersAction({ changes });
   observeActionResult(result);
   if (!result.ok) throw new Error(result.error.message);
-  return result.data.users;
-}
-
-export async function adminDeleteUser(
-  userId: string,
-  mode: "purge" | "deactivate",
-) {
-  return observeActionResult(await adminDeleteUserAction({ userId, mode }));
 }
 
 export async function adminSearchUsers(query: string) {
@@ -126,18 +92,6 @@ export async function adminFetchAiCredits(userId: string) {
   observeActionResult(result);
   if (!result.ok) throw new Error(result.error.message);
   return result.data;
-}
-
-export async function adminTopUpAiCredits(input: {
-  userId: string;
-  amount: number;
-  idempotencyKey: string;
-  note: string;
-}) {
-  const result = await adminTopUpAiCreditsAction(input);
-  observeActionResult(result);
-  if (!result.ok) throw new Error(result.error.message);
-  return result.data.credits;
 }
 
 export async function adminFetchAiBilling() {
@@ -156,13 +110,28 @@ export async function adminUpdateAiBillingPolicy(
   return result.data;
 }
 
-export async function adminAssignAiPlan(
-  input: ActionArgs<"adminAssignAiPlanAction">[0],
+export async function adminAssignAiCredits(
+  input: Omit<ActionArgs<"adminAssignAiCreditsAction">[0], "targets"> & {
+    userIds: string[];
+  },
 ) {
-  const result = await adminAssignAiPlanAction(input);
+  const createIdempotencyKey = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  };
+  const { userIds, ...assignment } = input;
+  const result = await adminAssignAiCreditsAction({
+    ...assignment,
+    targets: userIds.map((userId) => ({
+      userId,
+      idempotencyKey: createIdempotencyKey(),
+    })),
+  });
   observeActionResult(result);
   if (!result.ok) throw new Error(result.error.message);
-  return result.data.credits;
 }
 
 // ── Ghost users ─────────────────────────────────────────────────────────────
@@ -208,46 +177,19 @@ export async function adminCreateGroup(
   };
 }
 
-export async function adminUpdateGroup(
-  groupId: string,
-  body: Omit<ActionArgs<"adminUpdateGroupAction">[0], "groupId">,
+export async function adminMutateGroups(
+  changes: ActionArgs<"adminMutateGroupsAction">[0]["changes"],
 ) {
-  const result = await adminUpdateGroupAction({
-    groupId,
-    ...body,
-  });
-  const res = observeActionResult(result);
-  return {
-    res,
-    data: result.ok ? result.data : { error: result.error.message },
-  };
+  const result = await adminMutateGroupsAction({ changes });
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
 }
-
-export async function adminDeleteGroup(groupId: string) {
-  return observeActionResult(await adminDeleteGroupAction(groupId));
-}
-
-export async function adminAddGroupMember(groupId: string, userId: string) {
-  const result = await adminUpdateGroupAction({
-    groupId,
-    action: "add_member",
-    user_id: userId,
-  });
-  const res = observeActionResult(result);
-  const data: AdminMutationData = result.ok
-    ? {}
-    : { error: result.error.message };
-  return { res, data };
-}
-
-export async function adminRemoveGroupMember(groupId: string, userId: string) {
-  return observeActionResult(
-    await adminUpdateGroupAction({
-      groupId,
-      action: "remove_member",
-      user_id: userId,
-    }),
-  );
+export async function adminMutateClients(
+  changes: ActionArgs<"adminMutateClientsAction">[0]["changes"],
+) {
+  const result = await adminMutateClientsAction({ changes });
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
 }
 
 // ── Clients ───────────────────────────────────────────────────────────────────
@@ -262,30 +204,6 @@ export async function adminFetchClients(offset = 0, query = "") {
     throw new Error(result.error.message);
   }
   return result.data;
-}
-
-export async function adminDeleteClient(id: string) {
-  return observeActionResult(await adminDeleteClientAction(id));
-}
-
-export async function adminToggleClientLock(id: string, lock: boolean) {
-  return observeActionResult(
-    await adminToggleClientLockAction({ id, action: lock ? "lock" : "unlock" }),
-  );
-}
-
-export async function adminPromoteClient(id: string) {
-  return observeActionResult(await adminPromoteClientAction(id));
-}
-
-export async function adminUpdateClient(
-  body: ActionArgs<"adminUpdateClientAction">[0],
-) {
-  const result = await adminUpdateClientAction(body);
-  return {
-    res: observeActionResult(result),
-    data: result.ok ? result.data : { error: result.error.message },
-  };
 }
 
 export async function adminWhitelistCurrentClient() {

@@ -22,21 +22,27 @@ import LockOpenIcon from "@mui/icons-material/LockOpen";
 import EditIcon from "@mui/icons-material/Edit";
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import TuneIcon from "@mui/icons-material/Tune";
 import {
   type AdminClientRecord as ClientRecord,
-  adminDeleteClient,
   adminFetchClients,
   adminFetchConfig,
-  adminPromoteClient,
   adminSearchUsers,
-  adminToggleClientLock,
-  adminUpdateClient,
   adminUpdateConfig,
   adminWhitelistCurrentClient,
+  adminMutateClients,
 } from "@/client/api/admin";
 import { isFuture, formatRemaining } from "@/shared/time";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
+import { HelpSection } from "@/client/components/shared/HelpTip";
+import { DialogTitleWithHelp } from "@/client/components/shared/HelpTip";
+import {
+  BATCH_INCREMENTAL_HELP,
+  IncrementalCheckbox,
+  type IncrementalBoolean,
+} from "./IncrementalField";
+import { SelectionActionBar, SelectionActionIcon } from "./SelectionActionBar";
 
 type IdentityMethod = "mac" | "ip" | "user_agent";
 type UserOption = { id: string; label: string };
@@ -57,6 +63,11 @@ export function ClientsTab() {
   const [boundUser, setBoundUser] = useState<UserOption | null>(null);
   const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   const [saving, setSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchAccessOpen, setBatchAccessOpen] = useState(false);
+  const [batchWhitelisted, setBatchWhitelisted] =
+    useState<IncrementalBoolean>("unchanged");
+  const [batchSaving, setBatchSaving] = useState(false);
 
   const { data, loading, reload } = useActionQuery<{
     clients: ClientRecord[];
@@ -132,26 +143,34 @@ export function ClientsTab() {
   };
 
   const handlePromote = async (client: ClientRecord) => {
-    const res = await adminPromoteClient(client.id);
-    setFeedback(
-      res.ok
-        ? { severity: "success", text: `已保留客户端 ${client.id}` }
-        : { severity: "error", text: "保留客户端失败" },
-    );
+    try {
+      await adminMutateClients([{ id: client.id, promote: true }]);
+      setFeedback({ severity: "success", text: `已保留客户端 ${client.id}` });
+    } catch {
+      setFeedback({ severity: "error", text: "保留客户端失败" });
+    }
     reload();
   };
 
   const handleDelete = async (client: ClientRecord) => {
     const label = client.remark || client.id;
     if (!confirm(`确认删除客户端「${label}」？相关会话也会被清除。`)) return;
-    const res = await adminDeleteClient(client.id);
-    if (!res.ok) setFeedback({ severity: "error", text: "客户端删除失败" });
+    try {
+      await adminMutateClients([{ id: client.id, delete: true }]);
+    } catch {
+      setFeedback({ severity: "error", text: "客户端删除失败" });
+    }
     reload();
   };
 
   const handleToggleLock = async (client: ClientRecord) => {
-    const res = await adminToggleClientLock(client.id, !client.konami_locked);
-    if (!res.ok) setFeedback({ severity: "error", text: "锁定状态更新失败" });
+    try {
+      await adminMutateClients([
+        { id: client.id, locked: !client.konami_locked },
+      ]);
+    } catch {
+      setFeedback({ severity: "error", text: "锁定状态更新失败" });
+    }
     reload();
   };
 
@@ -183,22 +202,87 @@ export function ClientsTab() {
   const saveClient = async () => {
     if (!editing) return;
     setSaving(true);
-    const { res, data: result } = await adminUpdateClient({
-      id: editing.id,
-      remark: editRemark,
-      whitelisted: editWhitelisted,
-      bound_user_id: boundUser?.id ?? null,
-    });
-    setSaving(false);
-    if (!res.ok) {
+    try {
+      await adminMutateClients([
+        {
+          id: editing.id,
+          remark: editRemark,
+          whitelisted: editWhitelisted,
+          bound_user_id: boundUser?.id ?? null,
+        },
+      ]);
+    } catch (error) {
+      setSaving(false);
       setFeedback({
         severity: "error",
-        text: "error" in result ? result.error : "客户端属性保存失败",
+        text: error instanceof Error ? error.message : "客户端属性保存失败",
       });
       return;
     }
+    setSaving(false);
     setEditing(null);
     setFeedback({ severity: "success", text: "客户端属性已保存" });
+    reload();
+  };
+
+  const selectedClients = (data?.clients ?? []).filter((client) =>
+    selectedIds.has(client.id),
+  );
+  const whitelistAggregate: "enabled" | "disabled" | "mixed" =
+    selectedClients.every((client) => client.whitelisted)
+      ? "enabled"
+      : selectedClients.every((client) => !client.whitelisted)
+        ? "disabled"
+        : "mixed";
+  const applyBatchAccess = async () => {
+    if (batchWhitelisted === "unchanged") return;
+    setBatchSaving(true);
+    try {
+      await adminMutateClients(
+        selectedClients.map((record) => ({
+          id: record.id,
+          ...(!record.persistent ? { promote: true } : {}),
+          whitelisted: batchWhitelisted === "enabled",
+        })),
+      );
+      setBatchAccessOpen(false);
+      setBatchWhitelisted("unchanged");
+      setSelectedIds(new Set());
+      reload();
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+  const batchSetLock = async (locked: boolean) => {
+    await adminMutateClients(
+      selectedClients.map((record) => ({ id: record.id, locked })),
+    );
+    setSelectedIds(new Set());
+    reload();
+  };
+  const batchPromote = async () => {
+    const changes = selectedClients
+      .filter((record) => !record.persistent)
+      .map((record) => ({ id: record.id, promote: true }));
+    if (!changes.length) {
+      setFeedback({ severity: "warning", text: "所选客户端均已持久化" });
+      return;
+    }
+    await adminMutateClients(changes);
+    setSelectedIds(new Set());
+    reload();
+  };
+  const batchDelete = async () => {
+    if (
+      !confirm(
+        `确认删除选中的 ${selectedClients.length} 个客户端？相关会话也会被清除。`,
+      )
+    )
+      return;
+    await adminMutateClients(
+      selectedClients.map((record) => ({ id: record.id, delete: true })),
+    );
+    setSelectedIds(new Set());
     reload();
   };
 
@@ -207,6 +291,8 @@ export function ClientsTab() {
       id: "id",
       label: "客户端 ID",
       width: 280,
+      pinned: "start",
+      hideable: false,
       render: (client) => (
         <Box sx={{ display: "flex", alignItems: "center", minWidth: 0 }}>
           <Typography
@@ -328,6 +414,8 @@ export function ClientsTab() {
       id: "actions",
       label: "操作",
       width: 150,
+      pinned: "end",
+      hideable: false,
       render: (client) => (
         <Box sx={{ display: "flex" }}>
           {!client.persistent ? (
@@ -387,13 +475,19 @@ export function ClientsTab() {
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
           客户端访问控制
         </Typography>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ mt: 0.5, mb: 1.5 }}
-        >
-          新身份会先成为临时客户端，并在一天未活跃且没有会话后自动清理。保留后可添加备注、加入白名单或绑定用户。
-        </Typography>
+        <HelpSection label="Authentication Flow 与持久化机制">
+          <Typography variant="body2" color="text.secondary" component="div">
+            浏览器首次连接时，服务端按下方启用的标识字段组合匹配客户端记录；匹配结果是准入身份，不等同于用户账号。新记录先是临时客户端：没有会话且连续一天未活跃后会被清理。转为持久客户端后，记录、备注、白名单状态与用户绑定才会长期保留。
+            <br />
+            <br />
+            白名单模式关闭时，已识别的客户端均可进入登录流程；开启时，只有“持久且已加入白名单”、并且当前标识仍属于该记录的客户端可以进入。开启前系统会先保留并授权当前客户端，避免管理员立即锁在系统之外。绑定用户是登录后的第二层约束：它限制此客户端能登录哪个账号，并会清理不符合绑定的既有会话。
+            <br />
+            <br />
+            MAC 通常稳定但可能被网络设备隐藏；IP 可能因
+            DHCP、漫游或代理变化；User Agent
+            辨识度较弱且会随升级改变。启用多个字段会提高区分能力，也可能让环境变化后的设备产生新记录，因此应按实际网络拓扑选择。
+          </Typography>
+        </HelpSection>
 
         <Typography
           variant="caption"
@@ -477,8 +571,89 @@ export function ClientsTab() {
           columns={columns}
           rowKey={(client) => client.id}
           empty="没有匹配的客户端"
+          selection={{
+            selectedKeys: selectedIds,
+            onChange: (keys) => setSelectedIds(new Set([...keys].map(String))),
+          }}
+          bulkActionBar={
+            selectedClients.length ? (
+              <SelectionActionBar
+                label={`已选 ${selectedClients.length} 个客户端`}
+                onClear={() => setSelectedIds(new Set())}
+              >
+                <SelectionActionIcon
+                  label="配置准入"
+                  onClick={() => setBatchAccessOpen(true)}
+                >
+                  <TuneIcon fontSize="small" />
+                </SelectionActionIcon>
+                <SelectionActionIcon
+                  label="转为持久客户端"
+                  onClick={() => void batchPromote()}
+                >
+                  <BookmarkAddIcon fontSize="small" />
+                </SelectionActionIcon>
+                <SelectionActionIcon
+                  label="锁定"
+                  onClick={() => void batchSetLock(true)}
+                >
+                  <LockIcon fontSize="small" />
+                </SelectionActionIcon>
+                <SelectionActionIcon
+                  label="解锁"
+                  onClick={() => void batchSetLock(false)}
+                >
+                  <LockOpenIcon fontSize="small" />
+                </SelectionActionIcon>
+                <SelectionActionIcon
+                  label="删除客户端"
+                  color="error"
+                  onClick={() => void batchDelete()}
+                >
+                  <DeleteIcon fontSize="small" />
+                </SelectionActionIcon>
+              </SelectionActionBar>
+            ) : null
+          }
         />
       )}
+
+      <Dialog
+        open={batchAccessOpen}
+        onClose={() => !batchSaving && setBatchAccessOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitleWithHelp help={BATCH_INCREMENTAL_HELP}>
+          批量配置客户端准入
+        </DialogTitleWithHelp>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            临时客户端在授权时会自动转为持久客户端。
+          </Typography>
+          <IncrementalCheckbox
+            label="加入白名单"
+            value={batchWhitelisted}
+            aggregate={whitelistAggregate}
+            onChange={setBatchWhitelisted}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            disabled={batchSaving}
+            onClick={() => setBatchAccessOpen(false)}
+          >
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            disabled={batchSaving || batchWhitelisted === "unchanged"}
+            onClick={() => void applyBatchAccess()}
+          >
+            应用到 {selectedClients.length} 个客户端
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {data && data.total > 50 && (
         <Box

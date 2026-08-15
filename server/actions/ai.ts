@@ -51,14 +51,6 @@ export async function adminFetchAiCreditsAction(
   );
 }
 
-export async function adminTopUpAiCreditsAction(
-  input: ActionInput<"adminTopUpAiCreditsAction">,
-) {
-  return withActionScope(async (scope) => ({
-    credits: await scope.facades().ai().adminTopUp(input),
-  }));
-}
-
 export async function adminFetchAiBillingAction() {
   return withActionScope(async (scope) =>
     scope.facades().ai().adminBillingSummary(),
@@ -73,10 +65,10 @@ export async function adminUpdateAiBillingPolicyAction(
   );
 }
 
-export async function adminAssignAiPlanAction(
-  input: ActionInput<"adminAssignAiPlanAction">,
+export async function adminAssignAiCreditsAction(
+  input: ActionInput<"adminAssignAiCreditsAction">,
 ) {
-  return withActionScope(async (scope) => ({
-    credits: scope.facades().ai().adminAssignPlan(input),
-  }));
+  return withActionScope(async (scope) =>
+    scope.facades().ai().adminAssignCredits(input),
+  );
 }

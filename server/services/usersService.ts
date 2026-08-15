@@ -199,35 +199,6 @@ export class UserService {
     return updated;
   }
 
-  updateFeaturesBatch(
-    updates: Array<{ userId: string; features: UserFeatures }>,
-  ): User[] {
-    const ids = new Set<string>();
-    for (const update of updates) {
-      if (ids.has(update.userId)) throw new PublicError("批量更新包含重复用户");
-      ids.add(update.userId);
-      if (!userFeaturesSchema.safeParse(update.features).success) {
-        throw new PublicError("功能设置无效");
-      }
-      if (!userExists(this.db, update.userId)) {
-        throw new PublicError("干员不存在");
-      }
-    }
-    this.db.transaction(() => {
-      for (const update of updates) {
-        updateUserFeatures(this.db, update.userId, update.features);
-      }
-    })();
-    const users = updates.map((update) => this.get(update.userId));
-    for (const user of users) {
-      this.deps.publishUserEvent(user.id, {
-        kind: "user.profile_changed",
-        data: { user },
-      });
-    }
-    return users;
-  }
-
   deactivate(id: string): void {
     const user = this.get(id);
     insertDeletedUser(this.db, user);

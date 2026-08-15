@@ -14,12 +14,9 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import type { Group } from "@/shared/types/api";
 import { fetchGroupMembers } from "@/client/interact/groups";
 import { flexGap } from "@/client/lib/css";
-import {
-  adminSearchUsers,
-  adminAddGroupMember,
-  adminRemoveGroupMember,
-} from "@/client/api/admin";
+import { adminSearchUsers, adminMutateGroups } from "@/client/api/admin";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
+import { SelectionActionBar, SelectionActionIcon } from "./SelectionActionBar";
 export function GroupMembersDialog({
   group,
   canManage,
@@ -36,6 +33,7 @@ export function GroupMembersDialog({
   const [addHandle, setAddHandle] = useState("");
   const [addErr, setAddErr] = useState("");
   const [adding, setAdding] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,7 +51,9 @@ export function GroupMembersDialog({
 
   const handleKick = async (userId: string) => {
     if (!confirm("确认踢出该成员？")) return;
-    await adminRemoveGroupMember(group.id, userId);
+    await adminMutateGroups([
+      { groupId: group.id, memberAction: "remove", userId },
+    ]);
     load();
   };
 
@@ -70,14 +70,33 @@ export function GroupMembersDialog({
       setAdding(false);
       return;
     }
-    const { res, data } = await adminAddGroupMember(group.id, user.id);
-    setAdding(false);
-    if (res.ok) {
+    try {
+      await adminMutateGroups([
+        { groupId: group.id, memberAction: "add", userId: user.id },
+      ]);
+      setAdding(false);
       setAddHandle("");
-      load();
-    } else {
-      setAddErr(data.error || "失败");
+      void load();
+    } catch (error) {
+      setAdding(false);
+      setAddErr(error instanceof Error ? error.message : "失败");
     }
+  };
+  const selectedMembers = members.filter((member) =>
+    selectedIds.has(member.id),
+  );
+  const handleBatchKick = async () => {
+    if (!confirm(`确认将选中的 ${selectedMembers.length} 名成员移出群组？`))
+      return;
+    await adminMutateGroups(
+      selectedMembers.map((member) => ({
+        groupId: group.id,
+        memberAction: "remove" as const,
+        userId: member.id,
+      })),
+    );
+    setSelectedIds(new Set());
+    void load();
   };
   type Member = (typeof members)[number];
   const columns: AdminGridColumn<Member>[] = [
@@ -85,6 +104,8 @@ export function GroupMembersDialog({
       id: "identity",
       label: "干员",
       width: 240,
+      pinned: "start",
+      hideable: false,
       render: (member) => `@${member.handle}`,
       longText: (member) => `@${member.handle}\nID: ${member.id}`,
     },
@@ -117,6 +138,8 @@ export function GroupMembersDialog({
             id: "actions",
             label: "操作",
             width: 100,
+            pinned: "end",
+            hideable: false,
             render: (member: Member) => (
               <IconButton
                 size="small"
@@ -175,6 +198,31 @@ export function GroupMembersDialog({
             rowKey={(member) => member.id}
             empty="暂无成员"
             height={420}
+            selection={
+              canManage
+                ? {
+                    selectedKeys: selectedIds,
+                    onChange: (keys) =>
+                      setSelectedIds(new Set([...keys].map(String))),
+                  }
+                : undefined
+            }
+            bulkActionBar={
+              selectedMembers.length ? (
+                <SelectionActionBar
+                  label={`已选 ${selectedMembers.length} 名成员`}
+                  onClear={() => setSelectedIds(new Set())}
+                >
+                  <SelectionActionIcon
+                    label="移出群组"
+                    color="error"
+                    onClick={() => void handleBatchKick()}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </SelectionActionIcon>
+                </SelectionActionBar>
+              ) : null
+            }
           />
         )}
       </DialogContent>

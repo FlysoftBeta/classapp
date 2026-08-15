@@ -500,7 +500,7 @@ function AppShell({
             articlesEnabled={articlesEnabled}
           />
         )}
-        {view === "ai" && aiEnabled && (
+        {view === "ai" && online && aiEnabled && (
           <AiView
             key={route.conversationId ?? "new"}
             conversationId={route.conversationId}
@@ -520,7 +520,7 @@ function AppShell({
             }
           />
         )}
-        {view === "settings" && (
+        {view === "settings" && online && (
           <Box sx={{ flex: 1, minHeight: 0 }}>
             <Settings
               currentUser={user!}

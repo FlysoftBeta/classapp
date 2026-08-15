@@ -260,41 +260,27 @@ export const actionContracts = {
       object({ user: userSchema }),
     ]),
   ),
-  adminUpdateUserAction: contract(
+  adminMutateUsersAction: contract(
     one(
       object({
-        userId: nonEmptyString,
-        handle: z.string().optional(),
-        username: z.string().optional(),
-        features: userFeaturesSchema.optional(),
-        roles: z.array(adminRoleSchema).optional(),
-        pin: z.string().optional(),
-        mute_hours: z.number().positive().optional(),
-        unmute: z.boolean().optional(),
-        ban_hours: z.number().positive().optional(),
-        unban: z.boolean().optional(),
-      }),
-    ),
-    object({ user: userSchema }),
-  ),
-  adminBatchUpdateUserFeaturesAction: contract(
-    one(
-      object({
-        updates: z
+        changes: z
           .array(
-            object({ userId: nonEmptyString, features: userFeaturesSchema }),
+            object({
+              userId: nonEmptyString,
+              handle: z.string().optional(),
+              username: z.string().optional(),
+              features: userFeaturesSchema.optional(),
+              roles: z.array(adminRoleSchema).optional(),
+              pin: z.string().optional(),
+              mute_hours: z.number().positive().optional(),
+              unmute: z.boolean().optional(),
+              ban_hours: z.number().positive().optional(),
+              unban: z.boolean().optional(),
+              removal: z.enum(["purge", "deactivate"]).optional(),
+            }),
           )
           .min(1)
           .max(500),
-      }),
-    ),
-    object({ users: z.array(userSchema) }),
-  ),
-  adminDeleteUserAction: contract(
-    one(
-      object({
-        userId: nonEmptyString,
-        mode: z.enum(["purge", "deactivate"]),
       }),
     ),
     okSchema,
@@ -321,27 +307,34 @@ export const actionContracts = {
     one(adminGroupCreateInputSchema),
     object({ group: groupSchema }),
   ),
-  adminUpdateGroupAction: contract(
+  adminMutateGroupsAction: contract(
     one(
       object({
-        groupId: nonEmptyString,
-        handle: z.string().optional(),
-        name: z.string().optional(),
-        password: z.string().optional(),
-        clearPassword: z.boolean().optional(),
-        type: z.string().optional(),
-        discoverable: z.boolean().optional(),
-        members_hidden: z.boolean().optional(),
-        admin_only: z.boolean().optional(),
-        no_leave: z.boolean().optional(),
-        parent_group_id: z.string().nullable().optional(),
-        action: z.enum(["add_member", "remove_member"]).optional(),
-        user_id: z.string().optional(),
+        changes: z
+          .array(
+            object({
+              groupId: nonEmptyString,
+              handle: z.string().optional(),
+              name: z.string().optional(),
+              password: z.string().optional(),
+              clearPassword: z.boolean().optional(),
+              type: z.string().optional(),
+              discoverable: z.boolean().optional(),
+              members_hidden: z.boolean().optional(),
+              admin_only: z.boolean().optional(),
+              no_leave: z.boolean().optional(),
+              parent_group_id: z.string().nullable().optional(),
+              memberAction: z.enum(["add", "remove"]).optional(),
+              userId: z.string().optional(),
+              delete: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(500),
       }),
     ),
-    z.union([okSchema, object({ group: groupSchema })]),
+    okSchema,
   ),
-  adminDeleteGroupAction: contract(one(nonEmptyString), okSchema),
   adminFetchClientsAction: contract(
     optionalOne(
       object({
@@ -354,19 +347,23 @@ export const actionContracts = {
       total: z.number().int().nonnegative(),
     }),
   ),
-  adminToggleClientLockAction: contract(
-    one(object({ id: nonEmptyString, action: z.enum(["lock", "unlock"]) })),
-    okSchema,
-  ),
-  adminDeleteClientAction: contract(one(nonEmptyString), okSchema),
-  adminPromoteClientAction: contract(one(nonEmptyString), okSchema),
-  adminUpdateClientAction: contract(
+  adminMutateClientsAction: contract(
     one(
       object({
-        id: nonEmptyString,
-        remark: z.string().max(100).optional(),
-        whitelisted: z.boolean().optional(),
-        bound_user_id: z.string().nullable().optional(),
+        changes: z
+          .array(
+            object({
+              id: nonEmptyString,
+              promote: z.boolean().optional(),
+              locked: z.boolean().optional(),
+              remark: z.string().max(100).optional(),
+              whitelisted: z.boolean().optional(),
+              bound_user_id: z.string().nullable().optional(),
+              delete: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(500),
       }),
     ),
     okSchema,
@@ -982,17 +979,6 @@ export const actionContracts = {
       ledger: z.array(aiCreditLedgerEntrySchema),
     }),
   ),
-  adminTopUpAiCreditsAction: contract(
-    one(
-      object({
-        userId: nonEmptyString,
-        amount: z.number().int().positive().max(1_000_000_000),
-        idempotencyKey: z.string().uuid(),
-        note: z.string().max(200),
-      }),
-    ),
-    object({ credits: aiCreditBalanceSchema }),
-  ),
   adminFetchAiBillingAction: contract(noArgs, aiBillingSummarySchema),
   adminUpdateAiBillingPolicyAction: contract(
     one(
@@ -1004,14 +990,24 @@ export const actionContracts = {
     ),
     aiBillingPolicySchema,
   ),
-  adminAssignAiPlanAction: contract(
+  adminAssignAiCreditsAction: contract(
     one(
       object({
-        userId: nonEmptyString,
-        durationDays: z.number().int().positive().max(3650),
+        targets: z
+          .array(
+            object({
+              userId: nonEmptyString,
+              idempotencyKey: z.string().uuid(),
+            }),
+          )
+          .min(1)
+          .max(500),
+        durationDays: z.number().int().positive().max(3650).optional(),
+        amount: z.number().int().positive().max(1_000_000_000).optional(),
+        note: z.string().max(200),
       }),
     ),
-    object({ credits: aiCreditBalanceSchema }),
+    okSchema,
   ),
 } as const;
 

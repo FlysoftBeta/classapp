@@ -19,12 +19,12 @@ import Chip from "@mui/material/Chip";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import AddIcon from "@mui/icons-material/Add";
+import TuneIcon from "@mui/icons-material/Tune";
 import {
   type AdminGroupRecord,
   adminFetchGroups,
   adminCreateGroup,
-  adminUpdateGroup,
-  adminDeleteGroup,
+  adminMutateGroups,
 } from "@/client/api/admin";
 import {
   DialogTitleWithHelp,
@@ -33,6 +33,13 @@ import {
 import { useActionQuery } from "@/client/hooks/useActionQuery";
 import { GroupMembersDialog } from "./GroupMembersDialog";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
+import {
+  BATCH_INCREMENTAL_HELP,
+  IncrementalCheckbox,
+  type IncrementalBoolean,
+} from "./IncrementalField";
+import { HelpSection } from "@/client/components/shared/HelpTip";
+import { SelectionActionBar, SelectionActionIcon } from "./SelectionActionBar";
 
 const GROUP_TYPE_LABELS: Record<string, string> = {
   normal: "普通",
@@ -79,6 +86,20 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
   const [membersGroup, setMembersGroup] = useState<AdminGroupRecord | null>(
     null,
   );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchChanges, setBatchChanges] = useState<
+    Record<
+      "discoverable" | "members_hidden" | "admin_only" | "no_leave",
+      IncrementalBoolean
+    >
+  >({
+    discoverable: "unchanged",
+    members_hidden: "unchanged",
+    admin_only: "unchanged",
+    no_leave: "unchanged",
+  });
 
   const openCreate = () => {
     const wild = data?.groups.find((g) => g.type === "wild");
@@ -145,19 +166,66 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
     if (!isSystemGroup) body.parent_group_id = editParentGroupId || null;
     if (editClearPassword) body.clearPassword = true;
     else if (editUsePassword && editPassword) body.password = editPassword;
-    const { res, data } = await adminUpdateGroup(editGroup.id, body);
-    setEditSaving(false);
-    if (!res.ok) {
-      setEditErr(("error" in data && data.error) || "失败");
+    try {
+      await adminMutateGroups([{ groupId: editGroup.id, ...body }]);
+    } catch (error) {
+      setEditSaving(false);
+      setEditErr(error instanceof Error ? error.message : "失败");
       return;
     }
+    setEditSaving(false);
     setEditGroup(null);
     reload();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("确认删除该群组？")) return;
-    await adminDeleteGroup(id);
+    await adminMutateGroups([{ groupId: id, delete: true }]);
+    reload();
+  };
+
+  const selectedGroups = (data?.groups ?? []).filter((group) =>
+    selectedIds.has(group.id),
+  );
+  const aggregateGroupFlag = (
+    field: "discoverable" | "members_hidden" | "admin_only" | "no_leave",
+  ): "enabled" | "disabled" | "mixed" => {
+    const values = selectedGroups.map((group) => !!group[field]);
+    return values.every(Boolean)
+      ? "enabled"
+      : values.every((value) => !value)
+        ? "disabled"
+        : "mixed";
+  };
+  const applyBatchGroupRules = async () => {
+    const patch = Object.fromEntries(
+      Object.entries(batchChanges)
+        .filter(([, value]) => value !== "unchanged")
+        .map(([field, value]) => [field, value === "enabled"]),
+    );
+    if (!Object.keys(patch).length) return;
+    setBatchSaving(true);
+    await adminMutateGroups(
+      selectedGroups.map((group) => ({ groupId: group.id, ...patch })),
+    );
+    setBatchSaving(false);
+    setBatchOpen(false);
+    setSelectedIds(new Set());
+    reload();
+  };
+  const deleteSelectedGroups = async () => {
+    const deletable = selectedGroups.filter(
+      (group) => group.type !== "wild" && group.type !== "announcement",
+    );
+    if (
+      !deletable.length ||
+      !confirm(`确认删除选中的 ${deletable.length} 个普通群组？`)
+    )
+      return;
+    await adminMutateGroups(
+      deletable.map((group) => ({ groupId: group.id, delete: true })),
+    );
+    setSelectedIds(new Set());
     reload();
   };
 
@@ -188,6 +256,8 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
       id: "identity",
       label: "群组标识",
       width: 260,
+      pinned: "start",
+      hideable: false,
       render: (group) => group.handle ?? group.id,
       longText: (group) =>
         group.handle ? `Handle: ${group.handle}\nID: ${group.id}` : group.id,
@@ -250,6 +320,8 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
       id: "actions",
       label: "操作",
       width: 110,
+      pinned: "end",
+      hideable: false,
       render: (group) =>
         canManage ? (
           <Box sx={{ display: "flex" }}>
@@ -272,6 +344,11 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
 
   return (
     <Box>
+      <HelpSection label="群组配置与命令如何分工">
+        <Typography variant="body2" color="text.secondary">
+          群组名称、发现入口、加入验证与发言规则属于持续生效的配置；成员管理和删除属于立即执行的命令，因此从右侧操作栏进入。批量配置只覆盖管理员明确改动的规则，群组类型、身份和成员关系不会被暗中改写。
+        </Typography>
+      </HelpSection>
       <Box sx={{ mb: 2 }}>
         <Button
           startIcon={<AddIcon />}
@@ -290,8 +367,89 @@ export function GroupsTab({ canManage }: { canManage: boolean }) {
           columns={columns}
           rowKey={(group) => group.id}
           empty="暂无群组"
+          selection={
+            canManage
+              ? {
+                  selectedKeys: selectedIds,
+                  onChange: (keys) =>
+                    setSelectedIds(new Set([...keys].map(String))),
+                }
+              : undefined
+          }
+          bulkActionBar={
+            selectedGroups.length ? (
+              <SelectionActionBar
+                label={`已选 ${selectedGroups.length} 个群组`}
+                onClear={() => setSelectedIds(new Set())}
+              >
+                <SelectionActionIcon
+                  label="配置群组规则"
+                  onClick={() => setBatchOpen(true)}
+                >
+                  <TuneIcon fontSize="small" />
+                </SelectionActionIcon>
+                <SelectionActionIcon
+                  label="删除群组"
+                  color="error"
+                  onClick={() => void deleteSelectedGroups()}
+                >
+                  <DeleteIcon fontSize="small" />
+                </SelectionActionIcon>
+              </SelectionActionBar>
+            ) : null
+          }
         />
       )}
+
+      <Dialog
+        open={batchOpen}
+        onClose={() => !batchSaving && setBatchOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitleWithHelp help={BATCH_INCREMENTAL_HELP}>
+          批量配置群组规则
+        </DialogTitleWithHelp>
+        <DialogContent>
+          <Box sx={{ display: "grid" }}>
+            {(
+              [
+                ["discoverable", "可被发现"],
+                ["members_hidden", "隐藏成员列表"],
+                ["admin_only", "仅管理员发言"],
+                ["no_leave", "禁止成员退出"],
+              ] as const
+            ).map(([field, label]) => (
+              <IncrementalCheckbox
+                key={field}
+                label={label}
+                value={batchChanges[field]}
+                aggregate={aggregateGroupFlag(field)}
+                onChange={(value) =>
+                  setBatchChanges((current) => ({ ...current, [field]: value }))
+                }
+              />
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={batchSaving} onClick={() => setBatchOpen(false)}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            disabled={
+              batchSaving ||
+              Object.values(batchChanges).every(
+                (value) => value === "unchanged",
+              )
+            }
+            onClick={() => void applyBatchGroupRules()}
+          >
+            应用到 {selectedGroups.length} 个群组
+          </Button>
+        </DialogActions>
+      </Dialog>
       {data && data.total > 50 && (
         <Box sx={{ mt: 1, display: "flex", alignItems: "center" }}>
           <Button
