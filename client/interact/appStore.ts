@@ -1,15 +1,13 @@
 import { create } from "zustand";
 import type {
   User,
-  ArticleSidebarPayload,
-  Conversation,
   AiConversation,
   AiCreditBalance,
 } from "@/shared/types/api";
+import type { Article, Conversation } from "@/client/interact/presentation";
 import type {
   AppStatePayload,
   ArticleSidebarUpdatedPayload,
-  ConvUpdatedPayload,
   AiRunUpdatedPayload,
 } from "@/shared/types/events";
 import type { ActionData } from "@/shared/protocol/actions";
@@ -29,7 +27,7 @@ interface ApplicationStore {
   appDisable: AppStatePayload["app"];
   route: AppRoute;
   conversations: Conversation[];
-  articleSidebar: ArticleSidebarPayload;
+  articleSidebar: ArticleSidebarView;
   aiConversations: AiConversation[];
   aiCredits: AiCreditBalance;
   aiStatus: ActionData<"fetchAiSidebarAction">["status"];
@@ -49,9 +47,9 @@ interface ApplicationStore {
   patchUser(user: User): void;
   navigate(route: AppRoute): void;
   setConversations(entries: Conversation[]): void;
-  applyConversation(payload: ConvUpdatedPayload): void;
+  applyConversation(payload: ConversationDelta): void;
   startDm(peerId: string, peerName: string, handle?: string | null): void;
-  setArticleSidebar(payload: ArticleSidebarPayload): void;
+  setArticleSidebar(payload: ArticleSidebarView): void;
   applyArticleSidebar(payload: ArticleSidebarUpdatedPayload): void;
   setCurrentArticle(id: string | null): void;
   setAiSidebar(payload: ActionData<"fetchAiSidebarAction">): void;
@@ -86,7 +84,18 @@ function mergeConversation(
   return sortConversations(next);
 }
 
-function sortSidebar(payload: ArticleSidebarPayload): ArticleSidebarPayload {
+interface ArticleSidebarView {
+  current_article_id: string | null;
+  articles: Article[];
+}
+
+interface ConversationDelta {
+  entry?: Conversation;
+  removed?: { type: "group" | "dm"; id: string };
+  refresh?: true;
+}
+
+function sortSidebar(payload: ArticleSidebarView): ArticleSidebarView {
   return {
     ...payload,
     articles: [...payload.articles].sort((left, right) =>
@@ -97,7 +106,7 @@ function sortSidebar(payload: ArticleSidebarPayload): ArticleSidebarPayload {
   };
 }
 
-const EMPTY_SIDEBAR: ArticleSidebarPayload = {
+const EMPTY_SIDEBAR: ArticleSidebarView = {
   current_article_id: null,
   articles: [],
 };

@@ -30,8 +30,6 @@ export type AdminGroup = z.infer<typeof adminGroupSchema>;
 export const groupMemberSchema = z
   .object({
     id: z.string(),
-    handle: z.string(),
-    username: z.string(),
     created_at: z.string().optional(),
     joined_at: z.string().optional(),
     hide_self: z.number().int().optional(),

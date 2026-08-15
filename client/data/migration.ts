@@ -39,7 +39,10 @@ const HISTORICAL_APPLICATION_STORES = [
   "domain_sync",
 ] as const;
 
-type MigrationPlan = { kind: "nuke-yanked" } | { kind: "add-me-gate-state" };
+type MigrationPlan =
+  | { kind: "nuke-yanked" }
+  | { kind: "add-me-gate-state" }
+  | { kind: "drop-handle-indexes" };
 
 interface OpenedDatabase {
   database: IDBDatabase;
@@ -63,13 +66,51 @@ function openDatabase(
       planApplied = true;
       const db = request.result;
       const transaction = request.transaction!;
+      const dropHandleIndexes = () => {
+        for (const storeName of [STORES.GROUPS, STORES.USERS]) {
+          const store = transaction.objectStore(storeName);
+          if (store.indexNames.contains("by-handle")) {
+            store.deleteIndex("by-handle");
+          }
+        }
+      };
+      const markLegacyUserMetadata = () => {
+        const store = transaction.objectStore(STORES.USERS);
+        const rows = store.getAll();
+        rows.onsuccess = () => {
+          for (const value of rows.result as Array<Record<string, unknown>>) {
+            store.put({ ...value, revision: -1 });
+          }
+        };
+      };
+      const markLegacyMeUsers = () => {
+        const store = transaction.objectStore(STORES.ME);
+        const rows = store.getAll();
+        rows.onsuccess = () => {
+          for (const value of rows.result as Array<Record<string, unknown>>) {
+            const user = value.user as Record<string, unknown> | undefined;
+            if (user) {
+              store.put({
+                ...value,
+                user: { ...user, profile_revision: -1 },
+              });
+            }
+          }
+        };
+      };
       if (plan.kind === "add-me-gate-state") {
+        dropHandleIndexes();
+        markLegacyUserMetadata();
         const meStore = transaction.objectStore(STORES.ME);
         const rows = meStore.getAll();
         rows.onsuccess = () => {
           for (const value of rows.result as Array<Record<string, unknown>>) {
+            const user = value.user as Record<string, unknown> | undefined;
             meStore.put({
               ...value,
+              ...(user
+                ? { user: { ...user, profile_revision: -1 } }
+                : {}),
               konami_lock: {
                 base: { value: false, updated_at: 0 },
                 proposal: null,
@@ -83,6 +124,16 @@ function openDatabase(
             value: APP_SCHEMA_VERSION,
           });
         };
+        return;
+      }
+      if (plan.kind === "drop-handle-indexes") {
+        dropHandleIndexes();
+        markLegacyUserMetadata();
+        markLegacyMeUsers();
+        transaction.objectStore(STORES.GLOBALS).put({
+          key: GLOBAL_KEYS.APP_SCHEMA_VERSION,
+          value: APP_SCHEMA_VERSION,
+        });
         return;
       }
       // Keep the list explicit: a yanked schema must never leave an unknown
@@ -158,7 +209,9 @@ export async function openApplicationDatabase(): Promise<IDBDatabase> {
         nextPhysicalVersion,
         schemaVersion === 2
           ? { kind: "add-me-gate-state" }
-          : { kind: "nuke-yanked" },
+          : schemaVersion === 3
+            ? { kind: "drop-handle-indexes" }
+            : { kind: "nuke-yanked" },
       );
       // Shell and app are independent schema owners. If the other owner won
       // this physical version race, our request opens successfully without a

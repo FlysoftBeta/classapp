@@ -6,11 +6,11 @@ import ListItemText from "@mui/material/ListItemText";
 import ButtonBase from "@mui/material/ButtonBase";
 import ArticleIcon from "@mui/icons-material/Article";
 import BookmarkIcon from "@mui/icons-material/BookmarkBorder";
-import type { ArticleWithMeta } from "@/shared/types/api";
+import type { Article } from "@/client/interact/presentation";
 import { SidebarSection } from "./SidebarSection";
 
 interface ArticleSectionProps {
-  articles: ArticleWithMeta[];
+  articles: Article[];
   currentArticleId?: string | null;
   onOpenArticle: (id: string) => void;
   onOpenArticles: () => void;

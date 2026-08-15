@@ -48,7 +48,7 @@ export async function POST(req: Request) {
           item_count: stored.itemCount,
           group_id: groupId,
         });
-      return Response.json({ article: result.article }, { status: 201 });
+      return Response.json(result, { status: 201 });
     } catch (e) {
       try {
         await removeArticleBundle(stored.sourcePath, stored.archivePath);

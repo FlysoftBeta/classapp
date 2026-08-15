@@ -72,9 +72,9 @@ stable design.
 ## Identity rules
 
 - Use stable server IDs for keys and references.
-- Handles are mutable lookup labels. Client handle indexes are non-unique
-  because stale reconstructible rows must not poison a newer identity that
-  legitimately reuses a handle.
+- Handles are mutable lookup labels, not client lookup keys. Objective stores
+  have no handle indexes; stale reconstructible rows therefore cannot poison a
+  newer identity that legitimately reuses a handle.
 - `conv_id` is the canonical conversation identity:
   `group:<group-id>` or ordered `dm:<peer-a>:<peer-b>`.
 - Post `(id, conv_id, sequence)` is immutable; current content/tombstone changes
@@ -87,8 +87,15 @@ stable design.
 ## Normalization rules
 
 Wire DTOs may aggregate objective, actor, and decision fields for transport
-efficiency. `client/interact` splits them before persistence. Every response and
-event for the same entity must use the same normalization/merge entry point.
+efficiency, but domain entities carry only stable user IDs. APIs and events put
+the public identities already justified by those visible entities in one
+deduplicated `users` side bundle. The server resolves every side bundle through
+the shared ID-based helper; `client/interact` merges it through the shared
+`domain_users` path before storing or presenting the entities. This avoids a
+second user-directory authorization question and keeps every response/event on
+the same normalization path. Each identity carries a monotonic profile revision;
+older responses cannot overwrite a newer cached handle or username, and equal
+revision conflicts are treated as contract violations.
 
 React receives a presentation DTO assembled from normalized rows. It must not
 persist aggregate screens, because duplicated metadata then drifts and one
@@ -113,13 +120,16 @@ the client lock immediately, while any separately cached effective user/system
 disable state still gates the App. Reconnect later confirms the unlock with the
 server.
 
-Application schema v3 adds these fields to `domain_me`. The v2-to-v3 upgrade
+Application schema v3 adds these fields to `domain_me`. Application schema v4
+also removes the obsolete Group/User handle indexes and marks legacy cached
+user rows as pre-versioned. The v2-to-v4 upgrade
 updates existing user rows and the semantic marker in one versionchange
 transaction without rebuilding other application stores, so drafts, pending
 proposals, retention choices, cached content, and Shell stores survive. Because
 v2 did not retain gate evidence, migrated rows initially use the prior
 unlocked-start behavior; the first successful online state probe replaces those
-defaults. Unknown or yanked semantic versions still use the reconstructible
+defaults. The v3-to-v4 upgrade only removes the indexes and advances the
+semantic marker. Unknown or yanked semantic versions still use the reconstructible
 application-store rebuild path. The existing physical-version retry handles a
 concurrent Shell upgrade, and the standard blocked-upgrade Incident/UX remains
 the failure boundary.

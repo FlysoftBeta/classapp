@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import type { Conversation } from "@/shared/types/api";
+import type { ConversationEntity } from "@/shared/types/api";
 import {
   dmConvId,
   groupConvId,
@@ -7,13 +7,15 @@ import {
   parseConvId,
 } from "@/shared/conversations/id";
 
-function sortConvEntries(entries: Conversation[]): Conversation[] {
+function sortConvEntries(entries: ConversationEntity[]): ConversationEntity[] {
   return entries.sort((a, b) => {
     if (!!a.pinned !== !!b.pinned) return b.pinned - a.pinned;
     if (a.last_at && b.last_at) return b.last_at.localeCompare(a.last_at);
     if (a.last_at) return -1;
     if (b.last_at) return 1;
-    return a.name.localeCompare(b.name);
+    const left = a.type === "group" ? a.name : a.id;
+    const right = b.type === "group" ? b.name : b.id;
+    return left.localeCompare(right);
   });
 }
 
@@ -25,7 +27,7 @@ END`;
 export function listConversations(
   db: Database,
   userId: string,
-): Conversation[] {
+): ConversationEntity[] {
   const groups = db
     .prepare(
       `SELECT g.id, g.conv_id, g.revision, g.handle, g.name, g.type AS group_type,
@@ -70,8 +72,6 @@ export function listConversations(
     .prepare(
       `SELECT d.conv_id, d.revision, NULL AS group_type,
          CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END AS id,
-         COALESCE(u.username, du.username, '已注销') AS name,
-         u.handle,
          (COALESCE(me.is_muted, 0) = 0) AS can_post,
          0 AS can_leave,
          ${LAST_MESSAGE_SQL} AS last_message,
@@ -92,11 +92,6 @@ export function listConversations(
          COALESCE(state.muted_updated_at_ms, 0) AS muted_updated_at_ms
        FROM dms d
        JOIN users me ON me.id = :uid
-       LEFT JOIN users u
-         ON u.id = CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END
-        AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-       LEFT JOIN deleted_users du
-         ON du.id = CASE WHEN d.peer_a = :uid THEN d.peer_b ELSE d.peer_a END
        LEFT JOIN convs_user state ON state.user_id = :uid AND state.conv_id = d.conv_id
        LEFT JOIN posts rp ON rp.id = state.last_read_post_id
        LEFT JOIN posts lp ON lp.sequence = (
@@ -108,30 +103,25 @@ export function listConversations(
 
   return sortConvEntries([
     ...groups.map((row) => ({
-      ...(row as Omit<Conversation, "type" | "can_post" | "can_leave">),
+      ...row,
       type: "group" as const,
+      group_type: String(row.group_type),
+      handle: String(row.handle),
+      name: String(row.name),
       can_post: !!row.can_post,
       can_leave: !!row.can_leave,
-    })),
+    })) as ConversationEntity[],
     ...dms.map((row) => ({
-      ...(row as Omit<
-        Conversation,
-        | "type"
-        | "has_password"
-        | "members_hidden"
-        | "admin_only"
-        | "no_leave"
-        | "can_post"
-        | "can_leave"
-      >),
+      ...row,
       type: "dm" as const,
+      group_type: null,
       has_password: 0,
       members_hidden: 0,
       admin_only: 0,
       no_leave: 0,
       can_post: !!row.can_post,
       can_leave: !!row.can_leave,
-    })),
+    })) as ConversationEntity[],
   ]);
 }
 
@@ -164,7 +154,7 @@ export function getConversationEntry(
   userId: string,
   type: "group" | "dm",
   id: string,
-): Conversation | null {
+): ConversationEntity | null {
   return (
     listConversations(db, userId).find(
       (row) => row.type === type && row.id === id,

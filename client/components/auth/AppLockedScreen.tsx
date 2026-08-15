@@ -13,6 +13,7 @@ import { inset } from "@/client/lib/css";
 
 interface AppLockedScreenProps {
   state: AppDisableState;
+  username?: string | null;
   /** Auto-fires once the 30s countdown finishes. */
   onAutoLock: () => void;
   /** "Logout" menu item. */
@@ -21,13 +22,16 @@ interface AppLockedScreenProps {
   onLockNow: () => void;
 }
 
-function describeReason(state: AppDisableState): string {
+function describeReason(
+  state: AppDisableState,
+  username?: string | null,
+): string {
   switch (state.reason) {
     case "banned": {
       const remaining = state.banned_until
         ? formatRemaining(state.banned_until)
         : "未知时间";
-      const who = state.username ? `账号 ${state.username} ` : "";
+      const who = username ? `账号 ${username} ` : "";
       return `${who}已被封禁。还有 ${remaining} 才能恢复。`;
     }
     case "system_locked":
@@ -49,6 +53,7 @@ const AUTO_LOCK_MS = 30_000;
 
 export default function AppLockedScreen({
   state,
+  username,
   onAutoLock,
   onLogout,
   onLockNow,
@@ -115,7 +120,9 @@ export default function AppLockedScreen({
             >
               锁定原因
             </Typography>
-            <Typography variant="body2">{describeReason(state)}</Typography>
+            <Typography variant="body2">
+              {describeReason(state, username)}
+            </Typography>
           </Box>
           <Divider />
           <MenuItem

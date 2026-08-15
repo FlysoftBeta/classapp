@@ -22,7 +22,6 @@ type ArticleProvider = TextProvider | BundleProvider;
 
 const META_COLUMNS = `
   a.id, a.user_id, a.group_id, a.title, a.provider_json, a.created_at,
-  COALESCE(u.username, du.username) AS username, u.handle,
   ab.bookmarked AS is_bookmarked,
   ab.updated_at_ms AS bookmark_updated_at_ms,
   rp.offset AS current_offset,
@@ -30,18 +29,12 @@ const META_COLUMNS = `
   rp.locator AS current_locator,
   rp.total_read_seconds AS total_read_seconds,
   rp.updated_at AS last_read_at`;
-const ARTICLE_AUTHOR_JOINS = `
-  LEFT JOIN users u ON a.user_id = u.id
-    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-  LEFT JOIN deleted_users du ON a.user_id = du.id`;
 const FROM_ARTICLES = ` FROM articles a
   LEFT JOIN article_bookmarks ab ON ab.user_id = :uid AND ab.article_id = a.id
-  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id
-  ${ARTICLE_AUTHOR_JOINS}`;
+  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id`;
 const FROM_BOOKMARKED_ARTICLES = ` FROM article_bookmarks ab
   JOIN articles a ON a.id = ab.article_id
-  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id
-  ${ARTICLE_AUTHOR_JOINS}`;
+  LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id`;
 
 export interface ArticleRecord {
   id: string;
@@ -135,8 +128,6 @@ export function rowToArticle(row: Record<string, unknown>): ArticleWithMeta {
     provider,
     ...providerReadModel(provider),
     created_at: String(row.created_at),
-    username: typeof row.username === "string" ? row.username : null,
-    handle: typeof row.handle === "string" ? row.handle : null,
     is_bookmarked: !!row.is_bookmarked,
     bookmark_updated_at_ms: (row.bookmark_updated_at_ms as number | null) ?? 0,
     current_offset: (row.current_offset as number | null) ?? 0,

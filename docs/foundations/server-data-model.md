@@ -1,7 +1,7 @@
 # Server data model and migration discipline
 
 The server database is the durable authority. In the examined working tree it
-uses SQLite schema v21 and accepts v17 as the oldest migration baseline. Unlike
+uses SQLite schema v22 and accepts v17 as the oldest migration baseline. Unlike
 the reconstructible browser projection, server rows are not casually nuked.
 
 ## Table families

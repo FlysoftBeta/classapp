@@ -210,9 +210,21 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     const repository = repositoryForActor(actor);
     recovery.enqueue(async () => {
       if (!isActorContextCurrent(actor)) return;
-      useApplicationStore.getState().applyConversation(data);
-      if (data.entry) await repository.upsertConversation(data.entry);
+      if (data.entry) {
+        await repository.upsertConversation(data.entry, data.users ?? []);
+        const entry = (await repository.getConversations()).find(
+          (candidate) =>
+            candidate.type === data.entry!.type &&
+            candidate.id === data.entry!.id,
+        );
+        if (entry) {
+          useApplicationStore.getState().applyConversation({ entry });
+        }
+      }
       if (data.removed) {
+        useApplicationStore.getState().applyConversation({
+          removed: data.removed,
+        });
         await repository.removeConversation(data.removed);
       }
       if (data.refresh) resourceQueries.scheduleConversations();
@@ -243,9 +255,21 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     client.subscribe("user.banned", () => void refreshState()),
     client.subscribe("user.unbanned", () => void refreshState()),
     client.subscribe("user.muted_changed", onMuted),
-    client.subscribe("user.profile_changed", ({ user }) =>
-      useApplicationStore.getState().patchUser(user),
-    ),
+    client.subscribe("user.profile_changed", ({ user }) => {
+      useApplicationStore.getState().patchUser(user);
+      const actor = captureActorContext();
+      recovery.enqueue(async () => {
+        if (!isActorContextCurrent(actor)) return;
+        await repositoryForActor(actor).saveUserMetadata([
+          {
+            id: user.id,
+            revision: user.profile_revision,
+            handle: user.handle,
+            username: user.username,
+          },
+        ]);
+      });
+    }),
     client.subscribe("system.lock_changed", () => void refreshState()),
     client.subscribe("system.announcement_changed", announcementEvents.emit),
     client.subscribe("remote.resubscribe", () => recovery.schedule()),

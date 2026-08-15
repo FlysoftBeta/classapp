@@ -2,10 +2,12 @@ import { z } from "zod";
 import { articleWithMetaSchema } from "../api/article";
 import { appDisableStateSchema } from "../api/app";
 import { userSchema } from "../api/user";
+import { userMetadataSchema } from "../api/user";
 
 export const articleSidebarUpdatedPayloadSchema = z
   .object({
     entry: articleWithMetaSchema.optional(),
+    users: z.array(userMetadataSchema).optional(),
     removed: z.object({ article_id: z.string() }).strict().optional(),
     current_article_id: z.string().nullable().optional(),
     /** Fallback when the delta cannot be computed. */
@@ -19,6 +21,7 @@ export type ArticleSidebarUpdatedPayload = z.infer<
 export const articleListUpdatedPayloadSchema = z
   .object({
     entry: articleWithMetaSchema.optional(),
+    users: z.array(userMetadataSchema).optional(),
     removed: z.object({ article_id: z.string() }).strict().optional(),
     /** New row — increment total even when not on page 0. */
     created: z.literal(true).optional(),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TEXT_ARTICLE_SEGMENT_SIZE } from "@/shared/articles/segments";
+import { userMetadataSchema } from "./user";
 
 const articleBaseShape = {
   id: z.string(),
@@ -31,8 +32,6 @@ const articleBaseShape = {
   file_size: z.number().nonnegative(),
   original_filename: z.string().nullable().optional(),
   created_at: z.string(),
-  username: z.string().nullable().optional(),
-  handle: z.string().nullable().optional(),
 };
 
 export const articleWithMetaSchema = z
@@ -53,10 +52,12 @@ export const articleWithMetaSchema = z
   .strict();
 export type ArticleWithMeta = z.infer<typeof articleWithMetaSchema>;
 
+/** Article rows plus the deduplicated author-identity side bundle. */
 export const articleSidebarPayloadSchema = z
   .object({
     current_article_id: z.string().nullable(),
     articles: z.array(articleWithMetaSchema),
+    users: z.array(userMetadataSchema),
   })
   .strict();
 export type ArticleSidebarPayload = z.infer<typeof articleSidebarPayloadSchema>;

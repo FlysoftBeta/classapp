@@ -2,10 +2,10 @@ import React, { useState } from "react";
 import Box from "@mui/material/Box";
 import type {
   User,
-  ArticleWithMeta,
   AiConversation,
   AiCreditBalance,
 } from "@/shared/types/api";
+import type { Article } from "@/client/interact/presentation";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { FindGroupDialog } from "./FindGroupDialog";
 import { SidebarTopProps } from "./SidebarTop";
@@ -25,10 +25,10 @@ function emptyGroupEntry(g: { id: string; name: string }): ConvEntry {
     conv_id: groupConvId(g.id),
     revision: 0,
     type: "group",
-    group_type: null,
+    group_type: "normal",
     id: g.id,
     name: g.name,
-    handle: null,
+    handle: g.id,
     has_password: 0,
     members_hidden: 0,
     admin_only: 0,
@@ -60,7 +60,7 @@ interface ConversationListProps {
   onArticles: () => void;
   onLearning: () => void;
   onOpenArticle: (id: string) => void;
-  sidebarArticles: ArticleWithMeta[];
+  sidebarArticles: Article[];
   currentArticleId?: string | null;
   themeMode: "light" | "dark";
   online: boolean;

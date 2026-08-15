@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import type BetterSqlite3 from "better-sqlite3";
 import { parseDbTime } from "@/shared/time";
-import type { Group, User } from "@/shared/types/api";
+import type { Group, User, UserMetadata } from "@/shared/types/api";
 import type { UserFeatures } from "@/shared/features";
 import {
   decodeFeatureBitset,
@@ -11,6 +11,7 @@ import { listUserRoles } from "@/server/data/roles";
 
 export interface UserRow {
   id: string;
+  profile_revision: number;
   handle: string;
   username: string;
   feature_bitset: number;
@@ -20,7 +21,7 @@ export interface UserRow {
   created_at: string;
 }
 
-export const USER_SELECT = `SELECT u.id, u.handle, u.username, u.feature_bitset,
+export const USER_SELECT = `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
    CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
    u.muted_until, u.banned_until, u.created_at
    FROM users u LEFT JOIN deleted_users du ON du.id = u.id
@@ -71,6 +72,7 @@ export function hydrateUser(db: BetterSqlite3.Database, row: UserRow): User {
   const roles = listUserRoles(db, row.id);
   return {
     id: row.id,
+    profile_revision: row.profile_revision,
     handle: row.handle,
     username: row.username,
     features: decodeFeatureBitset(row.feature_bitset),
@@ -90,6 +92,30 @@ export function getUser(db: BetterSqlite3.Database, id: string): User | null {
   return row ? hydrateUser(db, row) : null;
 }
 
+/**
+ * Resolve the public identity side bundle for domain rows that already proved
+ * their own visibility. IDs are deduplicated here so individual Services do
+ * not need a second user-directory authorization path.
+ */
+export function userMetadataForIds(
+  db: BetterSqlite3.Database,
+  userIds: Iterable<string | null | undefined>,
+): UserMetadata[] {
+  const ids = [...new Set([...userIds].filter((id): id is string => !!id))];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  return db
+    .prepare(
+      `SELECT u.id,
+        u.profile_revision AS revision,
+        CASE WHEN du.id IS NULL THEN u.handle ELSE NULL END AS handle,
+        COALESCE(du.username, u.username) AS username
+       FROM users u LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.id IN (${placeholders})`,
+    )
+    .all(...ids) as UserMetadata[];
+}
+
 export function searchUsers(
   db: BetterSqlite3.Database,
   q = "",
@@ -98,7 +124,7 @@ export function searchUsers(
   const rows = q
     ? (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.feature_bitset,
+          `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
            CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
            u.muted_until, u.banned_until, u.created_at FROM users u
            LEFT JOIN deleted_users du ON du.id = u.id
@@ -108,7 +134,7 @@ export function searchUsers(
         .all(`%${q}%`, `%${q}%`, offset) as UserRow[])
     : (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.feature_bitset,
+          `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
            CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
            u.muted_until, u.banned_until, u.created_at FROM users u
            LEFT JOIN deleted_users du ON du.id = u.id
@@ -230,7 +256,9 @@ export function updateUserHandle(
   userId: string,
   handle: string,
 ): void {
-  db.prepare("UPDATE users SET handle = ? WHERE id = ?").run(handle, userId);
+  db.prepare(
+    "UPDATE users SET handle = ?, profile_revision = profile_revision + 1 WHERE id = ?",
+  ).run(handle, userId);
 }
 
 export function updateUserUsername(
@@ -238,10 +266,9 @@ export function updateUserUsername(
   userId: string,
   username: string,
 ): void {
-  db.prepare("UPDATE users SET username = ? WHERE id = ?").run(
-    username,
-    userId,
-  );
+  db.prepare(
+    "UPDATE users SET username = ?, profile_revision = profile_revision + 1 WHERE id = ?",
+  ).run(username, userId);
 }
 
 export function updateUserFeatures(

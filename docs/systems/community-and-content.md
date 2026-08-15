@@ -66,8 +66,11 @@ The Facade selects a legitimate path:
 complete authoritative versions. It does not take a generic `isAdmin` flag.
 
 Posts store author/reply user IDs. Presentation user metadata travels as a
-deduplicated side bundle and is normalized into `domain_users`. Do not copy
-mutable handles into every historical cached Post.
+deduplicated side bundle and is normalized into `domain_users`. The same
+envelope applies to DM peers, Group membership rows, Articles, and the admin
+Audit/Client read models: domain rows carry stable user IDs, while a sibling
+`users` array carries each required public identity once. Do not copy mutable
+handles into historical content, membership, or operational rows.
 
 ## Articles
 
@@ -84,6 +87,11 @@ Bookmarks, resume offset, furthest progress, reading duration, and list
 membership are actor/user state, not Article core. Title/author presentation
 classification must remain explicit; “everything returned by API is immutable”
 is false.
+
+The Article wire entity contains `user_id`, never `username` or `handle`.
+Client presentation joins its author from `domain_users`; the persisted Article
+core is a positive field list rather than an `Omit` blacklist, so adding a new
+wire presentation field cannot silently expand the immutable core.
 
 Article lists use keyset pagination with `(list_sort_at, id)`. The three current
 views (`all`, `bookmarked`, `recent`) have different server-owned sort values.

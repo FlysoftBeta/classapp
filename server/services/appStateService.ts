@@ -113,7 +113,6 @@ export class AppStateService {
         disabled: true,
         reason: "banned",
         banned_until: ban.banned_until,
-        username: user.username,
       };
     }
 

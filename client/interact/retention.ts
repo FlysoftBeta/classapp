@@ -1,4 +1,5 @@
-import type { ArticleWithMeta, Conversation } from "@/shared/types/api";
+import type { ArticleWithMeta } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import {
   ARTICLE_RETENTION_DAYS,
   type ArticleDownloadPolicy,

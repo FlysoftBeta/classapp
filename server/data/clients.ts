@@ -17,7 +17,6 @@ export interface ClientAdminListRow {
   remark: string;
   whitelisted: number;
   bound_user_id: string | null;
-  bound_user_handle: string | null;
   ips: string | null;
   last_seen: string | null;
   konami_locked: number;
@@ -29,7 +28,6 @@ export interface ClientAdminListRow {
 
 export interface ClientSessionUserRow {
   id: string;
-  handle: string;
 }
 
 export interface ClientStoredState {
@@ -443,7 +441,7 @@ export function listClientAdminRows(
   return db
     .prepare(
       `SELECT c.id, c.created_at, c.persistent, c.remark, c.whitelisted,
-              c.bound_user_id, u.handle AS bound_user_handle,
+              c.bound_user_id,
               c.konami_locked,
               GROUP_CONCAT(ci.ip, ',') AS ips,
               MAX(ci.last_seen) AS last_seen,
@@ -472,7 +470,7 @@ export function listRecentClientSessionUsers(
 ): ClientSessionUserRow[] {
   return db
     .prepare(
-      `SELECT u.id, u.handle FROM sessions s
+      `SELECT u.id FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.client_id = ? AND s.created_at > datetime('now', '-1 day')
        GROUP BY u.id`,

@@ -4,7 +4,6 @@ import type { Database } from "better-sqlite3";
 export interface AuditEntry {
   id: string;
   actor_id: string | null;
-  actor_handle: string | null;
   action: string;
   target_kind: string;
   target_id: string | null;
@@ -47,9 +46,9 @@ export function listAuditEntries(
 ): AuditEntry[] {
   const rows = db
     .prepare(
-      `SELECT a.id, a.actor_id, u.handle AS actor_handle, a.action,
+      `SELECT a.id, a.actor_id, a.action,
       a.target_kind, a.target_id, a.details_json, a.created_at
-     FROM admin_audit_log a LEFT JOIN users u ON u.id = a.actor_id
+     FROM admin_audit_log a
      ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?`,
     )
     .all(limit, offset) as AuditRow[];

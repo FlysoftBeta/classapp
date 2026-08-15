@@ -5,6 +5,7 @@ import { userFeaturesSchema } from "@/shared/features";
 export const userSchema = z
   .object({
     id: z.string(),
+    profile_revision: z.number().int().nonnegative(),
     handle: z.string(),
     username: z.string(),
     features: userFeaturesSchema,
@@ -22,6 +23,7 @@ export type User = z.infer<typeof userSchema>;
 export const userMetadataSchema = z
   .object({
     id: z.string(),
+    revision: z.number().int().nonnegative(),
     handle: z.string().nullable(),
     username: z.string(),
   })

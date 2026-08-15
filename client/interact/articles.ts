@@ -1,4 +1,5 @@
-import type { ArticleWithMeta } from "@/shared/types/api";
+import type { ArticleWithMeta, UserMetadata } from "@/shared/types/api";
+import type { Article } from "@/client/interact/presentation";
 import {
   observeActionResult,
   apiFetch,
@@ -24,6 +25,10 @@ import { ResultTools } from "@/shared/protocol/result";
 import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { purgeArticleBundle } from "@/client/interact/bundles";
 import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
+import {
+  cacheUserMetadata,
+  userMetadataById,
+} from "@/client/interact/users";
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -33,7 +38,7 @@ export interface ArticleSegmentPayload {
 }
 
 interface ArticleListPage {
-  articles: ArticleWithMeta[];
+  articles: Article[];
   hasMore: boolean;
 }
 
@@ -47,14 +52,31 @@ const remoteArticlePageRequests = new Map<
   Promise<ArticleListPage | null>
 >();
 
+function materializeArticle(
+  article: ArticleWithMeta,
+  users: readonly UserMetadata[],
+): Article {
+  const author = article.user_id
+    ? userMetadataById(users).get(article.user_id)
+    : undefined;
+  return {
+    ...article,
+    username: author?.username ?? null,
+    handle: author?.handle ?? null,
+  };
+}
+
 async function reconcileArticleProgressMeta(
   article: ArticleWithMeta,
+  users: readonly UserMetadata[],
   membership: {
     view: "all" | "bookmarked" | "sidebar" | "direct";
     group_id: string | null;
   } = { view: "direct", group_id: null },
-): Promise<ArticleWithMeta> {
+  cacheUsers = true,
+): Promise<Article> {
   try {
+    if (cacheUsers) await cacheUserMetadata(users);
     await offlineRepository.saveArticleMeta(article, membership);
     const bookmark = await offlineRepository.reconcileArticleBookmark(
       article.id,
@@ -71,7 +93,7 @@ async function reconcileArticleProgressMeta(
       },
     );
     return {
-      ...article,
+      ...materializeArticle(article, users),
       is_bookmarked: bookmark.value,
       bookmark_updated_at_ms: bookmark.updatedAt,
       current_offset: progress.offset,
@@ -87,14 +109,20 @@ async function reconcileArticleProgressMeta(
 
 async function reconcileArticleList(
   articles: ArticleWithMeta[],
+  users: readonly UserMetadata[],
   membership: {
     view: "all" | "bookmarked" | "sidebar";
     group_id: string | null;
   },
-): Promise<ArticleWithMeta[]> {
+): Promise<Article[]> {
+  try {
+    await cacheUserMetadata(users);
+  } catch (error) {
+    captureDetachedClientIncident("article.user-cache", error);
+  }
   return Promise.all(
     articles.map((article) =>
-      reconcileArticleProgressMeta(article, membership),
+      reconcileArticleProgressMeta(article, users, membership, false),
     ),
   );
 }
@@ -117,10 +145,11 @@ async function fetchRemoteArticlePage(
     });
     observeActionResult(result);
     if (!result.ok) return null;
-    const articles = await reconcileArticleList(result.data.articles ?? [], {
-      view: "all",
-      group_id: groupId ?? null,
-    });
+    const articles = await reconcileArticleList(
+      result.data.articles ?? [],
+      result.data.users,
+      { view: "all", group_id: groupId ?? null },
+    );
     try {
       await offlineRepository.reconcileArticlePage(articles, {
         view: "all",
@@ -209,7 +238,7 @@ export async function listBookmarkedArticles() {
   if (!result.ok) return null;
   const data = result.data;
   if (data.articles) {
-    data.articles = await reconcileArticleList(data.articles, {
+    data.articles = await reconcileArticleList(data.articles, data.users, {
       view: "bookmarked",
       group_id: null,
     });
@@ -231,7 +260,7 @@ export async function fetchArticleSidebar() {
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
-  data.articles = await reconcileArticleList(data.articles, {
+  data.articles = await reconcileArticleList(data.articles, data.users, {
     view: "sidebar",
     group_id: null,
   });
@@ -240,7 +269,7 @@ export async function fetchArticleSidebar() {
 
 export async function primeOfflineArticleList(): Promise<void> {
   if (!client.isConnected()) return;
-  const pages: ArticleWithMeta[] = [];
+  const pages: Article[] = [];
   let cursor: ArticleListCursor | undefined;
   for (let pageNumber = 0; pageNumber < 4; pageNumber++) {
     const page = await fetchRemoteArticlePage(cursor);
@@ -292,7 +321,7 @@ export async function fetchArticle(articleId: string) {
   if (!result.ok) return null;
   const data = result.data;
   if (data.article) {
-    data.article = await reconcileArticleProgressMeta(data.article);
+    data.article = await reconcileArticleProgressMeta(data.article, data.users);
     try {
       const progress = await offlineRepository.getArticleProgress(articleId);
       if (progress && !progress.synced) {
@@ -323,10 +352,10 @@ export async function fetchCachedArticle(articleId: string) {
 
 export async function loadArticleForReader(
   articleId: string,
-  onCached?: (article: ArticleWithMeta) => void | Promise<void>,
+  onCached?: (article: Article) => void | Promise<void>,
 ): Promise<{
   source: "remote" | "offline";
-  article: ArticleWithMeta | null;
+  article: Article | null;
 }> {
   let cached: Awaited<ReturnType<typeof fetchCachedArticle>> = null;
   try {
@@ -385,6 +414,13 @@ export async function createArticle(body: {
 }) {
   const result = await createArticleAction(body);
   const res = observeActionResult(result);
+  if (result.ok) {
+    await cacheUserMetadata(result.data.users);
+    result.data.article = materializeArticle(
+      result.data.article,
+      result.data.users,
+    );
+  }
   const data = result.ok ? result.data : { error: result.error.message };
   return { res, data };
 }
@@ -408,8 +444,13 @@ export async function createBundleArticle(
   });
   const data = await parseJson<{
     article?: ArticleWithMeta;
+    users?: UserMetadata[];
     error?: string;
   }>(res);
+  if (data.article && data.users) {
+    await cacheUserMetadata(data.users);
+    data.article = materializeArticle(data.article, data.users);
+  }
   return { res, data };
 }
 

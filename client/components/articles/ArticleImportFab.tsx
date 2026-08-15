@@ -10,7 +10,7 @@ import TextField from "@mui/material/TextField";
 import AddIcon from "@mui/icons-material/Add";
 import AttachmentIcon from "@mui/icons-material/Attachment";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
-import type { Conversation } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import { createArticle, createBundleArticle } from "@/client/interact/articles";
 import { newTaskId, taskStore } from "@/client/hooks/useTaskStore";
 import { decodeUploadedText } from "@/client/lib/textEncoding";

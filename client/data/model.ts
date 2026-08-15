@@ -2,17 +2,15 @@ import type {
   AppDisableState,
   ArticleWithMeta,
   Group,
-  Post,
+  PostEntity,
   User,
 } from "@/shared/types/api";
+import type { Article } from "@/client/interact/presentation";
 import type { ContinuousCoverage } from "./coverage";
 
 export type EvictionTier = 0 | 1 | 2;
 
-export type StoredPost = Omit<
-  Post,
-  "username" | "handle" | "reply_username" | "reply_handle"
-> & {
+export type StoredPost = PostEntity & {
   sequence: number;
   size: number;
   touched_at: number;
@@ -43,19 +41,21 @@ export interface ObjectiveDm {
 
 export interface ObjectiveArticle {
   id: string;
-  value: Omit<
+  value: Pick<
     ArticleWithMeta,
-    | "is_bookmarked"
-    | "bookmark_updated_at_ms"
-    | "current_offset"
-    | "current_offset_updated_at"
-    | "current_locator"
-    | "total_read_seconds"
-    | "last_read_at"
-    | "list_sort_at"
-    | "content"
-    | "username"
-    | "handle"
+    | "id"
+    | "user_id"
+    | "group_id"
+    | "title"
+    | "provider"
+    | "content_kind"
+    | "source_path"
+    | "archive_path"
+    | "mime_type"
+    | "file_size"
+    | "original_filename"
+    | "created_at"
+    | "content_length"
   >;
   group_id: string;
   created_at: string;
@@ -64,8 +64,11 @@ export interface ObjectiveArticle {
   eviction_tier: EvictionTier;
 }
 
+export type MaterializedArticle = Article;
+
 export interface ObjectiveUser {
   id: string;
+  revision: number;
   handle: string | null;
   username: string;
 }
@@ -114,8 +117,8 @@ export interface GroupMembersAccessRow {
   snapshot: {
     members: Array<{
       id: string;
-      handle: string;
-      username: string;
+      created_at?: string;
+      joined_at?: string;
       hide_self?: number;
     }>;
     hidden: boolean;

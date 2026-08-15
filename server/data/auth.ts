@@ -8,7 +8,7 @@ export function findUserByPinHash(
 ): User | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.handle, u.username, u.feature_bitset,
+      `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
          CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
          u.muted_until, u.banned_until, u.created_at
          FROM user_pins up
@@ -70,7 +70,7 @@ export function findRecentSessionByClientId(
 ): { user: User; token: string } | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.handle, u.username, u.feature_bitset,
+      `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
        CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
        u.muted_until, u.banned_until, u.created_at, s.token
        FROM sessions s
@@ -105,7 +105,7 @@ export function findUserBySessionToken(
 ): User | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.handle, u.username, u.feature_bitset,
+      `SELECT u.id, u.profile_revision, u.handle, u.username, u.feature_bitset,
          CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
          u.muted_until, u.banned_until, u.created_at
      FROM sessions s JOIN users u ON s.user_id = u.id

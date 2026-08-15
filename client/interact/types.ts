@@ -1,13 +1,13 @@
 import type {
   AppDisableReason,
   AppDisableState,
-  Conversation,
 } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import type {
   AppStatePayload,
-  PostStreamEvent,
   UserConfigChangedEvent,
 } from "@/shared/types/events";
+import type { PostStreamEvent } from "@/client/interact/presentation";
 
 export type AppState =
   "loading" | "konami" | "login" | "oobe" | "app_locked" | "app";

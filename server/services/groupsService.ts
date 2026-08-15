@@ -35,6 +35,8 @@ import { publishRemoteResubscribe } from "@/server/services/eventBus";
 import type { AdminGroup, Group, GroupMember } from "@/shared/types/api";
 import { groupConvId } from "@/shared/conversations/id";
 import { Facts, fact, type Fact } from "@/server/runtime/facts";
+import { userMetadataForIds } from "@/server/data/users";
+import type { UserMetadata } from "@/shared/types/api";
 
 const HANDLE_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 
@@ -87,6 +89,7 @@ export interface UpdateGroupInput extends CreateGroupInput {
 
 export interface GroupMembersResult {
   members: GroupMember[];
+  users: UserMetadata[];
   hidden: boolean;
   no_leave: boolean;
   self_hide_self: boolean;
@@ -364,6 +367,7 @@ export class GroupService {
     if (visibility.members_hidden === 1 && !isAdmin) {
       return {
         members: [],
+        users: [],
         hidden: true,
         no_leave: visibility.no_leave === 1,
         self_hide_self: selfHideSelf,
@@ -372,8 +376,18 @@ export class GroupService {
     if (!selfMembership && !isAdmin) {
       throw new PublicError("你不在该群组中");
     }
+    const members = listGroupMembersForView(
+      this.db,
+      group.id,
+      userId,
+      isAdmin,
+    );
     return {
-      members: listGroupMembersForView(this.db, group.id, userId, isAdmin),
+      members,
+      users: userMetadataForIds(
+        this.db,
+        members.map((member) => member.id),
+      ),
       hidden: false,
       no_leave: visibility.no_leave === 1,
       self_hide_self: selfHideSelf,

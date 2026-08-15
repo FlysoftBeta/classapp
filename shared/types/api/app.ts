@@ -12,7 +12,6 @@ export const appDisableStateSchema = z
     disabled: z.boolean(),
     reason: appDisableReasonSchema.nullable(),
     banned_until: z.string().nullable().optional(),
-    username: z.string().nullable().optional(),
   })
   .strict();
 

@@ -22,7 +22,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 21;
+const CURRENT_SCHEMA_VERSION = 22;
 
 type SchemaMigration = (db: Database) => void;
 
@@ -336,6 +336,14 @@ const MIGRATIONS = new Map<number, SchemaMigration>([
       db.exec(AI_SCHEMA);
     },
   ],
+  [
+    21,
+    (db) => {
+      db.exec(
+        "ALTER TABLE users ADD COLUMN profile_revision INTEGER NOT NULL DEFAULT 0",
+      );
+    },
+  ],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -396,6 +404,7 @@ function installSchema(db: Database): void {
       id           TEXT PRIMARY KEY,
       handle       TEXT UNIQUE NOT NULL,
       username     TEXT NOT NULL,
+      profile_revision INTEGER NOT NULL DEFAULT 0,
       feature_bitset INTEGER NOT NULL DEFAULT ${DEFAULT_FEATURE_BITSET},
       is_muted     INTEGER NOT NULL DEFAULT 0,
       muted_until  TEXT,

@@ -1,4 +1,4 @@
-import type { Conversation, Post } from "@/shared/types/api";
+import type { Conversation, Post } from "@/client/interact/presentation";
 import { parseConvId, peerIdFromDmConvId } from "@/shared/conversations/id";
 
 export const LOAD_LIMIT = 40;

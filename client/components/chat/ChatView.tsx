@@ -8,7 +8,8 @@ import Fade from "@mui/material/Fade";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArticleIcon from "@mui/icons-material/Article";
-import type { User, Conversation } from "@/shared/types/api";
+import type { User } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import type {
   PostStreamEvent,
   UserConfigChangedEvent,

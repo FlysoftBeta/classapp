@@ -3,7 +3,7 @@ import {
   articleSidebarPayloadSchema,
   articleWithMetaSchema,
   adminGroupSchema,
-  conversationSchema,
+  conversationEntitySchema,
   groupSchema,
   groupMemberSchema,
   postSchema,
@@ -76,7 +76,6 @@ const announcementSchema = object({
 const auditEntrySchema = object({
   id: z.string().uuid(),
   actor_id: z.string().nullable(),
-  actor_handle: z.string().nullable(),
   action: z.string(),
   target_kind: z.string(),
   target_id: z.string().nullable(),
@@ -101,7 +100,7 @@ const clientRecordSchema = object({
   ips: z.array(z.string()),
   last_seen: z.string().nullable(),
   active_sessions: z.number().int().nonnegative(),
-  session_users: z.string(),
+  session_user_ids: z.array(z.string()),
   konami_locked: z.boolean(),
   throttled_until: z.string().nullable(),
   attempts: z.number().int(),
@@ -109,7 +108,6 @@ const clientRecordSchema = object({
   user_agent: z.string().nullable(),
   whitelisted: z.boolean(),
   bound_user_id: z.string().nullable(),
-  bound_user_handle: z.string().nullable(),
 });
 const backupSchema = object({
   name: z.string(),
@@ -296,7 +294,10 @@ export const actionContracts = {
   ),
   adminFetchAuditLogAction: contract(
     optionalOne(object({ offset: z.number().int().nonnegative().optional() })),
-    object({ entries: z.array(auditEntrySchema) }),
+    object({
+      entries: z.array(auditEntrySchema),
+      users: z.array(userMetadataSchema),
+    }),
   ),
   adminFetchGhostUsersAction: contract(
     noArgs,
@@ -353,6 +354,7 @@ export const actionContracts = {
     ),
     object({
       clients: z.array(clientRecordSchema),
+      users: z.array(userMetadataSchema),
       total: z.number().int().nonnegative(),
     }),
   ),
@@ -571,6 +573,7 @@ export const actionContracts = {
     ),
     object({
       articles: z.array(articleWithMetaSchema),
+      users: z.array(userMetadataSchema),
       hasMore: z.boolean(),
     }),
   ),
@@ -585,6 +588,7 @@ export const actionContracts = {
     ),
     object({
       article: articleWithMetaSchema,
+      users: z.array(userMetadataSchema),
     }),
   ),
   searchNetworkArticlesAction: contract(
@@ -617,7 +621,10 @@ export const actionContracts = {
   ),
   fetchArticleAction: contract(
     one(nonEmptyString),
-    object({ article: articleWithMetaSchema }),
+    object({
+      article: articleWithMetaSchema,
+      users: z.array(userMetadataSchema),
+    }),
   ),
   fetchArticleSegmentAction: contract(
     one(
@@ -674,7 +681,13 @@ export const actionContracts = {
   ),
   deleteArticleAction: contract(one(nonEmptyString), okSchema),
 
-  fetchConversationsAction: contract(noArgs, z.array(conversationSchema)),
+  fetchConversationsAction: contract(
+    noArgs,
+    object({
+      entries: z.array(conversationEntitySchema),
+      users: z.array(userMetadataSchema),
+    }),
+  ),
   fetchConversationRevisionsAction: contract(
     noArgs,
     object({
@@ -769,6 +782,7 @@ export const actionContracts = {
     one(nonEmptyString),
     object({
       members: z.array(groupMemberSchema),
+      users: z.array(userMetadataSchema),
       hidden: z.boolean(),
       no_leave: z.boolean(),
       self_hide_self: z.boolean(),

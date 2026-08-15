@@ -17,7 +17,7 @@ import Chip from "@mui/material/Chip";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArticleIcon from "@mui/icons-material/Article";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
-import type { ArticleWithMeta, Conversation } from "@/shared/types/api";
+import type { Article, Conversation } from "@/client/interact/presentation";
 import { formatBytes } from "@/shared/bytes";
 import { flexGap, vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
@@ -37,12 +37,12 @@ const RECENT_ARTICLES_ID = "article-list:recent";
 interface RecentArticlesRow {
   kind: "recent";
   id: typeof RECENT_ARTICLES_ID;
-  articles: ArticleWithMeta[];
+  articles: Article[];
 }
 
 interface ArticleEntryRow {
   kind: "article";
-  article: ArticleWithMeta;
+  article: Article;
   offset: number;
   cursor: ArticleListCursor;
 }
@@ -70,7 +70,7 @@ function estimateArticleRowSize(row: ArticleRow): number {
 }
 
 interface ArticleListProps {
-  sidebarArticles?: ArticleWithMeta[];
+  sidebarArticles?: Article[];
   currentArticleId?: string | null;
   onOpenArticle: (id: string) => void;
   refreshKey: number;
@@ -85,7 +85,7 @@ function formatDate(s: string) {
   return d.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" });
 }
 
-function formatArticleSize(a: ArticleWithMeta) {
+function formatArticleSize(a: Article) {
   if (a.content_kind === "bundle") {
     return formatBytes(a.file_size || a.content_length || 0);
   }
@@ -104,7 +104,7 @@ const ArticleVirtualRow = React.memo(function ArticleVirtualRow({
   selected,
   onOpenArticle,
 }: {
-  article: ArticleWithMeta;
+  article: Article;
   selected: boolean;
   onOpenArticle: (id: string) => void;
 }) {
@@ -164,7 +164,7 @@ const RecentArticlesVirtualRow = React.memo(function RecentArticlesVirtualRow({
   showEmpty,
   onOpenArticle,
 }: {
-  articles: ArticleWithMeta[];
+  articles: Article[];
   currentArticleId: string | null;
   showEmpty: boolean;
   onOpenArticle: (id: string) => void;

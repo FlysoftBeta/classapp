@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import type { PostEntity, UserMetadata } from "@/shared/types/api";
+import { userMetadataForIds } from "@/server/data/users";
 import { getStickerEntry } from "@/server/infra/stickerLoader";
 import {
   loadStoredContent,
@@ -83,24 +84,10 @@ export function postUserMetadata(
   db: Database,
   posts: readonly PostEntity[],
 ): UserMetadata[] {
-  const ids = [
-    ...new Set(
-      posts
-        .flatMap((post) => [post.user_id, post.reply_user_id])
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  if (!ids.length) return [];
-  const placeholders = ids.map(() => "?").join(", ");
-  return db
-    .prepare(
-      `SELECT u.id,
-        CASE WHEN du.id IS NULL THEN u.handle ELSE NULL END AS handle,
-        COALESCE(du.username, u.username) AS username
-       FROM users u LEFT JOIN deleted_users du ON du.id = u.id
-       WHERE u.id IN (${placeholders})`,
-    )
-    .all(...ids) as UserMetadata[];
+  return userMetadataForIds(
+    db,
+    posts.flatMap((post) => [post.user_id, post.reply_user_id]),
+  );
 }
 
 export function truncatePosts(posts: PostEntity[]): PostEntity[] {

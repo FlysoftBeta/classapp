@@ -22,6 +22,8 @@ import {
 } from "@/server/data/clients";
 import { publishClient } from "@/server/services/eventBus";
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
+import { userMetadataForIds } from "@/server/data/users";
+import type { UserMetadata } from "@/shared/types/api";
 
 export interface ClientRecord {
   id: string;
@@ -31,7 +33,7 @@ export interface ClientRecord {
   ips: string[];
   last_seen: string | null;
   active_sessions: number;
-  session_users: string;
+  session_user_ids: string[];
   konami_locked: boolean;
   throttled_until: string | null;
   attempts: number;
@@ -39,7 +41,6 @@ export interface ClientRecord {
   user_agent: string | null;
   whitelisted: boolean;
   bound_user_id: string | null;
-  bound_user_handle: string | null;
 }
 
 export class ClientService {
@@ -70,7 +71,7 @@ export class ClientService {
     offset = 0,
     limit = 50,
     query = "",
-  ): { clients: ClientRecord[]; total: number } {
+  ): { clients: ClientRecord[]; users: UserMetadata[]; total: number } {
     const total = countClients(this.db, query);
     const clients = listClientAdminRows(this.db, offset, limit, query).map(
       (row) => {
@@ -83,9 +84,7 @@ export class ClientService {
           ips: row.ips ? row.ips.split(",").filter(Boolean) : [],
           last_seen: row.last_seen,
           active_sessions: sessionUsers.length,
-          session_users: sessionUsers
-            .map((session) => `@${session.handle}`)
-            .join(", "),
+          session_user_ids: sessionUsers.map((session) => session.id),
           konami_locked: row.konami_locked === 1,
           throttled_until: row.throttled_until,
           attempts: row.attempts ?? 0,
@@ -93,11 +92,20 @@ export class ClientService {
           user_agent: row.user_agent,
           whitelisted: row.whitelisted === 1,
           bound_user_id: row.bound_user_id,
-          bound_user_handle: row.bound_user_handle,
         };
       },
     );
-    return { clients, total };
+    return {
+      clients,
+      users: userMetadataForIds(
+        this.db,
+        clients.flatMap((client) => [
+          client.bound_user_id,
+          ...client.session_user_ids,
+        ]),
+      ),
+      total,
+    };
   }
 
   setKonamiLocked(clientId: string, locked: boolean): void {

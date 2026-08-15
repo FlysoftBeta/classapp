@@ -67,11 +67,14 @@ export async function fetchConversationAccess(): Promise<ConvEntry[]> {
   observeActionResult(result);
   if (!result.ok) return offlineRepository.getConversations();
   try {
-    await offlineRepository.saveConversations(result.data);
+    await offlineRepository.saveConversations(
+      result.data.entries,
+      result.data.users,
+    );
     return sortConversations(await offlineRepository.getConversations());
   } catch (error) {
     captureDetachedClientIncident("conversation.snapshot-cache", error);
-    return sortConversations([...result.data]);
+    return offlineRepository.getConversations();
   }
 }
 

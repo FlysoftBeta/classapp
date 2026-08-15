@@ -102,6 +102,7 @@ export async function fetchGroupMembersAction(
       .members(expectString(groupId, "群组不存在"));
     return {
       members: result.members,
+      users: result.users,
       hidden: result.hidden,
       no_leave: result.no_leave,
       self_hide_self: result.self_hide_self,

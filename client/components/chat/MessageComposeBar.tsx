@@ -14,10 +14,9 @@ import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
 import type {
   User,
-  Conversation,
-  Post,
   StickerRecentItem,
 } from "@/shared/types/api";
+import type { Conversation, Post } from "@/client/interact/presentation";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
 import { createPost, type CreatePostBody } from "@/client/interact/posts";
 import { sendStickerPost } from "@/client/api/stickers";

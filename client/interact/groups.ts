@@ -15,7 +15,7 @@ const {
 
 export interface GroupMember {
   id: string;
-  handle: string;
+  handle: string | null;
   username: string;
   hide_self?: number;
 }
@@ -107,7 +107,7 @@ export async function fetchGroupMembers(groupId: string) {
   observeActionResult(result);
   if (!result.ok) return offlineRepository.getGroupMembers(groupId);
   await offlineRepository.saveGroupMembers(groupId, result.data);
-  return result.data;
+  return offlineRepository.getGroupMembers(groupId);
 }
 
 export async function patchMyGroupMembership(

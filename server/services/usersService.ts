@@ -201,8 +201,10 @@ export class UserService {
 
   deactivate(id: string): void {
     const user = this.get(id);
-    insertDeletedUser(this.db, user);
-    revokeUserCredentials(this.db, id);
+    this.db.transaction(() => {
+      insertDeletedUser(this.db, user);
+      revokeUserCredentials(this.db, id);
+    })();
   }
 
   purgeIdentity(id: string): void {

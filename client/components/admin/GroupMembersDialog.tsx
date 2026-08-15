@@ -27,7 +27,7 @@ export function GroupMembersDialog({
   onClose: () => void;
 }) {
   const [members, setMembers] = useState<
-    { id: string; handle: string; username: string; hide_self?: number }[]
+    { id: string; handle: string | null; username: string; hide_self?: number }[]
   >([]);
   const [loading, setLoading] = useState(false);
   const [addHandle, setAddHandle] = useState("");

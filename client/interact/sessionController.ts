@@ -83,7 +83,6 @@ export async function bootstrapSession(
         disabled: true,
         reason: "banned",
         banned_until: automatic.banned_until,
-        username: automatic.username,
       });
       store.setAppState("app_locked");
       return;
@@ -194,7 +193,6 @@ export async function loginWithPin(pin: string): Promise<void> {
         disabled: true,
         reason: "banned",
         banned_until: data.banned_until as string,
-        username: data.username as string,
       });
       store.setAppState("app_locked");
       return;

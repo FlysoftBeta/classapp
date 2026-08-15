@@ -248,7 +248,7 @@ export function listGroupMembersForView(
   return isAdmin
     ? (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.created_at, ug.joined_at, ug.hide_self
+          `SELECT ug.user_id AS id, u.created_at, ug.joined_at, ug.hide_self
            FROM group_members ug
            JOIN users u ON ug.user_id = u.id
            WHERE ug.group_id = ?
@@ -257,7 +257,7 @@ export function listGroupMembersForView(
         .all(groupId) as GroupMember[])
     : (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.created_at, ug.joined_at, ug.hide_self
+          `SELECT ug.user_id AS id, u.created_at, ug.joined_at, ug.hide_self
            FROM group_members ug
            JOIN users u ON ug.user_id = u.id
            WHERE ug.group_id = ?

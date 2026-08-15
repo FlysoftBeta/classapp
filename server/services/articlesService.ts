@@ -3,6 +3,7 @@ import type { Database } from "better-sqlite3";
 import type {
   ArticleSidebarPayload,
   ArticleWithMeta,
+  UserMetadata,
 } from "@/shared/types/api";
 import type {
   ArticleListUpdatedPayload,
@@ -27,6 +28,7 @@ import {
   upsertArticleProgressOffset,
   purgeArticlesForUser,
 } from "@/server/data/articles";
+import { userMetadataForIds } from "@/server/data/users";
 import {
   PublicError,
   ContractViolationError,
@@ -80,7 +82,14 @@ export class ArticleService {
       groupId?: string;
     },
   ) {
-    return listArticlesForUser(this.db, userId, input);
+    const result = listArticlesForUser(this.db, userId, input);
+    return {
+      ...result,
+      users: userMetadataForIds(
+        this.db,
+        result.articles.map((article) => article.user_id),
+      ),
+    };
   }
 
   sidebar(userId: string): ArticleSidebarPayload {
@@ -103,13 +112,20 @@ export class ArticleService {
         a.last_read_at ?? a.created_at,
       ),
     );
-    return { current_article_id: currentArticleId, articles };
+    return {
+      current_article_id: currentArticleId,
+      articles,
+      users: userMetadataForIds(
+        this.db,
+        articles.map((article) => article.user_id),
+      ),
+    };
   }
 
   createText(
     userId: string,
     input: CreateArticleInput,
-  ): { article: ArticleWithMeta } {
+  ): { article: ArticleWithMeta; users: UserMetadata[] } {
     const article = this.insertText(
       userId,
       requireTrimmed(input.title, "标题不能为空"),
@@ -117,13 +133,16 @@ export class ArticleService {
       input.group_id,
     );
     this.notifyCreated(userId, article.id);
-    return { article };
+    return {
+      article,
+      users: userMetadataForIds(this.db, [article.user_id]),
+    };
   }
 
   createBundle(
     userId: string,
     input: CreateBundleArticleInput,
-  ): { article: ArticleWithMeta } {
+  ): { article: ArticleWithMeta; users: UserMetadata[] } {
     if (!input.source_path || !input.archive_path)
       throw new ContractViolationError("文件保存失败");
     if (input.source_mime !== "application/pdf")
@@ -144,13 +163,22 @@ export class ArticleService {
     });
     const article = this.requireOwned(id, userId);
     this.notifyCreated(userId, id);
-    return { article };
+    return {
+      article,
+      users: userMetadataForIds(this.db, [article.user_id]),
+    };
   }
 
-  getMeta(userId: string, articleId: string): { article: ArticleWithMeta } {
+  getMeta(
+    userId: string,
+    articleId: string,
+  ): { article: ArticleWithMeta; users: UserMetadata[] } {
     const article = findArticleForUser(this.db, articleId, userId);
     if (!article) throw new PublicError("文章不存在");
-    return { article };
+    return {
+      article,
+      users: userMetadataForIds(this.db, [article.user_id]),
+    };
   }
 
   bundleResource(articleId: string) {
@@ -411,14 +439,22 @@ export class ArticleService {
         current === articleId ||
         (entry.total_read_seconds ?? 0) >= READING_HISTORY_MIN_SECONDS);
     const data: ArticleSidebarUpdatedPayload = visible
-      ? { entry, current_article_id: current }
+      ? {
+          entry,
+          users: userMetadataForIds(this.db, [entry.user_id]),
+          current_article_id: current,
+        }
       : { removed: { article_id: articleId }, current_article_id: current };
     publishUser(userId, { kind: "article.sidebar_updated", data });
   }
   private publishList(userId: string, articleId: string, created = false) {
     const entry = findArticleForUser(this.db, articleId, userId);
     const data: ArticleListUpdatedPayload = entry
-      ? { entry, ...(created ? { created: true } : {}) }
+      ? {
+          entry,
+          users: userMetadataForIds(this.db, [entry.user_id]),
+          ...(created ? { created: true } : {}),
+        }
       : { removed: { article_id: articleId } };
     publishUser(userId, { kind: "article.list_updated", data });
   }

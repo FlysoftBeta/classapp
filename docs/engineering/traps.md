@@ -75,7 +75,9 @@ or embedding them into immutable history.
 
 A stale cached row can permanently block a new server identity reusing the
 handle. Profile changes can also trigger false immutable-content violations.
-Use stable IDs and normalized presentation entities.
+Use stable IDs and normalized presentation entities. Domain APIs/events carry
+deduplicated public user metadata beside entities in a `users` side bundle;
+they do not embed mutable labels in each entity.
 
 ## Broad immutable deep equality
 

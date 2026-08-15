@@ -1,4 +1,4 @@
-import type { Conversation } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import {
   fetchConversationDraft,
   fetchConversations,

@@ -23,10 +23,9 @@ export {
   postSchema,
   textPostSchema,
   stickerPostSchema,
-  type Post,
   type PostEntity,
-  type TextPost,
-  type StickerPost,
+  type TextPostEntity,
+  type StickerPostEntity,
 } from "./post";
 export { isTextPost, isStickerPost, postPreview } from "./post";
 export {
@@ -35,7 +34,12 @@ export {
   type ArticleWithMeta,
   type ArticleSidebarPayload,
 } from "./article";
-export { conversationSchema, type Conversation } from "./conversation";
+export {
+  conversationEntitySchema,
+  groupConversationSchema,
+  dmConversationSchema,
+  type ConversationEntity,
+} from "./conversation";
 export {
   aiMessageStatusSchema,
   aiMessageSchema,

@@ -11,6 +11,9 @@ export function insertDeletedUser(
   user: { id: string; username: string },
 ): void {
   db.prepare(
+    "UPDATE users SET profile_revision = profile_revision + 1 WHERE id = ?",
+  ).run(user.id);
+  db.prepare(
     `INSERT INTO deleted_users (id, username)
      VALUES (?, ?)
      ON CONFLICT(id) DO UPDATE SET

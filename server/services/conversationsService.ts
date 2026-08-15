@@ -1,5 +1,9 @@
 import type { ConvEventSpec, ConvUpdatedPayload } from "@/shared/types/events";
-import type { Conversation } from "@/shared/types/api";
+import type {
+  ConversationEntity,
+  UserMetadata,
+} from "@/shared/types/api";
+import { userMetadataForIds } from "@/server/data/users";
 import type BetterSqlite3 from "better-sqlite3";
 import {
   clearConversationComposeDraft,
@@ -37,7 +41,7 @@ import { parseConvId } from "@/shared/conversations/id";
 export function listConversations(
   db: BetterSqlite3.Database,
   userId: string,
-): Conversation[] {
+): ConversationEntity[] {
   return listConversationEntries(db, userId);
 }
 
@@ -47,7 +51,7 @@ export function getConversationEntry(
   userId: string,
   type: "group" | "dm",
   id: string,
-): Conversation | null {
+): ConversationEntity | null {
   return getConversationEntryRecord(db, userId, type, id);
 }
 
@@ -71,7 +75,12 @@ export function publishConversationUpdate(
     if (entry) {
       publishUserConv(userId, {
         kind: "conv.updated",
-        data: { entry } satisfies ConvUpdatedPayload,
+        data: {
+          entry,
+          users: userMetadataForIds(db, [
+            entry.type === "dm" ? entry.id : null,
+          ]),
+        } satisfies ConvUpdatedPayload,
       });
       return;
     }
@@ -302,9 +311,9 @@ export function getConversations(
   db: BetterSqlite3.Database,
   userId: string,
 ): {
-  groups: Conversation[];
-  dms: Conversation[];
-  entries: Conversation[];
+  groups: ConversationEntity[];
+  dms: ConversationEntity[];
+  entries: ConversationEntity[];
 } {
   const entries = listConversations(db, userId);
   return {
@@ -322,8 +331,18 @@ export interface ConversationRefInput {
 export class ConversationService {
   constructor(private readonly db: BetterSqlite3.Database) {}
 
-  list(userId: string): Conversation[] {
-    return listConversations(this.db, userId);
+  list(userId: string): {
+    entries: ConversationEntity[];
+    users: UserMetadata[];
+  } {
+    const entries = listConversations(this.db, userId);
+    return {
+      entries,
+      users: userMetadataForIds(
+        this.db,
+        entries.map((entry) => (entry.type === "dm" ? entry.id : null)),
+      ),
+    };
   }
 
   revisions(

@@ -16,7 +16,7 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import Slider from "@mui/material/Slider";
 import Button from "@mui/material/Button";
-import type { ArticleWithMeta } from "@/shared/types/api";
+import type { Article } from "@/client/interact/presentation";
 import {
   loadArticleForReader,
   toggleArticleBookmark,
@@ -65,7 +65,7 @@ export default function ArticleReader({
   offlineEnabled,
 }: ArticleReaderProps) {
   const [headerRef, headerHeight] = useObservedElementHeight<HTMLDivElement>();
-  const [loadedMeta, setMeta] = useState<ArticleWithMeta | null>(null);
+  const [loadedMeta, setMeta] = useState<Article | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
   const [contentLength, setContentLength] = useState(0);
   const [isBookmarked, setIsBookmarked] = useState(false);
@@ -88,7 +88,7 @@ export default function ArticleReader({
 
   useEffect(() => {
     let cancelled = false;
-    const applyArticle = async (article: ArticleWithMeta) => {
+    const applyArticle = async (article: Article) => {
       if (cancelled) return;
       setMeta(article);
       setIsBookmarked(article.is_bookmarked);

@@ -1,11 +1,16 @@
 import type {
   AppDisableState,
   ArticleWithMeta,
-  Conversation,
-  Post,
+  ConversationEntity,
+  PostEntity,
   User,
   UserMetadata,
 } from "@/shared/types/api";
+import type {
+  Article,
+  Conversation,
+  Post,
+} from "@/client/interact/presentation";
 import { dmConvId, groupConvId, parseConvId } from "@/shared/conversations/id";
 import { requestResult, runTransaction } from "./idb";
 import { STORES, GLOBAL_KEYS, type StoreName } from "./schema";
@@ -170,6 +175,28 @@ class Values {
       },
     };
   }
+}
+
+async function mergeUserMetadata(
+  store: IDBObjectStore,
+  incoming: UserMetadata,
+): Promise<void> {
+  const current = (await requestResult(store.get(incoming.id))) as
+    | ObjectiveUser
+    | undefined;
+  // Pre-v4 cached identities have no comparable server revision. Treat them
+  // as older than the first versioned side bundle while retaining offline UX.
+  const currentRevision = current?.revision ?? -1;
+  if (current && incoming.revision < currentRevision) return;
+  if (
+    current &&
+    incoming.revision === currentRevision &&
+    (current.handle !== incoming.handle ||
+      current.username !== incoming.username)
+  ) {
+    throw new Error(`User metadata revision collision: ${incoming.id}`);
+  }
+  store.put(incoming satisfies ObjectiveUser);
 }
 
 class Policies {
@@ -380,23 +407,21 @@ function splitArticle(entry: ArticleWithMeta): {
     lastReadAt: string | null;
   };
 } {
-  const {
-    is_bookmarked,
-    bookmark_updated_at_ms,
-    current_offset,
-    current_offset_updated_at,
-    current_locator: _locator,
-    total_read_seconds,
-    last_read_at,
-    list_sort_at: _sort,
-    username: _username,
-    handle: _handle,
-    ...core
-  } = entry;
-  void _locator;
-  void _sort;
-  void _username;
-  void _handle;
+  const core: ObjectiveArticle["value"] = {
+    id: entry.id,
+    user_id: entry.user_id,
+    group_id: entry.group_id,
+    title: entry.title,
+    provider: entry.provider,
+    content_kind: entry.content_kind,
+    source_path: entry.source_path,
+    archive_path: entry.archive_path,
+    mime_type: entry.mime_type,
+    file_size: entry.file_size,
+    original_filename: entry.original_filename,
+    created_at: entry.created_at,
+    content_length: entry.content_length,
+  };
   return {
     entity: {
       id: entry.id,
@@ -409,15 +434,15 @@ function splitArticle(entry: ArticleWithMeta): {
     },
     state: {
       bookmark: {
-        value: is_bookmarked,
-        updatedAt: bookmark_updated_at_ms,
+        value: entry.is_bookmarked,
+        updatedAt: entry.bookmark_updated_at_ms,
       },
       resume: {
-        value: current_offset,
-        updatedAt: current_offset_updated_at,
+        value: entry.current_offset,
+        updatedAt: entry.current_offset_updated_at,
       },
-      totalReadSeconds: total_read_seconds ?? 0,
-      lastReadAt: last_read_at ?? null,
+      totalReadSeconds: entry.total_read_seconds ?? 0,
+      lastReadAt: entry.last_read_at ?? null,
     },
   };
 }
@@ -552,7 +577,7 @@ function sortConversations(entries: Conversation[]): Conversation[] {
 async function upsertConversationInTransaction(
   tx: IDBTransaction,
   meId: string,
-  entry: Conversation,
+  entry: ConversationEntity,
 ): Promise<void> {
   const now = Date.now();
   const parsed = parseConvId(entry.conv_id);
@@ -583,11 +608,6 @@ async function upsertConversationInTransaction(
       last_at: entry.last_at,
       touched_at: now,
     } satisfies DmRow);
-    tx.objectStore(STORES.USERS).put({
-      id: entry.id,
-      handle: entry.handle,
-      username: entry.name,
-    } satisfies ObjectiveUser);
   } else {
     throw new Error(`Conversation type disagrees with id: ${entry.conv_id}`);
   }
@@ -652,13 +672,6 @@ async function upsertArticle(
       // The server enforces Article immutability. Re-publishing the same entity
       // is idempotent and avoids an unnecessary read-before-write race.
       articleStore.put(entity);
-      if (entry.user_id) {
-        tx.objectStore(STORES.USERS).put({
-          id: entry.user_id,
-          handle: entry.handle ?? null,
-          username: entry.username ?? "已注销",
-        } satisfies ObjectiveUser);
-      }
       const accessStore = tx.objectStore(STORES.ME_ACCESS);
       const currentAccess = (await requestResult(
         accessStore.get([meId, "article", entry.id]),
@@ -697,7 +710,7 @@ async function upsertArticle(
 
 async function materializeArticle(
   access: ArticleAccessRow,
-): Promise<ArticleWithMeta | null> {
+): Promise<Article | null> {
   const article = await runTransaction(STORES.ARTICLES, "readonly", (tx) =>
     requestResult(tx.objectStore(STORES.ARTICLES).get(access.object_id)),
   );
@@ -737,7 +750,7 @@ async function materializeArticle(
     total_read_seconds: state.total_read_seconds,
     last_read_at: state.last_read_at,
     ...(membership?.sort_at ? { list_sort_at: membership.sort_at } : {}),
-  } as ArticleWithMeta;
+  } as Article;
 }
 
 export function conversationRetentionCutoff(
@@ -1076,7 +1089,10 @@ function createOfflineRepository(userScope: string) {
       });
     },
 
-    async saveConversations(entries: Conversation[]): Promise<void> {
+    async saveConversations(
+      entries: ConversationEntity[],
+      users: UserMetadata[],
+    ): Promise<void> {
       const meId = actorId();
       const stores: StoreName[] = [
         STORES.GROUPS,
@@ -1094,6 +1110,8 @@ function createOfflineRepository(userScope: string) {
             .getAllKeys(IDBKeyRange.only([meId, "conversation"])),
         );
         for (const key of oldKeys) accessStore.delete(key);
+        const userStore = tx.objectStore(STORES.USERS);
+        for (const user of users) await mergeUserMetadata(userStore, user);
         for (const entry of entries) {
           await upsertConversationInTransaction(tx, meId, entry);
         }
@@ -1118,7 +1136,10 @@ function createOfflineRepository(userScope: string) {
       );
     },
 
-    async upsertConversation(entry: Conversation): Promise<void> {
+    async upsertConversation(
+      entry: ConversationEntity,
+      users: UserMetadata[],
+    ): Promise<void> {
       const meId = actorId();
       await runTransaction(
         [
@@ -1129,7 +1150,11 @@ function createOfflineRepository(userScope: string) {
           STORES.ME_CONV_STATE,
         ],
         "readwrite",
-        (tx) => upsertConversationInTransaction(tx, meId, entry),
+        async (tx) => {
+          const userStore = tx.objectStore(STORES.USERS);
+          for (const user of users) await mergeUserMetadata(userStore, user);
+          return upsertConversationInTransaction(tx, meId, entry);
+        },
       );
     },
 
@@ -1140,7 +1165,7 @@ function createOfflineRepository(userScope: string) {
       await runTransaction(
         [STORES.ME_ACCESS, STORES.ME_CONV_STATE],
         "readwrite",
-        (tx) => {
+        async (tx) => {
           tx.objectStore(STORES.ME_ACCESS).delete([
             actorId(),
             "conversation",
@@ -1153,46 +1178,63 @@ function createOfflineRepository(userScope: string) {
 
     async saveGroupMembers(
       groupId: string,
-      payload: GroupMembersAccessRow["snapshot"],
+      payload: GroupMembersAccessRow["snapshot"] & {
+        users: UserMetadata[];
+      },
     ): Promise<void> {
       await runTransaction(
         [STORES.ME_ACCESS, STORES.USERS],
         "readwrite",
-        (tx) => {
+        async (tx) => {
+          const { users: userMetadata, ...snapshot } = payload;
           tx.objectStore(STORES.ME_ACCESS).put({
             me_id: actorId(),
             kind: "group-members",
             object_id: groupId,
-            snapshot: payload,
+            snapshot,
             snapshot_at: Date.now(),
           } satisfies GroupMembersAccessRow);
           const users = tx.objectStore(STORES.USERS);
-          for (const member of payload.members) {
-            users.put({
-              id: member.id,
-              handle: member.handle,
-              username: member.username,
-            } satisfies ObjectiveUser);
-          }
+          for (const user of userMetadata)
+            await mergeUserMetadata(users, user);
         },
       );
     },
 
     async getGroupMembers(groupId: string) {
-      return runTransaction(STORES.ME_ACCESS, "readonly", async (tx) => {
-        const conversation = await requestResult(
-          tx
-            .objectStore(STORES.ME_ACCESS)
-            .get([actorId(), "conversation", groupConvId(groupId)]),
-        );
-        if (!conversation) return null;
-        const row = await requestResult(
-          tx
-            .objectStore(STORES.ME_ACCESS)
-            .get([actorId(), "group-members", groupId]),
-        );
-        return (row as GroupMembersAccessRow | undefined)?.snapshot ?? null;
-      });
+      return runTransaction(
+        [STORES.ME_ACCESS, STORES.USERS],
+        "readonly",
+        async (tx) => {
+          const conversation = await requestResult(
+            tx
+              .objectStore(STORES.ME_ACCESS)
+              .get([actorId(), "conversation", groupConvId(groupId)]),
+          );
+          if (!conversation) return null;
+          const row = await requestResult(
+            tx
+              .objectStore(STORES.ME_ACCESS)
+              .get([actorId(), "group-members", groupId]),
+          );
+          const snapshot = (row as GroupMembersAccessRow | undefined)?.snapshot;
+          if (!snapshot) return null;
+          const userStore = tx.objectStore(STORES.USERS);
+          const members = await Promise.all(
+            snapshot.members.map(async (member) => {
+              const user = (await requestResult(
+                userStore.get(member.id),
+              )) as ObjectiveUser | undefined;
+              return {
+                ...member,
+                handle: user?.handle ?? null,
+                username: user?.username ?? "已注销",
+              };
+            }),
+          );
+          return { ...snapshot, members };
+        },
+      );
     },
 
     async setConversationFlag(
@@ -1424,7 +1466,7 @@ function createOfflineRepository(userScope: string) {
     async savePosts(
       ref: Pick<Conversation, "type" | "id"> &
         Partial<Pick<Conversation, "conv_id">>,
-      incoming: Post[],
+      incoming: PostEntity[],
       options: {
         extendCoverage?: boolean;
         liveAppend?: boolean;
@@ -1455,17 +1497,7 @@ function createOfflineRepository(userScope: string) {
           let oldest: { id: string; order: number } | null = null;
           let newest: { id: string; order: number } | null = null;
           for (const post of incoming) {
-            const {
-              username: _username,
-              handle: _handle,
-              reply_username: _replyUsername,
-              reply_handle: _replyHandle,
-              ...entity
-            } = post;
-            void _username;
-            void _handle;
-            void _replyUsername;
-            void _replyHandle;
+            const entity = post;
             if (
               !Number.isSafeInteger(post.sequence) ||
               (post.sequence ?? 0) <= 0
@@ -1538,19 +1570,16 @@ function createOfflineRepository(userScope: string) {
 
     async saveUserMetadata(users: UserMetadata[]): Promise<void> {
       if (!users.length) return;
-      await runTransaction(STORES.USERS, "readwrite", (tx) => {
+      await runTransaction(STORES.USERS, "readwrite", async (tx) => {
         const store = tx.objectStore(STORES.USERS);
-        for (const user of users) {
-          store.put({
-            id: user.id,
-            handle: user.handle,
-            username: user.username,
-          } satisfies ObjectiveUser);
-        }
+        for (const user of users) await mergeUserMetadata(store, user);
       });
     },
 
-    async applyPostVersion(post: Post, liveAppend = false): Promise<void> {
+    async applyPostVersion(
+      post: PostEntity,
+      liveAppend = false,
+    ): Promise<void> {
       const parsed = parseConvId(post.conv_id);
       if (!parsed) return;
       const ref =
@@ -1574,7 +1603,7 @@ function createOfflineRepository(userScope: string) {
     async reconcilePostPage(
       ref: Pick<Conversation, "type" | "id"> &
         Partial<Pick<Conversation, "conv_id">>,
-      incoming: Post[],
+      incoming: PostEntity[],
       page: {
         beforeId?: string;
         afterId?: string;
@@ -1665,7 +1694,7 @@ function createOfflineRepository(userScope: string) {
     async reconcilePostRevisions(
       ref: Pick<Conversation, "type" | "id"> &
         Partial<Pick<Conversation, "conv_id">>,
-      incoming: Post[],
+      incoming: PostEntity[],
       revision: number,
       revisionSum?: string,
     ): Promise<void> {
@@ -1865,20 +1894,20 @@ function createOfflineRepository(userScope: string) {
       }
     },
 
-    async getArticleList(): Promise<ArticleWithMeta[]> {
+    async getArticleList(): Promise<Article[]> {
       const rows = (await accessRows(
         actorId(),
         "article",
       )) as ArticleAccessRow[];
       const articles = await Promise.all(rows.map(materializeArticle));
       return articles
-        .filter((value): value is ArticleWithMeta => !!value)
+        .filter((value): value is Article => !!value)
         .sort((left, right) => right.created_at.localeCompare(left.created_at));
     },
 
-    async getSavedArticleList(): Promise<ArticleWithMeta[]> {
+    async getSavedArticleList(): Promise<Article[]> {
       const entries = await this.getArticleList();
-      const result: ArticleWithMeta[] = [];
+      const result: Article[] = [];
       for (const article of entries) {
         if ((await this.getArticlePolicy(article.id)).mode === "retained") {
           result.push(article);
@@ -2069,7 +2098,7 @@ function createOfflineRepository(userScope: string) {
       });
     },
 
-    async getArticleMeta(articleId: string): Promise<ArticleWithMeta | null> {
+    async getArticleMeta(articleId: string): Promise<Article | null> {
       const row = await runTransaction(STORES.ME_ACCESS, "readonly", (tx) =>
         requestResult(
           tx

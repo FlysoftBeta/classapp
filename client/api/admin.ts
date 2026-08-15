@@ -1,6 +1,7 @@
 import type { ActionArgs, ActionData } from "@/shared/protocol/actions";
 import { observeActionResult, apiFetch, authHeaders } from "./runtime";
 import { client } from "@/client/interact/remote/client";
+import { cacheUserMetadata } from "@/client/interact/users";
 
 const {
   adminConfirmUpdateAction,
@@ -43,14 +44,24 @@ export type AdminToolData = {
   error?: string;
 };
 
-export type AdminAuditEntry =
+type AdminAuditWire =
   ActionData<"adminFetchAuditLogAction">["entries"][number];
+export type AdminAuditEntry = AdminAuditWire & {
+  actor_handle: string | null;
+};
 
 export async function adminFetchAuditLog(offset = 0) {
   const result = await adminFetchAuditLogAction({ offset });
   observeActionResult(result);
   if (!result.ok) throw new Error(result.error.message);
-  return result.data.entries;
+  await cacheUserMetadata(result.data.users);
+  const users = new Map(result.data.users.map((user) => [user.id, user]));
+  return result.data.entries.map((entry) => ({
+    ...entry,
+    actor_handle: entry.actor_id
+      ? (users.get(entry.actor_id)?.handle ?? null)
+      : null,
+  }));
 }
 
 // ── Users ───────────────────────────────────────────────────────────────────
@@ -196,8 +207,12 @@ export async function adminMutateClients(
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
-export type AdminClientRecord =
+type AdminClientWire =
   ActionData<"adminFetchClientsAction">["clients"][number];
+export type AdminClientRecord = AdminClientWire & {
+  session_users: string;
+  bound_user_handle: string | null;
+};
 
 export async function adminFetchClients(offset = 0, query = "") {
   const result = await adminFetchClientsAction({ offset, q: query });
@@ -205,7 +220,20 @@ export async function adminFetchClients(offset = 0, query = "") {
   if (!result.ok) {
     throw new Error(result.error.message);
   }
-  return result.data;
+  await cacheUserMetadata(result.data.users);
+  const users = new Map(result.data.users.map((user) => [user.id, user]));
+  return {
+    ...result.data,
+    clients: result.data.clients.map((client) => ({
+      ...client,
+      session_users: client.session_user_ids
+        .map((id) => `@${users.get(id)?.handle ?? id}`)
+        .join(", "),
+      bound_user_handle: client.bound_user_id
+        ? (users.get(client.bound_user_id)?.handle ?? null)
+        : null,
+    })),
+  };
 }
 
 export async function adminWhitelistCurrentClient() {

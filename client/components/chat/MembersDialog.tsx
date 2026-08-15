@@ -170,7 +170,7 @@ export function MembersDialog({
                       size="small"
                       variant="text"
                       onClick={() => {
-                        onStartDm(m.id, m.handle);
+                        onStartDm(m.id, m.handle ?? "");
                         setOpen(false);
                       }}
                     >

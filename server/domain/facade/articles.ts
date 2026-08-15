@@ -2,6 +2,7 @@ import type { Actor } from "@/server/runtime/actor";
 import type {
   ArticleSidebarPayload,
   ArticleWithMeta,
+  UserMetadata,
 } from "@/shared/types/api";
 import type {
   ArticleService,
@@ -53,7 +54,11 @@ export class ArticleActorFacade {
     cursor?: { sortAt: string; id: string };
     direction?: "before" | "after";
     groupId?: string;
-  }): Promise<{ articles: ArticleWithMeta[]; hasMore: boolean }> {
+  }): Promise<{
+    articles: ArticleWithMeta[];
+    users: UserMetadata[];
+    hasMore: boolean;
+  }> {
     const user = await this.actor.requireFeature("articles");
     if (input.groupId) this.requireMember(user.id, input.groupId);
     return this.articles.list(user.id, input);
@@ -66,7 +71,7 @@ export class ArticleActorFacade {
 
   async createText(
     input: CreateArticleInput,
-  ): Promise<{ article: ArticleWithMeta }> {
+  ): Promise<{ article: ArticleWithMeta; users: UserMetadata[] }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
     this.requireCanPublish(user, input.group_id);
@@ -75,7 +80,7 @@ export class ArticleActorFacade {
 
   async createBundle(
     input: CreateBundleArticleInput,
-  ): Promise<{ article: ArticleWithMeta }> {
+  ): Promise<{ article: ArticleWithMeta; users: UserMetadata[] }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
     this.requireCanPublish(user, input.group_id);
@@ -89,7 +94,9 @@ export class ArticleActorFacade {
     this.requireCanPublish(user, groupId);
   }
 
-  async getMeta(articleId: string): Promise<{ article: ArticleWithMeta }> {
+  async getMeta(
+    articleId: string,
+  ): Promise<{ article: ArticleWithMeta; users: UserMetadata[] }> {
     const user = await this.actor.requireFeature("articles");
     this.requireAccess(user.id, articleId);
     const result = this.articles.getMeta(user.id, articleId);

@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { User, Conversation, Post } from "@/shared/types/api";
+import type { User } from "@/shared/types/api";
+import type { Conversation, Post } from "@/client/interact/presentation";
 import type { PostStreamEvent } from "@/client/hooks/useAppLogic";
 import type {
   Alignment,

@@ -1,4 +1,7 @@
-import type { Conversation } from "@/shared/types/api";
+import type {
+  ConversationEntity,
+  UserMetadata,
+} from "@/shared/types/api";
 import type {
   ConversationRefInput,
   ConversationService,
@@ -11,7 +14,10 @@ export class ConversationActorFacade {
     private readonly conversations: ConversationService,
   ) {}
 
-  async list(): Promise<Conversation[]> {
+  async list(): Promise<{
+    entries: ConversationEntity[];
+    users: UserMetadata[];
+  }> {
     const user = await this.actor.requireUser();
     return this.conversations.list(user.id);
   }

@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { insertAuditEntry, listAuditEntries } from "@/server/data/audit";
+import { userMetadataForIds } from "@/server/data/users";
 
 /** Structured records of successful administrative decisions. */
 export class AuditService {
@@ -16,7 +17,14 @@ export class AuditService {
   }
 
   list(offset = 0) {
-    return { entries: listAuditEntries(this.db, offset, 100) };
+    const entries = listAuditEntries(this.db, offset, 100);
+    return {
+      entries,
+      users: userMetadataForIds(
+        this.db,
+        entries.map((entry) => entry.actor_id),
+      ),
+    };
   }
 }
 

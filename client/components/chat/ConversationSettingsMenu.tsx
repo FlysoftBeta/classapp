@@ -16,7 +16,7 @@ import Slider from "@mui/material/Slider";
 import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import type { Conversation } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 import {
   setConversationMuted,
   setConversationPinned,

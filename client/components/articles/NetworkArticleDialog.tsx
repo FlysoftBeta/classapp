@@ -17,7 +17,7 @@ import {
   startNetworkArticleDownload,
 } from "@/client/interact/articles";
 import { taskStore } from "@/client/hooks/useTaskStore";
-import type { Conversation } from "@/shared/types/api";
+import type { Conversation } from "@/client/interact/presentation";
 
 type Result =
   Awaited<ReturnType<typeof searchNetworkArticles>> extends infer R

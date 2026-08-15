@@ -1,9 +1,5 @@
-import type {
-  Conversation,
-  Post,
-  PostEntity,
-  UserMetadata,
-} from "@/shared/types/api";
+import type { PostEntity, UserMetadata } from "@/shared/types/api";
+import type { Conversation, Post } from "@/client/interact/presentation";
 import type { CreatePostPayload } from "@/shared/validation/posts";
 import { observeActionResult } from "@/client/api/runtime";
 const {

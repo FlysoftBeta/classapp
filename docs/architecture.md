@@ -137,7 +137,7 @@ from whether the client seems online.
 
 ## Data topology
 
-The authoritative server database is SQLite schema v21 in the examined working
+The authoritative server database is SQLite schema v22 in the examined working
 tree, with v17 as the accepted migration baseline. The browser uses the shared
 `classapp-runtime` IndexedDB database but has two independent schema owners:
 

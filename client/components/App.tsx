@@ -816,6 +816,7 @@ export default function App() {
       {appState === "app_locked" && (
         <AppLockedScreen
           state={appDisable}
+          username={user?.username}
           onAutoLock={lockKonami}
           onLogout={handleLogout}
           onLockNow={lockKonami}
