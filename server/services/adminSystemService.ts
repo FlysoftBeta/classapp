@@ -6,7 +6,7 @@ import {
   listBackupFiles,
   buildBackupDownload,
 } from "@/server/infra/dbBackup";
-import { updateManager } from "@/server/infra/updateManager";
+import { updateManager } from "@/server/infra/update/manager";
 import { PublicError } from "@/server/services/incidentService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
 
@@ -52,8 +52,31 @@ export class AdminSystemService {
           applied_at: null,
           seconds_remaining: 0,
           timeout_seconds: 0,
+          cloud_checking: false,
+          cloud_installing: false,
+          cloud_latest_build_id: null,
+          cloud_update_available: false,
+          cloud_last_checked_at: null,
+          cloud_last_error: null,
           disabled: true,
         };
+  }
+
+  cloudConfigChanged(): void {
+    updateManager()?.cloudConfigChanged();
+  }
+
+  async checkCloudUpdate() {
+    const manager = updateManager();
+    if (!manager) throw new PublicError("当前环境已禁用在线更新");
+    return manager.checkCloudUpdate();
+  }
+
+  async installCloudUpdate(): Promise<{ ok: true; message: string }> {
+    const manager = updateManager();
+    if (!manager) throw new PublicError("当前环境已禁用在线更新");
+    await manager.installCloudUpdate();
+    return { ok: true, message: "服务器即将重启以应用云端更新" };
   }
 
   getHttpsStatus() {

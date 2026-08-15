@@ -3,6 +3,69 @@ import type BetterSqlite3 from "better-sqlite3";
 export const IDLE_LOCK_TIMEOUT_MINUTES = 5;
 export const PENDING_UPDATE_KEY = "pending_update_at";
 export const HTTPS_REDIRECT_KEY = "https_redirect_enabled";
+export const CLOUD_DEPLOY_ENABLED_KEY = "cloud_deploy_enabled";
+export const UPDATE_AUTO_CHECK_KEY = "update_auto_check";
+export const UPDATE_MANIFEST_URL_KEY = "update_manifest_url";
+
+export interface CloudUpdateConfig {
+  cloud_deploy_enabled: boolean;
+  update_auto_check: boolean;
+  update_manifest_url: string;
+}
+
+function getConfigValue(
+  db: BetterSqlite3.Database,
+  key: string,
+): string | null {
+  const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key) as
+    { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+function setConfigValue(
+  db: BetterSqlite3.Database,
+  key: string,
+  value: string,
+): void {
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run(
+    key,
+    value,
+  );
+}
+
+export function getCloudUpdateConfig(
+  db: BetterSqlite3.Database,
+): CloudUpdateConfig {
+  return {
+    cloud_deploy_enabled: getConfigValue(db, CLOUD_DEPLOY_ENABLED_KEY) === "1",
+    update_auto_check: getConfigValue(db, UPDATE_AUTO_CHECK_KEY) === "1",
+    update_manifest_url: getConfigValue(db, UPDATE_MANIFEST_URL_KEY) ?? "",
+  };
+}
+
+export function setCloudUpdateConfig(
+  db: BetterSqlite3.Database,
+  input: Partial<CloudUpdateConfig>,
+): CloudUpdateConfig {
+  if (input.cloud_deploy_enabled !== undefined) {
+    setConfigValue(
+      db,
+      CLOUD_DEPLOY_ENABLED_KEY,
+      input.cloud_deploy_enabled ? "1" : "0",
+    );
+  }
+  if (input.update_auto_check !== undefined) {
+    setConfigValue(
+      db,
+      UPDATE_AUTO_CHECK_KEY,
+      input.update_auto_check ? "1" : "0",
+    );
+  }
+  if (input.update_manifest_url !== undefined) {
+    setConfigValue(db, UPDATE_MANIFEST_URL_KEY, input.update_manifest_url);
+  }
+  return getCloudUpdateConfig(db);
+}
 
 export function getPendingUpdateAt(db: BetterSqlite3.Database): string | null {
   const row = db

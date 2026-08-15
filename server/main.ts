@@ -10,7 +10,7 @@ import { createHttpHandler } from "@/server/http/handler";
 import { getDb } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
-import { setUpdateManager, UpdateManager } from "./infra/updateManager";
+import { setUpdateManager, UpdateManager } from "./infra/update/manager";
 import { Runtime } from "@/server/runtime/runtime";
 
 export async function bootstrap(
@@ -76,6 +76,7 @@ export async function bootstrap(
     }
   }
   return async () => {
+    setUpdateManager(null);
     stopMaintenance();
     protocol.close();
     await Promise.all(

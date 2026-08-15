@@ -64,6 +64,9 @@ const configSchema = object({
   identity_methods: z.array(z.enum(["mac", "ip", "user_agent"])).min(1),
   announcement_content: z.string(),
   announcement_revision: z.number().int().nonnegative(),
+  cloud_deploy_enabled: z.boolean(),
+  update_auto_check: z.boolean(),
+  update_manifest_url: z.string(),
 });
 const announcementSchema = object({
   content: z.string(),
@@ -119,6 +122,12 @@ const updateStatusSchema = object({
   seconds_remaining: z.number().int().nonnegative(),
   timeout_seconds: z.number().int().nonnegative(),
   disabled: z.boolean(),
+  cloud_checking: z.boolean(),
+  cloud_installing: z.boolean(),
+  cloud_latest_build_id: z.string().nullable(),
+  cloud_update_available: z.boolean(),
+  cloud_last_checked_at: z.string().nullable(),
+  cloud_last_error: z.string().nullable(),
 });
 const httpsStatusSchema = object({
   configured: z.boolean(),
@@ -385,6 +394,9 @@ export const actionContracts = {
           .min(1)
           .optional(),
         announcement_content: z.string().max(10000).optional(),
+        cloud_deploy_enabled: z.boolean().optional(),
+        update_auto_check: z.boolean().optional(),
+        update_manifest_url: z.string().max(2048).optional(),
       }),
     ),
     object({ ok: z.literal(true), ...configSchema.shape }),
@@ -404,6 +416,14 @@ export const actionContracts = {
   ),
   adminDeleteBackupAction: contract(one(nonEmptyString), okSchema),
   adminFetchUpdateStatusAction: contract(noArgs, updateStatusSchema),
+  adminCheckCloudUpdateAction: contract(
+    noArgs,
+    object({ build_id: z.string(), update_available: z.boolean() }),
+  ),
+  adminInstallCloudUpdateAction: contract(
+    noArgs,
+    object({ ok: z.literal(true), message: z.string() }),
+  ),
   adminFetchHttpsStatusAction: contract(noArgs, httpsStatusSchema),
   adminConfirmUpdateAction: contract(noArgs, okSchema),
   adminRollbackAction: contract(

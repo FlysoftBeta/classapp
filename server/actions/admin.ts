@@ -256,6 +256,18 @@ export async function adminFetchUpdateStatusAction() {
   });
 }
 
+export async function adminCheckCloudUpdateAction() {
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().checkCloudUpdate();
+  });
+}
+
+export async function adminInstallCloudUpdateAction() {
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().installCloudUpdate();
+  });
+}
+
 export async function adminConfirmUpdateAction() {
   return withActionScope(async (scope) => {
     return scope.facades().administration().confirmUpdate();

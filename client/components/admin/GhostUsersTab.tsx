@@ -14,6 +14,7 @@ import {
   adminFetchGhostUsers,
 } from "@/client/api/admin";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 import { HelpSection } from "@/client/components/shared/HelpTip";
 import { SelectionActionBar, SelectionActionIcon } from "./SelectionActionBar";
@@ -68,7 +69,7 @@ export function GhostUsersTab() {
       id: "created",
       label: "创建时间",
       width: 180,
-      render: (entry) => entry.created_at.slice(0, 16),
+      render: (entry) => formatDeviceDateTime(entry.created_at),
     },
     {
       id: "state",

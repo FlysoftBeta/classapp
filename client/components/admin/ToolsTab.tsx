@@ -21,22 +21,9 @@ import {
   type AdminTeachDocument,
 } from "@/client/api/admin";
 import { formatBytes } from "@/shared/bytes";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 
 const DOCUMENT_REFRESH_MS = 4_000;
-
-function formatCapturedAt(value: string): string {
-  const normalized = /(?:Z|[+-]\d\d:\d\d)$/.test(value)
-    ? value
-    : `${value.replace(" ", "T")}Z`;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(new Date(normalized));
-}
 
 function DocumentTypeIcon({
   type,
@@ -275,7 +262,7 @@ export function ToolsTab({ token }: { token: string }) {
                     {document.name}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {formatCapturedAt(document.created_at)} ·{" "}
+                    {formatDeviceDateTime(document.created_at, true)} ·{" "}
                     {document.application} · {formatBytes(document.file_size)}
                   </Typography>
                 </Box>

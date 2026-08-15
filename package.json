@@ -18,6 +18,7 @@
     "reset": "node scripts/dev/reset-dev.mjs",
     "https:check": "node scripts/operation/duckdns-certificate.mjs --check",
     "https:renew": "node scripts/operation/duckdns-certificate.mjs --renew --agree-tos",
+    "deploy-gitee": "node scripts/operation/deploy-gitee.mjs",
     "prelint": "npm run infini:build && npm run zstd:build",
     "lint": "tsc --noEmit && eslint",
     "format": "prettier . --write"

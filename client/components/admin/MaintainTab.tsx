@@ -13,10 +13,15 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
 import LinearProgress from "@mui/material/LinearProgress";
+import TextField from "@mui/material/TextField";
 import DeleteIcon from "@mui/icons-material/Delete";
 import BackupIcon from "@mui/icons-material/Backup";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import { flexGap } from "@/client/lib/css";
+import {
+  formatDeviceDate,
+  formatDeviceDateTime,
+} from "@/client/lib/deviceTime";
 import {
   adminBackupDownloadUrl,
   adminFetchConfig,
@@ -29,6 +34,8 @@ import {
   adminDeployPackage,
   adminConfirmUpdate,
   adminRollback,
+  adminCheckCloudUpdate,
+  adminInstallCloudUpdate,
 } from "@/client/api/admin";
 import { formatBytes } from "@/shared/bytes";
 import type { ActionData } from "@/shared/protocol/actions";
@@ -41,6 +48,9 @@ type HttpsStatus = ActionData<"adminFetchHttpsStatusAction">;
 
 export function MaintainTab({ token }: { token: string }) {
   const [httpsRedirect, setHttpsRedirect] = useState(false);
+  const [cloudDeploy, setCloudDeploy] = useState(false);
+  const [autoCheck, setAutoCheck] = useState(false);
+  const [manifestUrl, setManifestUrl] = useState("");
   const [cfgLoading, setCfgLoading] = useState(true);
   const [cfgSaving, setCfgSaving] = useState(false);
   const [cfgMsg, setCfgMsg] = useState("");
@@ -66,6 +76,9 @@ export function MaintainTab({ token }: { token: string }) {
     const d = await adminFetchConfig();
     if (d) {
       setHttpsRedirect(!!d.https_redirect_enabled);
+      setCloudDeploy(d.cloud_deploy_enabled);
+      setAutoCheck(d.update_auto_check);
+      setManifestUrl(d.update_manifest_url);
     }
     setCfgLoading(false);
   }, []);
@@ -104,18 +117,26 @@ export function MaintainTab({ token }: { token: string }) {
     system_locked?: boolean;
     https_redirect_enabled?: boolean;
     announcement_content?: string;
+    cloud_deploy_enabled?: boolean;
+    update_auto_check?: boolean;
+    update_manifest_url?: string;
   }) => {
     setCfgSaving(true);
     setCfgMsg("");
-    const { res } = await adminUpdateConfig(updates);
+    const { res, data } = await adminUpdateConfig(updates);
     if (res.ok) {
       if (updates.https_redirect_enabled !== undefined) {
         setHttpsRedirect(updates.https_redirect_enabled);
         void fetchHttpsStatus();
       }
+      if ("cloud_deploy_enabled" in data) {
+        setCloudDeploy(data.cloud_deploy_enabled);
+        setAutoCheck(data.update_auto_check);
+        setManifestUrl(data.update_manifest_url);
+      }
       setCfgMsg("已保存");
     } else {
-      setCfgMsg("保存失败");
+      setCfgMsg(`保存失败：${"error" in data ? data.error : "请求失败"}`);
     }
     setCfgSaving(false);
   };
@@ -164,7 +185,7 @@ export function MaintainTab({ token }: { token: string }) {
       id: "created",
       label: "时间",
       width: 180,
-      render: (backup) => backup.created_at.slice(0, 16),
+      render: (backup) => formatDeviceDateTime(backup.created_at),
     },
     {
       id: "actions",
@@ -205,6 +226,38 @@ export function MaintainTab({ token }: { token: string }) {
         /* not ready yet */
       }
     }, 3000);
+  };
+
+  const handleCloudCheck = async () => {
+    setUpdateStatusLoading(true);
+    setDeployMsg("");
+    const { res, data } = await adminCheckCloudUpdate();
+    if (!res.ok) {
+      setDeployMsg(`检查失败：${"error" in data ? data.error : "请求失败"}`);
+    }
+    await fetchUpdateStatus();
+  };
+
+  const handleCloudInstall = async () => {
+    if (!confirm("确认下载并安装这个云端版本？安装后仍需在 3 分钟内确认。")) {
+      return;
+    }
+    setDeploying(true);
+    setDeployMsg("正在下载并校验云端更新…");
+    try {
+      const { res, data } = await adminInstallCloudUpdate();
+      if (!res.ok) {
+        setDeployMsg(`安装失败：${"error" in data ? data.error : "请求失败"}`);
+        setDeploying(false);
+        await fetchUpdateStatus();
+        return;
+      }
+      setDeployMsg("服务器正在重启，请稍候…");
+      startRestartPoll();
+    } catch {
+      setDeployMsg("服务器正在重启，请稍候…");
+      startRestartPoll();
+    }
   };
 
   const handleDeploy = async () => {
@@ -322,11 +375,11 @@ export function MaintainTab({ token }: { token: string }) {
                   <TableCell>
                     {httpsStatus.certificate.not_before &&
                     httpsStatus.certificate.not_after
-                      ? `${new Date(
+                      ? `${formatDeviceDate(
                           httpsStatus.certificate.not_before,
-                        ).toLocaleDateString()} — ${new Date(
+                        )} — ${formatDeviceDate(
                           httpsStatus.certificate.not_after,
-                        ).toLocaleDateString()}`
+                        )}`
                       : "—"}
                   </TableCell>
                 </TableRow>
@@ -465,6 +518,123 @@ export function MaintainTab({ token }: { token: string }) {
       </Box>
 
       {/* ── Update Manager ── */}
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+          云端部署
+        </Typography>
+        <Box sx={{ display: "flex", ...flexGap(1), alignItems: "flex-start" }}>
+          <TextField
+            label="Manifest 链接"
+            value={manifestUrl}
+            onChange={(event) => setManifestUrl(event.target.value)}
+            placeholder="https://…/manifest.json"
+            size="small"
+            fullWidth
+            disabled={cfgSaving || !!updateStatus?.disabled}
+          />
+          <Button
+            variant="outlined"
+            onClick={() =>
+              void handleConfigSave({ update_manifest_url: manifestUrl.trim() })
+            }
+            disabled={cfgSaving || !!updateStatus?.disabled}
+          >
+            保存链接
+          </Button>
+        </Box>
+        <Box sx={{ display: "flex", ...flexGap(2), flexWrap: "wrap", mt: 1 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={cloudDeploy}
+                disabled={cfgSaving || !!updateStatus?.disabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  void handleConfigSave(
+                    enabled
+                      ? {
+                          update_manifest_url: manifestUrl.trim(),
+                          cloud_deploy_enabled: true,
+                        }
+                      : {
+                          cloud_deploy_enabled: false,
+                          update_auto_check: false,
+                        },
+                  );
+                }}
+              />
+            }
+            label="云端部署"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoCheck}
+                disabled={cfgSaving || !cloudDeploy || !!updateStatus?.disabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  void handleConfigSave(
+                    enabled
+                      ? { update_auto_check: true }
+                      : { update_auto_check: false },
+                  );
+                }}
+              />
+            }
+            label="自动检查"
+          />
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void handleCloudCheck()}
+            disabled={
+              !cloudDeploy ||
+              updateStatusLoading ||
+              !!updateStatus?.disabled ||
+              !!updateStatus?.pending
+            }
+          >
+            {updateStatus?.cloud_checking ? "检查中…" : "立即检查"}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() => void handleCloudInstall()}
+            disabled={
+              deploying ||
+              !updateStatus?.cloud_update_available ||
+              !!updateStatus?.pending
+            }
+          >
+            {updateStatus?.cloud_installing ? "安装中…" : "安装云端更新"}
+          </Button>
+        </Box>
+        {updateStatus && !updateStatus.disabled && (
+          <Alert
+            severity={updateStatus.cloud_last_error ? "error" : "info"}
+            sx={{ mt: 1 }}
+          >
+            {updateStatus.cloud_installing
+              ? "正在下载并安装云端更新…"
+              : updateStatus.cloud_checking
+                ? "正在检查云端更新…"
+                : updateStatus.cloud_last_error
+                  ? `最近检查失败：${updateStatus.cloud_last_error}`
+                  : updateStatus.cloud_latest_build_id
+                    ? `云端版本：${updateStatus.cloud_latest_build_id}${
+                        updateStatus.cloud_update_available
+                          ? "（有可用更新）"
+                          : "（已是当前版本）"
+                      }`
+                    : "尚未检查云端版本"}
+            {updateStatus.cloud_last_checked_at &&
+              `；检查时间：${formatDeviceDateTime(
+                updateStatus.cloud_last_checked_at,
+                true,
+              )}`}
+          </Alert>
+        )}
+      </Box>
       {updateStatus && !updateStatus.disabled ? (
         <>
           {updateStatus?.pending && (

@@ -43,6 +43,7 @@ import {
   LabelWithHelp,
 } from "@/client/components/shared/HelpTip";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 import {
   DEFAULT_USER_FEATURES,
   FEATURES,
@@ -513,7 +514,7 @@ export function UsersTab({ currentUser }: { currentUser: User }) {
       id: "created",
       label: "注册时间",
       width: 180,
-      render: (user) => user.created_at.slice(0, 16),
+      render: (user) => formatDeviceDateTime(user.created_at),
     },
     {
       id: "actions",

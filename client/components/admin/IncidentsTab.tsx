@@ -20,6 +20,7 @@ import {
   type AdminIncidentGroup,
 } from "@/client/api/admin";
 import { captureClientOperation } from "@/client/interact/clientIncidents";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 import { RemoteIncidentError } from "@/shared/protocol/errors";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
@@ -62,7 +63,7 @@ export function IncidentsTab({ token }: { token: string }) {
       id: "last",
       label: "最后发生",
       width: 180,
-      render: (group) => group.last_at,
+      render: (group) => formatDeviceDateTime(group.last_at, true),
     },
   ];
 
@@ -175,7 +176,8 @@ export function IncidentsTab({ token }: { token: string }) {
           {details.map((detail) => (
             <Box key={detail.id} sx={{ mb: 3 }}>
               <Typography variant="subtitle2">
-                {detail.public_id} · {detail.occurred_at}
+                {detail.public_id} ·{" "}
+                {formatDeviceDateTime(detail.occurred_at, true)}
               </Typography>
               {detail.message && <Typography>{detail.message}</Typography>}
               {detail.related_incident_ids.length > 0 && (

@@ -12,7 +12,7 @@ import {
   type RuntimeConfig,
 } from "@/server/infra/runtimeConfig";
 import { readBuildId } from "@/server/infra/buildId";
-import { UPDATE_CONFIRM_TIMEOUT_MS } from "@/server/infra/updateContract";
+import { UPDATE_CONFIRM_TIMEOUT_MS } from "@/server/infra/update/contract";
 
 type PendingLifecycle = {
   action: "update" | "rollback";

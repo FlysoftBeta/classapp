@@ -10,6 +10,7 @@ import type {
 import type { TeachDocumentsService } from "@/server/services/teachDocumentsService";
 import type { AuditService } from "@/server/services/auditService";
 import { PublicError } from "@/server/services/incidentService";
+import { normalizeManifestUrl } from "@/server/validation/update";
 
 export class AdministrationActorFacade {
   constructor(
@@ -85,6 +86,7 @@ export class AdministrationActorFacade {
       ...this.clients.config(),
       announcement_content: announcement.content,
       announcement_revision: announcement.revision,
+      ...this.appState.getCloudUpdateConfig(),
     };
   }
 
@@ -95,6 +97,9 @@ export class AdministrationActorFacade {
     whitelist_enabled?: boolean;
     identity_methods?: Array<"mac" | "ip" | "user_agent">;
     announcement_content?: string;
+    cloud_deploy_enabled?: boolean;
+    update_auto_check?: boolean;
+    update_manifest_url?: string;
   }) {
     const actor = this.actor.requireUser();
     if (
@@ -105,6 +110,11 @@ export class AdministrationActorFacade {
     }
     if (input.https_redirect_enabled !== undefined)
       this.actor.requireRole("operations");
+    const updatesCloudConfig =
+      input.cloud_deploy_enabled !== undefined ||
+      input.update_auto_check !== undefined ||
+      input.update_manifest_url !== undefined;
+    if (updatesCloudConfig) this.actor.requireRole("operations");
     if (
       input.whitelist_enabled !== undefined ||
       input.identity_methods !== undefined
@@ -113,6 +123,31 @@ export class AdministrationActorFacade {
     }
     if (input.announcement_content !== undefined) {
       this.actor.requireRole("advanced_community_manager");
+    }
+    let cloudConfig = this.appState.getCloudUpdateConfig();
+    const cloudInput = updatesCloudConfig
+      ? {
+          cloud_deploy_enabled: input.cloud_deploy_enabled,
+          update_auto_check: input.update_auto_check,
+          update_manifest_url:
+            input.update_manifest_url === undefined
+              ? undefined
+              : normalizeManifestUrl(input.update_manifest_url),
+        }
+      : null;
+    if (cloudInput) {
+      const next = {
+        ...cloudConfig,
+        ...cloudInput,
+        update_manifest_url:
+          cloudInput.update_manifest_url ?? cloudConfig.update_manifest_url,
+      };
+      if (next.cloud_deploy_enabled && !next.update_manifest_url) {
+        throw new PublicError("开启云端部署前请设置 Manifest 链接");
+      }
+      if (next.update_auto_check && !next.cloud_deploy_enabled) {
+        throw new PublicError("自动检查依赖云端部署");
+      }
     }
     const appConfig = this.appState.updateConfig({
       idle_lock_enabled: input.idle_lock_enabled,
@@ -129,6 +164,10 @@ export class AdministrationActorFacade {
       input.announcement_content !== undefined
         ? this.announcements.update(input.announcement_content)
         : this.announcements.get();
+    if (cloudInput) {
+      cloudConfig = this.appState.updateCloudUpdateConfig(cloudInput);
+      this.system.cloudConfigChanged();
+    }
     this.record(actor.id, "system.config.update", "runtime-config", null, {
       fields: Object.keys(input),
     });
@@ -139,6 +178,7 @@ export class AdministrationActorFacade {
       ...clientConfig,
       announcement_content: announcement.content,
       announcement_revision: announcement.revision,
+      ...cloudConfig,
     };
   }
 
@@ -181,6 +221,18 @@ export class AdministrationActorFacade {
   updateStatus() {
     this.actor.requireRole("operations");
     return this.system.getUpdateStatus();
+  }
+
+  checkCloudUpdate() {
+    this.actor.requireRole("operations");
+    return this.system.checkCloudUpdate();
+  }
+
+  async installCloudUpdate() {
+    const admin = this.actor.requireRole("operations");
+    const result = await this.system.installCloudUpdate();
+    this.record(admin.id, "runtime.cloud_update.install", "runtime-package");
+    return result;
   }
 
   confirmUpdate() {

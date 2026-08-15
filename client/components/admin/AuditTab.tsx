@@ -4,6 +4,7 @@ import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import { adminFetchAuditLog, type AdminAuditEntry } from "@/client/api/admin";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
 export function AuditTab() {
@@ -24,7 +25,7 @@ export function AuditTab() {
       id: "time",
       label: "时间",
       width: 180,
-      render: (entry) => entry.created_at,
+      render: (entry) => formatDeviceDateTime(entry.created_at, true),
     },
     {
       id: "actor",

@@ -34,6 +34,7 @@ import {
 } from "@/client/api/admin";
 import { isFuture, formatRemaining } from "@/shared/time";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { formatDeviceDateTime } from "@/client/lib/deviceTime";
 import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 import { HelpSection } from "@/client/components/shared/HelpTip";
 import { DialogTitleWithHelp } from "@/client/components/shared/HelpTip";
@@ -355,7 +356,8 @@ export function ClientsTab() {
       id: "last_seen",
       label: "最近活跃",
       width: 180,
-      render: (client) => client.last_seen?.slice(0, 16) ?? "尚未活跃",
+      render: (client) =>
+        client.last_seen ? formatDeviceDateTime(client.last_seen) : "尚未活跃",
     },
     {
       id: "mac",

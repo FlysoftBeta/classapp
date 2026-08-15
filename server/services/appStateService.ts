@@ -10,8 +10,10 @@ import {
   getIdleLockEnabled,
   getSystemLocked,
   getMinutesSinceTimestamp,
+  getCloudUpdateConfig,
   setIdleLockEnabled,
   setSystemLocked,
+  setCloudUpdateConfig,
   touchActivity,
 } from "@/server/data/appState";
 import { isClientKonamiLocked } from "@/server/data/clients";
@@ -62,6 +64,14 @@ export class AppStateService {
       });
     }
     return this.getConfig();
+  }
+
+  getCloudUpdateConfig() {
+    return getCloudUpdateConfig(this.db);
+  }
+
+  updateCloudUpdateConfig(input: Parameters<typeof setCloudUpdateConfig>[1]) {
+    return setCloudUpdateConfig(this.db, input);
   }
 
   snapshotAnonymous(clientId: string): AppStateSnapshot {

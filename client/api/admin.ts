@@ -4,6 +4,7 @@ import { client } from "@/client/interact/remote/client";
 
 const {
   adminConfirmUpdateAction,
+  adminCheckCloudUpdateAction,
   adminCreateBackupAction,
   adminCreateGroupAction,
   adminCreateUserAction,
@@ -17,6 +18,7 @@ const {
   adminFetchGroupsAction,
   adminFetchHttpsStatusAction,
   adminFetchUpdateStatusAction,
+  adminInstallCloudUpdateAction,
   adminFetchUsersAction,
   adminRollbackAction,
   adminRunToolAction,
@@ -271,6 +273,22 @@ export async function adminFetchUpdateStatus() {
   const result = await adminFetchUpdateStatusAction();
   observeActionResult(result);
   return result.ok ? result.data : null;
+}
+
+export async function adminCheckCloudUpdate() {
+  const result = await adminCheckCloudUpdateAction();
+  return {
+    res: observeActionResult(result),
+    data: result.ok ? result.data : { error: result.error.message },
+  };
+}
+
+export async function adminInstallCloudUpdate() {
+  const result = await adminInstallCloudUpdateAction();
+  return {
+    res: observeActionResult(result),
+    data: result.ok ? result.data : { error: result.error.message },
+  };
 }
 
 export async function adminFetchHttpsStatus() {
