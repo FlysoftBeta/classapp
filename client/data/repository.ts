@@ -3,6 +3,7 @@ import type {
   Conversation,
   Post,
   User,
+  UserMetadata,
 } from "@/shared/types/api";
 import { dmConvId, groupConvId, parseConvId } from "@/shared/conversations/id";
 import { requestResult, runTransaction } from "./idb";
@@ -514,7 +515,7 @@ async function materializeConversation(
     group_type: null,
     id: access.target_id,
     handle: user?.handle ?? null,
-    name: user?.name ?? "已注销",
+    name: user?.username ?? "已注销",
     has_password: 0,
     members_hidden: 0,
     admin_only: 0,
@@ -583,8 +584,8 @@ async function upsertConversationInTransaction(
     } satisfies DmRow);
     tx.objectStore(STORES.USERS).put({
       id: entry.id,
-      handle: entry.handle ?? entry.id,
-      name: entry.name,
+      handle: entry.handle,
+      username: entry.name,
     } satisfies ObjectiveUser);
   } else {
     throw new Error(`Conversation type disagrees with id: ${entry.conv_id}`);
@@ -653,8 +654,8 @@ async function upsertArticle(
       if (entry.user_id) {
         tx.objectStore(STORES.USERS).put({
           id: entry.user_id,
-          handle: entry.handle ?? entry.user_id,
-          name: entry.username ?? "已注销",
+          handle: entry.handle ?? null,
+          username: entry.username ?? "已注销",
         } satisfies ObjectiveUser);
       }
       const accessStore = tx.objectStore(STORES.ME_ACCESS);
@@ -725,7 +726,7 @@ async function materializeArticle(
   const membership = access.memberships[0];
   return {
     ...row.value,
-    username: author?.name ?? null,
+    username: author?.username ?? null,
     handle: author?.handle ?? null,
     is_bookmarked: bookmark.value,
     bookmark_updated_at_ms: bookmark.updatedAt,
@@ -1027,7 +1028,7 @@ function createOfflineRepository(userScope: string) {
             users.put({
               id: member.id,
               handle: member.handle,
-              name: member.username,
+              username: member.username,
             } satisfies ObjectiveUser);
           }
         },
@@ -1311,6 +1312,17 @@ function createOfflineRepository(userScope: string) {
           let oldest: { id: string; order: number } | null = null;
           let newest: { id: string; order: number } | null = null;
           for (const post of incoming) {
+            const {
+              username: _username,
+              handle: _handle,
+              reply_username: _replyUsername,
+              reply_handle: _replyHandle,
+              ...entity
+            } = post;
+            void _username;
+            void _handle;
+            void _replyUsername;
+            void _replyHandle;
             if (
               !Number.isSafeInteger(post.sequence) ||
               (post.sequence ?? 0) <= 0
@@ -1335,15 +1347,15 @@ function createOfflineRepository(userScope: string) {
               previous.revision === post.revision &&
               !Values.equal(
                 { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
-                { ...post, size: 0, touched_at: 0, eviction_tier: 0 },
+                { ...entity, size: 0, touched_at: 0, eviction_tier: 0 },
               )
             ) {
               throw new Error(`Post revision collision: ${post.id}`);
             }
             const row: StoredPost = {
-              ...post,
+              ...entity,
               sequence: post.sequence!,
-              size: Values.size(post),
+              size: Values.size(entity),
               touched_at: Date.now(),
               eviction_tier: 0,
             };
@@ -1379,6 +1391,20 @@ function createOfflineRepository(userScope: string) {
         },
       );
       await this.trimConversationPosts(ref);
+    },
+
+    async saveUserMetadata(users: UserMetadata[]): Promise<void> {
+      if (!users.length) return;
+      await runTransaction(STORES.USERS, "readwrite", (tx) => {
+        const store = tx.objectStore(STORES.USERS);
+        for (const user of users) {
+          store.put({
+            id: user.id,
+            handle: user.handle,
+            username: user.username,
+          } satisfies ObjectiveUser);
+        }
+      });
     },
 
     async applyPostVersion(post: Post, liveAppend = false): Promise<void> {
@@ -1524,7 +1550,7 @@ function createOfflineRepository(userScope: string) {
     ): Promise<Post[]> {
       const convId = conversationId(ref);
       return runTransaction(
-        [STORES.ME_ACCESS, STORES.POSTS],
+        [STORES.ME_ACCESS, STORES.POSTS, STORES.USERS],
         "readonly",
         async (tx) => {
           const access = await requestResult(
@@ -1544,14 +1570,37 @@ function createOfflineRepository(userScope: string) {
                 ),
               ),
           )) as StoredPost[];
-          return rows.map(
-            ({ size: _s, touched_at: _t, eviction_tier: _e, ...post }) => {
-              void _s;
-              void _t;
-              void _e;
-              return post;
-            },
+          const users = tx.objectStore(STORES.USERS);
+          const materialized = await Promise.all(
+            rows.map(
+              async ({
+                size: _s,
+                touched_at: _t,
+                eviction_tier: _e,
+                ...post
+              }) => {
+                void _s;
+                void _t;
+                void _e;
+                const author = post.user_id
+                  ? ((await requestResult(users.get(post.user_id))) as
+                      ObjectiveUser | undefined)
+                  : undefined;
+                const replyAuthor = post.reply_user_id
+                  ? ((await requestResult(users.get(post.reply_user_id))) as
+                      ObjectiveUser | undefined)
+                  : undefined;
+                return {
+                  ...post,
+                  username: author?.username ?? null,
+                  handle: author?.handle ?? null,
+                  reply_username: replyAuthor?.username ?? null,
+                  reply_handle: replyAuthor?.handle ?? null,
+                } as Post;
+              },
+            ),
           );
+          return materialized as Post[];
         },
       );
     },

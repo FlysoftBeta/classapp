@@ -3,7 +3,6 @@ import type { Database } from "better-sqlite3";
 import type {
   ArticleSidebarPayload,
   ArticleWithMeta,
-  User,
 } from "@/shared/types/api";
 import type {
   ArticleListUpdatedPayload,
@@ -14,6 +13,7 @@ import {
   addArticleProgressSeconds,
   deleteArticleById,
   findArticleForUser,
+  findArticleAccessRow,
   findArticleRecord,
   getArticleTextSegment,
   insertBundleArticle,
@@ -37,14 +37,8 @@ import {
   getUserConfig,
   setUserConfig,
 } from "@/server/services/userConfig";
-import {
-  assertCanAccessArticle,
-  assertCanCreateArticle,
-  assertCanDeleteArticle,
-} from "@/server/domain/policy/articles";
 import { removeArticleBundle } from "@/server/infra/articleArtifacts";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
-import { assertGroupMember } from "@/server/domain/policy/membership";
 import type { BundleSlice } from "@/shared/bundles/protocol";
 import {
   loadRenderArchive,
@@ -78,7 +72,7 @@ export class ArticleService {
   constructor(private readonly db: Database) {}
 
   list(
-    user: User,
+    userId: string,
     input: {
       view?: "all" | "bookmarked" | "recent";
       cursor?: { sortAt: string; id: string };
@@ -86,23 +80,22 @@ export class ArticleService {
       groupId?: string;
     },
   ) {
-    if (input.groupId) assertGroupMember(this.db, user.id, input.groupId);
-    return listArticlesForUser(this.db, user.id, input);
+    return listArticlesForUser(this.db, userId, input);
   }
 
-  sidebar(user: User): ArticleSidebarPayload {
+  sidebar(userId: string): ArticleSidebarPayload {
     const currentArticleId = getUserConfig(
       this.db,
-      user.id,
+      userId,
       USER_CONFIG.ACTIVE_ARTICLE_ID,
     );
     const byId = new Map<string, ArticleWithMeta>();
-    for (const row of listBookmarkedArticleRows(this.db, user.id))
+    for (const row of listBookmarkedArticleRows(this.db, userId))
       byId.set(row.id as string, rowToArticle(row));
-    for (const row of listArticleHistoryRows(this.db, user.id))
+    for (const row of listArticleHistoryRows(this.db, userId))
       byId.set(row.id as string, rowToArticle(row));
     if (currentArticleId) {
-      const active = findArticleForUser(this.db, currentArticleId, user.id);
+      const active = findArticleForUser(this.db, currentArticleId, userId);
       if (active) byId.set(active.id, active);
     }
     const articles = [...byId.values()].sort((a, b) =>
@@ -114,25 +107,23 @@ export class ArticleService {
   }
 
   createText(
-    user: User,
+    userId: string,
     input: CreateArticleInput,
   ): { article: ArticleWithMeta } {
-    assertCanCreateArticle(this.db, user, input.group_id);
     const article = this.insertText(
-      user.id,
+      userId,
       requireTrimmed(input.title, "标题不能为空"),
       requireTrimmed(input.content, "内容不能为空"),
       input.group_id,
     );
-    this.notifyCreated(user.id, article.id);
+    this.notifyCreated(userId, article.id);
     return { article };
   }
 
   createBundle(
-    user: User,
+    userId: string,
     input: CreateBundleArticleInput,
   ): { article: ArticleWithMeta } {
-    assertCanCreateArticle(this.db, user, input.group_id);
     if (!input.source_path || !input.archive_path)
       throw new ContractViolationError("文件保存失败");
     if (input.source_mime !== "application/pdf")
@@ -140,7 +131,7 @@ export class ArticleService {
     const id = crypto.randomUUID();
     insertBundleArticle(this.db, {
       id,
-      userId: user.id,
+      userId,
       title: requireTrimmed(input.title, "标题不能为空"),
       sourcePath: input.source_path,
       archivePath: input.archive_path,
@@ -151,20 +142,32 @@ export class ArticleService {
       itemCount: input.item_count,
       groupId: input.group_id,
     });
-    const article = this.requireOwned(id, user.id);
-    this.notifyCreated(user.id, id);
+    const article = this.requireOwned(id, userId);
+    this.notifyCreated(userId, id);
     return { article };
   }
 
-  getMeta(user: User, articleId: string): { article: ArticleWithMeta } {
-    assertCanAccessArticle(this.db, user, articleId);
-    const article = findArticleForUser(this.db, articleId, user.id);
+  getMeta(userId: string, articleId: string): { article: ArticleWithMeta } {
+    const article = findArticleForUser(this.db, articleId, userId);
     if (!article) throw new PublicError("文章不存在");
     return { article };
   }
 
-  segment(user: User, input: { articleId: string; offset: number }) {
-    assertCanAccessArticle(this.db, user, input.articleId);
+  bundleResource(articleId: string) {
+    const article = findArticleRecord(this.db, articleId);
+    if (!article || article.content_kind !== "bundle") {
+      throw new PublicError("文档资源不存在");
+    }
+    return article;
+  }
+
+  access(articleId: string) {
+    const article = findArticleAccessRow(this.db, articleId);
+    if (!article) throw new PublicError("文章不存在");
+    return article;
+  }
+
+  segment(input: { articleId: string; offset: number }) {
     const segment = getArticleTextSegment(
       this.db,
       input.articleId,
@@ -181,16 +184,13 @@ export class ArticleService {
     };
   }
 
-  async openBundle(
-    user: User,
-    input: {
-      articleId: string;
-      cursor: number | null;
-      before: number;
-      after: number;
-    },
-  ): Promise<BundleSlice> {
-    const index = await this.requireBundle(user, input.articleId);
+  async openBundle(input: {
+    articleId: string;
+    cursor: number | null;
+    before: number;
+    after: number;
+  }): Promise<BundleSlice> {
+    const index = await this.requireBundle(input.articleId);
     if (!index.items.length) return this.sliceBundle(index, 0, 0);
     const cursor = Math.min(input.cursor ?? 0, index.items.length - 1);
     return this.sliceBundle(
@@ -200,16 +200,13 @@ export class ArticleService {
     );
   }
 
-  async fetchBundle(
-    user: User,
-    input: {
-      articleId: string;
-      cursor: number;
-      direction: "before" | "after";
-      limit: number;
-    },
-  ): Promise<BundleSlice> {
-    const index = await this.requireBundle(user, input.articleId);
+  async fetchBundle(input: {
+    articleId: string;
+    cursor: number;
+    direction: "before" | "after";
+    limit: number;
+  }): Promise<BundleSlice> {
+    const index = await this.requireBundle(input.articleId);
     if (input.direction === "before") {
       const end = Math.min(input.cursor, index.items.length);
       return this.sliceBundle(index, Math.max(0, end - input.limit), end);
@@ -223,32 +220,30 @@ export class ArticleService {
   }
 
   setBookmark(
-    user: User,
+    userId: string,
     articleId: string,
     bookmarked: boolean,
     updatedAt: number,
   ) {
-    assertCanAccessArticle(this.db, user, articleId);
     const value = setArticleBookmarkValue(
       this.db,
-      user.id,
+      userId,
       articleId,
       bookmarked,
       updatedAt,
     );
-    this.publishSidebar(user.id, articleId);
-    this.publishList(user.id, articleId);
+    this.publishSidebar(userId, articleId);
+    this.publishList(userId, articleId);
     return value;
   }
 
   saveProgress(
-    user: User,
+    userId: string,
     articleId: string,
     offset: number,
     updatedAt: number,
     merge: "override" | "furthest",
   ) {
-    assertCanAccessArticle(this.db, user, articleId);
     const article = findArticleRecord(this.db, articleId);
     if (!article) throw new PublicError("文章不存在");
     const safe =
@@ -263,44 +258,41 @@ export class ArticleService {
         : Math.max(0, Math.min(Math.floor(offset), article.content_length));
     const value = upsertArticleProgressOffset(
       this.db,
-      user.id,
+      userId,
       articleId,
       safe,
       updatedAt,
       merge,
     );
-    this.publishReading(user.id, articleId);
+    this.publishReading(userId, articleId);
     return value;
   }
 
   recordReading(
-    user: User,
+    userId: string,
     articleId: string,
     input: { seconds?: number; active?: boolean },
   ): void {
-    assertCanAccessArticle(this.db, user, articleId);
     const seconds = Math.max(0, Math.min(Math.floor(input.seconds ?? 0), 300));
-    if (seconds)
-      addArticleProgressSeconds(this.db, user.id, articleId, seconds);
-    else touchArticleProgress(this.db, user.id, articleId);
+    if (seconds) addArticleProgressSeconds(this.db, userId, articleId, seconds);
+    else touchArticleProgress(this.db, userId, articleId);
     if (input.active)
-      setUserConfig(this.db, user.id, USER_CONFIG.ACTIVE_ARTICLE_ID, articleId);
+      setUserConfig(this.db, userId, USER_CONFIG.ACTIVE_ARTICLE_ID, articleId);
     else if (
-      getUserConfig(this.db, user.id, USER_CONFIG.ACTIVE_ARTICLE_ID) ===
+      getUserConfig(this.db, userId, USER_CONFIG.ACTIVE_ARTICLE_ID) ===
       articleId
     )
-      deleteUserConfig(this.db, user.id, USER_CONFIG.ACTIVE_ARTICLE_ID);
-    this.publishReading(user.id, articleId);
+      deleteUserConfig(this.db, userId, USER_CONFIG.ACTIVE_ARTICLE_ID);
+    this.publishReading(userId, articleId);
   }
 
-  async delete(user: User, articleId: string): Promise<void> {
-    assertCanDeleteArticle(this.db, user, articleId);
+  async delete(requestingUserId: string, articleId: string): Promise<void> {
     const record = findArticleRecord(this.db, articleId);
     deleteArticleById(this.db, articleId);
     if (record?.content_kind === "bundle")
       await removeArticleBundle(record.source_path, record.archive_path);
     const affectedUsers = new Set(
-      [user.id, record?.user_id].filter((id): id is string => !!id),
+      [requestingUserId, record?.user_id].filter((id): id is string => !!id),
     );
     for (const userId of affectedUsers) {
       if (
@@ -350,11 +342,7 @@ export class ArticleService {
     return this.requireOwned(id, userId);
   }
 
-  private async requireBundle(
-    user: User,
-    articleId: string,
-  ): Promise<RenderArchiveIndex> {
-    assertCanAccessArticle(this.db, user, articleId);
+  private async requireBundle(articleId: string): Promise<RenderArchiveIndex> {
     const article = findArticleRecord(this.db, articleId);
     if (
       !article ||

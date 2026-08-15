@@ -2,11 +2,6 @@ import { useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
 import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -19,6 +14,7 @@ import {
   adminFetchGhostUsers,
 } from "@/client/api/admin";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
 export function GhostUsersTab() {
   const { data, loading, reload } = useActionQuery<{ ghosts: GhostEntry[] }>(
@@ -43,6 +39,42 @@ export function GhostUsersTab() {
     await adminDeleteGhostUser(id);
     reload();
   };
+  const columns: AdminGridColumn<GhostEntry>[] = [
+    {
+      id: "id",
+      label: "身份 ID",
+      width: 300,
+      render: (entry) => entry.id,
+      longText: (entry) => entry.id,
+    },
+    {
+      id: "created",
+      label: "创建时间",
+      width: 180,
+      render: (entry) => entry.created_at.slice(0, 16),
+    },
+    {
+      id: "state",
+      label: "注册状态",
+      width: 160,
+      render: (entry) => (entry.pending_oobe ? "等待完成 OOBE" : "未使用"),
+    },
+    {
+      id: "actions",
+      label: "操作",
+      width: 100,
+      render: (entry) => (
+        <IconButton
+          size="small"
+          color="error"
+          title="删除待注册身份"
+          onClick={() => void handleDelete(entry.id)}
+        >
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      ),
+    },
+  ];
 
   return (
     <Box>
@@ -72,54 +104,13 @@ export function GhostUsersTab() {
       {loading ? (
         <CircularProgress size={24} />
       ) : (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>创建时间</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {(data?.ghosts || []).map((g) => (
-              <TableRow key={g.id}>
-                <TableCell sx={{ fontFamily: "monospace", fontSize: 11 }}>
-                  {g.id.slice(0, 8)}…
-                </TableCell>
-                <TableCell sx={{ fontSize: 12 }}>
-                  {g.created_at.slice(0, 16)}
-                </TableCell>
-                <TableCell sx={{ fontSize: 12 }}>
-                  {g.pending_oobe ? "待激活" : "未使用"}
-                </TableCell>
-                <TableCell align="right">
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={() => handleDelete(g.id)}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(data?.ghosts || []).length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={4}
-                  sx={{
-                    textAlign: "center",
-                    color: "text.disabled",
-                    fontSize: 13,
-                  }}
-                >
-                  暂无招募中干员
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+        <AdminDataGrid
+          rows={data?.ghosts ?? []}
+          columns={columns}
+          rowKey={(entry) => entry.id}
+          empty="暂无招募中干员"
+          height={420}
+        />
       )}
     </Box>
   );

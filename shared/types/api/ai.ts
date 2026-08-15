@@ -81,8 +81,32 @@ export const aiConversationDetailSchema = z
 
 export const aiCreditBalanceSchema = z
   .object({
-    balance: z.number().int().nonnegative(),
-    reserved: z.number().int().nonnegative(),
+    available: z.number().nonnegative(),
+    reserved: z.number().nonnegative(),
+    top_up: z.number().nonnegative(),
+    plan: z
+      .object({
+        active: z.boolean(),
+        starts_at: z.string().nullable(),
+        ends_at: z.string().nullable(),
+        daily: z
+          .object({
+            allowance: z.number().nonnegative(),
+            used: z.number().nonnegative(),
+            remaining: z.number().nonnegative(),
+            used_percent: z.number().min(0).max(100),
+          })
+          .strict(),
+        weekly: z
+          .object({
+            allowance: z.number().nonnegative(),
+            used: z.number().nonnegative(),
+            remaining: z.number().nonnegative(),
+            used_percent: z.number().min(0).max(100),
+          })
+          .strict(),
+      })
+      .strict(),
   })
   .strict();
 
@@ -91,12 +115,39 @@ export const aiCreditLedgerEntrySchema = z
     id: z.string().uuid(),
     user_id: z.string(),
     kind: z.enum(["top_up", "reserve", "settle", "release"]),
-    delta: z.number().int(),
-    balance_after: z.number().int().nonnegative(),
+    delta: z.number(),
+    top_up_after: z.number().nonnegative(),
     run_id: z.string().uuid().nullable(),
     admin_id: z.string().nullable(),
     note: z.string(),
     created_at: z.string(),
+  })
+  .strict();
+
+export const aiBillingPolicySchema = z
+  .object({
+    daily_allowance: z.number().nonnegative(),
+    weekly_allowance: z.number().nonnegative(),
+    default_plan_duration_days: z.number().int().positive(),
+    updated_at: z.string(),
+  })
+  .strict();
+
+export const aiBillingSummarySchema = z
+  .object({
+    policy: aiBillingPolicySchema,
+    stock: z
+      .object({
+        weekly_plan: z.number().nonnegative(),
+        top_up: z.number().nonnegative(),
+        total: z.number().nonnegative(),
+      })
+      .strict(),
+    consumption_by_day: z.array(
+      z
+        .object({ date: z.string(), credits: z.number().nonnegative() })
+        .strict(),
+    ),
   })
   .strict();
 
@@ -116,4 +167,6 @@ export type AiRun = z.infer<typeof aiRunSchema>;
 export type AiConversationDetail = z.infer<typeof aiConversationDetailSchema>;
 export type AiCreditBalance = z.infer<typeof aiCreditBalanceSchema>;
 export type AiCreditLedgerEntry = z.infer<typeof aiCreditLedgerEntrySchema>;
+export type AiBillingPolicy = z.infer<typeof aiBillingPolicySchema>;
+export type AiBillingSummary = z.infer<typeof aiBillingSummarySchema>;
 export type AiFileEntry = z.infer<typeof aiFileEntrySchema>;

@@ -10,6 +10,7 @@ import {
   stickerPackSummarySchema,
   stickerRecentItemSchema,
   userSchema,
+  userMetadataSchema,
   userWordProgressSchema,
   wordQuizPayloadSchema,
   wordStatsSchema,
@@ -19,6 +20,8 @@ import {
   aiConversationDetailSchema,
   aiCreditBalanceSchema,
   aiCreditLedgerEntrySchema,
+  aiBillingPolicySchema,
+  aiBillingSummarySchema,
 } from "@/shared/types/api";
 import {
   bundleFetchInputSchema,
@@ -32,6 +35,8 @@ import {
 } from "@/shared/validation/posts";
 import type { ActionResult } from "./result";
 import { incidentIdSchema } from "./errors";
+import { userFeaturesSchema } from "@/shared/features";
+import { adminRoleSchema } from "@/shared/authority";
 
 const object = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
 const noArgs = z.tuple([]);
@@ -64,6 +69,16 @@ const announcementSchema = object({
   content: z.string(),
   revision: z.number().int().nonnegative(),
   acknowledged: z.boolean(),
+});
+const auditEntrySchema = object({
+  id: z.string().uuid(),
+  actor_id: z.string().nullable(),
+  actor_handle: z.string().nullable(),
+  action: z.string(),
+  target_kind: z.string(),
+  target_id: z.string().nullable(),
+  details: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
 });
 
 const discoverySectionSchema = object({
@@ -237,7 +252,7 @@ export const actionContracts = {
         handle: z.string().optional(),
         username: z.string().optional(),
         pin: z.string().optional(),
-        feature_mask: z.number().int().optional(),
+        features: userFeaturesSchema.optional(),
       }),
     ),
     z.union([
@@ -251,7 +266,8 @@ export const actionContracts = {
         userId: nonEmptyString,
         handle: z.string().optional(),
         username: z.string().optional(),
-        feature_mask: z.number().int().optional(),
+        features: userFeaturesSchema.optional(),
+        roles: z.array(adminRoleSchema).optional(),
         pin: z.string().optional(),
         mute_hours: z.number().positive().optional(),
         unmute: z.boolean().optional(),
@@ -261,6 +277,19 @@ export const actionContracts = {
     ),
     object({ user: userSchema }),
   ),
+  adminBatchUpdateUserFeaturesAction: contract(
+    one(
+      object({
+        updates: z
+          .array(
+            object({ userId: nonEmptyString, features: userFeaturesSchema }),
+          )
+          .min(1)
+          .max(500),
+      }),
+    ),
+    object({ users: z.array(userSchema) }),
+  ),
   adminDeleteUserAction: contract(
     one(
       object({
@@ -269,6 +298,10 @@ export const actionContracts = {
       }),
     ),
     okSchema,
+  ),
+  adminFetchAuditLogAction: contract(
+    optionalOne(object({ offset: z.number().int().nonnegative().optional() })),
+    object({ entries: z.array(auditEntrySchema) }),
   ),
   adminFetchGhostUsersAction: contract(
     noArgs,
@@ -309,20 +342,6 @@ export const actionContracts = {
     z.union([okSchema, object({ group: groupSchema })]),
   ),
   adminDeleteGroupAction: contract(one(nonEmptyString), okSchema),
-  adminFetchPostsAction: contract(
-    optionalOne(
-      object({
-        q: z.string().optional(),
-        user: z.string().optional(),
-        offset: z.union([z.number(), z.string()]).optional(),
-      }),
-    ),
-    object({
-      posts: z.array(postSchema),
-      total: z.number().int().nonnegative(),
-    }),
-  ),
-  adminDeletePostAction: contract(one(nonEmptyString), okSchema),
   adminFetchClientsAction: contract(
     optionalOne(
       object({
@@ -767,9 +786,12 @@ export const actionContracts = {
         offset: z.string().optional(),
       }),
     ),
-    object({ posts: z.array(postSchema) }),
+    object({ posts: z.array(postSchema), users: z.array(userMetadataSchema) }),
   ),
-  fetchPostAction: contract(one(nonEmptyString), object({ post: postSchema })),
+  fetchPostAction: contract(
+    one(nonEmptyString),
+    object({ post: postSchema, users: z.array(userMetadataSchema) }),
+  ),
   createPostAction: contract(
     one(
       object({
@@ -778,13 +800,16 @@ export const actionContracts = {
         reply_to: z.string().optional(),
       }),
     ),
-    object({ post: postSchema }),
+    object({ post: postSchema, users: z.array(userMetadataSchema) }),
   ),
   updatePostAction: contract(
     one(object({ postId: nonEmptyString, text: z.string() })),
-    object({ post: postSchema }),
+    object({ post: postSchema, users: z.array(userMetadataSchema) }),
   ),
-  deletePostAction: contract(one(nonEmptyString), object({ post: postSchema })),
+  deletePostAction: contract(
+    one(nonEmptyString),
+    object({ post: postSchema, users: z.array(userMetadataSchema) }),
+  ),
 
   fetchStickerPacksAction: contract(
     noArgs,
@@ -810,7 +835,7 @@ export const actionContracts = {
         reply_to: z.string().optional(),
       }),
     ),
-    object({ post: postSchema }),
+    object({ post: postSchema, users: z.array(userMetadataSchema) }),
   ),
 
   fetchVersionedUserConfigAction: contract(
@@ -964,6 +989,26 @@ export const actionContracts = {
         amount: z.number().int().positive().max(1_000_000_000),
         idempotencyKey: z.string().uuid(),
         note: z.string().max(200),
+      }),
+    ),
+    object({ credits: aiCreditBalanceSchema }),
+  ),
+  adminFetchAiBillingAction: contract(noArgs, aiBillingSummarySchema),
+  adminUpdateAiBillingPolicyAction: contract(
+    one(
+      object({
+        dailyAllowance: z.number().nonnegative().max(1_000_000_000),
+        weeklyAllowance: z.number().nonnegative().max(1_000_000_000),
+        defaultPlanDurationDays: z.number().int().positive().max(3650),
+      }),
+    ),
+    aiBillingPolicySchema,
+  ),
+  adminAssignAiPlanAction: contract(
+    one(
+      object({
+        userId: nonEmptyString,
+        durationDays: z.number().int().positive().max(3650),
       }),
     ),
     object({ credits: aiCreditBalanceSchema }),

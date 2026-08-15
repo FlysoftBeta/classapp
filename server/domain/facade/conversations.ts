@@ -3,7 +3,7 @@ import type {
   ConversationRefInput,
   ConversationService,
 } from "@/server/services/conversationsService";
-import type { Actor } from "@/server/session/session";
+import type { Actor } from "@/server/runtime/actor";
 
 export class ConversationActorFacade {
   constructor(

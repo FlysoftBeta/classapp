@@ -3,6 +3,8 @@ import type { Database } from "better-sqlite3";
 import type {
   AiConversation,
   AiConversationDetail,
+  AiBillingPolicy,
+  AiBillingSummary,
   AiCreditBalance,
   AiCreditLedgerEntry,
   AiMessage,
@@ -226,7 +228,7 @@ export function createAiRunRecords(
   db.prepare(
     `INSERT INTO ai_runs
       (id, user_id, conversation_id, input_message_id, output_message_id,
-       status, reserved_credits)
+       status, reserved_credit_micros)
      VALUES (?, ?, ?, ?, ?, 'queued', ?)`,
   ).run(
     input.runId,
@@ -418,7 +420,7 @@ export function finishAiRun(
     status: "completed" | "failed" | "cancelled";
     content: string;
     error?: string | null;
-    chargedCredits: number;
+    chargedCreditMicros: number;
     inputTokens: number;
     cachedInputTokens: number;
     outputTokens: number;
@@ -434,13 +436,13 @@ export function finishAiRun(
        WHERE run_id = ? AND role = 'assistant'`,
     ).run(input.content, input.status, runId);
     db.prepare(
-      `UPDATE ai_runs SET status = ?, error = ?, charged_credits = ?,
+      `UPDATE ai_runs SET status = ?, error = ?, charged_credit_micros = ?,
        input_tokens = ?, cached_input_tokens = ?, output_tokens = ?,
        revision = revision + 1, updated_at = datetime('now') WHERE id = ?`,
     ).run(
       input.status,
       input.error ?? null,
-      input.chargedCredits,
+      input.chargedCreditMicros,
       input.inputTokens,
       input.cachedInputTokens,
       input.outputTokens,
@@ -547,16 +549,139 @@ export function updateAiConversationMetadata(
   })();
 }
 
+export const CREDIT_MICRO_SCALE = 1_000_000;
+
+export function creditsFromMicros(value: number): number {
+  return Number((value / CREDIT_MICRO_SCALE).toFixed(6));
+}
+
+export function microsFromCredits(value: number): number {
+  return Math.round(value * CREDIT_MICRO_SCALE);
+}
+
+interface BillingPolicyRow {
+  daily_credit_micros: number;
+  weekly_credit_micros: number;
+  default_plan_duration_days: number;
+  updated_at: string;
+}
+
+interface AccountRow {
+  top_up_credit_micros: number;
+  reserved_credit_micros: number;
+}
+
+interface EnrollmentRow {
+  starts_at: string;
+  ends_at: string;
+}
+
+export function aiAccountingWindow(now = new Date()): {
+  day: string;
+  week: string;
+} {
+  const day = now.toISOString().slice(0, 10);
+  const monday = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const weekday = monday.getUTCDay() || 7;
+  monday.setUTCDate(monday.getUTCDate() - weekday + 1);
+  return { day, week: monday.toISOString().slice(0, 10) };
+}
+
+function billingPolicyRow(db: Database): BillingPolicyRow {
+  return db
+    .prepare(
+      `SELECT daily_credit_micros, weekly_credit_micros,
+      default_plan_duration_days, updated_at
+     FROM ai_billing_policy WHERE id = 1`,
+    )
+    .get() as BillingPolicyRow;
+}
+
+function ensureBillingState(db: Database, userId: string): void {
+  ensureAccount(db, userId);
+  const policy = billingPolicyRow(db);
+  db.prepare(
+    `INSERT OR IGNORE INTO ai_plan_enrollments (user_id, starts_at, ends_at)
+     VALUES (?, datetime('now'), datetime('now', '+' || ? || ' days'))`,
+  ).run(userId, policy.default_plan_duration_days);
+}
+
+function quotaUsage(
+  db: Database,
+  userId: string,
+  keys: { day: string; week: string },
+): { daily: number; weekly: number } {
+  const daily = db
+    .prepare(
+      `SELECT COALESCE(SUM(plan_credit_micros), 0) AS value
+     FROM ai_credit_usage WHERE user_id = ? AND day_key = ?`,
+    )
+    .get(userId, keys.day) as { value: number };
+  const weekly = db
+    .prepare(
+      `SELECT COALESCE(SUM(plan_credit_micros), 0) AS value
+     FROM ai_credit_usage WHERE user_id = ? AND week_key = ?`,
+    )
+    .get(userId, keys.week) as { value: number };
+  return { daily: daily.value, weekly: weekly.value };
+}
+
+function percent(used: number, allowance: number): number {
+  if (allowance === 0) return used > 0 ? 100 : 0;
+  return Math.min(100, Number(((used / allowance) * 100).toFixed(2)));
+}
+
 export function getAiCreditBalance(
   db: Database,
   userId: string,
 ): AiCreditBalance {
-  ensureAccount(db, userId);
-  return db
+  ensureBillingState(db, userId);
+  const account = db
     .prepare(
-      "SELECT balance, reserved FROM ai_credit_accounts WHERE user_id = ?",
+      `SELECT top_up_credit_micros, reserved_credit_micros
+     FROM ai_credit_accounts WHERE user_id = ?`,
     )
-    .get(userId) as AiCreditBalance;
+    .get(userId) as AccountRow;
+  const policy = billingPolicyRow(db);
+  const enrollment = db
+    .prepare(
+      `SELECT starts_at, ends_at FROM ai_plan_enrollments WHERE user_id = ?`,
+    )
+    .get(userId) as EnrollmentRow;
+  const active = db
+    .prepare(`SELECT (? <= datetime('now') AND datetime('now') < ?) AS value`)
+    .get(enrollment.starts_at, enrollment.ends_at) as { value: number };
+  const usage = quotaUsage(db, userId, aiAccountingWindow());
+  const dailyAllowance = active.value ? policy.daily_credit_micros : 0;
+  const weeklyAllowance = active.value ? policy.weekly_credit_micros : 0;
+  const dailyRemaining = Math.max(0, dailyAllowance - usage.daily);
+  const weeklyRemaining = Math.max(0, weeklyAllowance - usage.weekly);
+  const available = Math.max(
+    0,
+    Math.min(dailyRemaining, weeklyRemaining) +
+      account.top_up_credit_micros -
+      account.reserved_credit_micros,
+  );
+  const window = (allowance: number, used: number) => ({
+    allowance: creditsFromMicros(allowance),
+    used: creditsFromMicros(used),
+    remaining: creditsFromMicros(Math.max(0, allowance - used)),
+    used_percent: percent(used, allowance),
+  });
+  return {
+    available: creditsFromMicros(available),
+    reserved: creditsFromMicros(account.reserved_credit_micros),
+    top_up: creditsFromMicros(account.top_up_credit_micros),
+    plan: {
+      active: !!active.value,
+      starts_at: enrollment.starts_at,
+      ends_at: enrollment.ends_at,
+      daily: window(dailyAllowance, usage.daily),
+      weekly: window(weeklyAllowance, usage.weekly),
+    },
+  };
 }
 
 export function topUpAiCredits(
@@ -570,30 +695,87 @@ export function topUpAiCredits(
   },
 ): AiCreditBalance {
   return db.transaction(() => {
-    ensureAccount(db, input.userId);
+    ensureBillingState(db, input.userId);
     const existing = db
       .prepare("SELECT 1 FROM ai_credit_ledger WHERE idempotency_key = ?")
       .get(input.idempotencyKey);
     if (existing) return getAiCreditBalance(db, input.userId);
+    const amount = microsFromCredits(input.amount);
     db.prepare(
-      `UPDATE ai_credit_accounts SET balance = balance + ?,
-       updated_at = datetime('now') WHERE user_id = ?`,
-    ).run(input.amount, input.userId);
-    const balance = getAiCreditBalance(db, input.userId);
+      `UPDATE ai_credit_accounts
+       SET top_up_credit_micros = top_up_credit_micros + ?,
+         updated_at = datetime('now') WHERE user_id = ?`,
+    ).run(amount, input.userId);
+    const account = db
+      .prepare(
+        "SELECT top_up_credit_micros AS value FROM ai_credit_accounts WHERE user_id = ?",
+      )
+      .get(input.userId) as { value: number };
     db.prepare(
       `INSERT INTO ai_credit_ledger
-       (id, user_id, kind, delta, balance_after, admin_id, idempotency_key, note)
+       (id, user_id, kind, delta_credit_micros, top_up_after_credit_micros,
+        admin_id, idempotency_key, note)
        VALUES (?, ?, 'top_up', ?, ?, ?, ?, ?)`,
     ).run(
       crypto.randomUUID(),
       input.userId,
-      input.amount,
-      balance.balance,
+      amount,
+      account.value,
       input.adminId,
       input.idempotencyKey,
       input.note,
     );
-    return balance;
+    return getAiCreditBalance(db, input.userId);
+  })();
+}
+
+function reserveCredits(
+  db: Database,
+  userId: string,
+  operationId: string,
+  runId: string | null,
+  amountCreditMicros: number,
+): AiCreditBalance | null {
+  return db.transaction(() => {
+    ensureBillingState(db, userId);
+    const existing = db
+      .prepare(
+        "SELECT status FROM ai_credit_reservations WHERE operation_id = ?",
+      )
+      .get(operationId) as { status: string } | undefined;
+    if (existing) return getAiCreditBalance(db, userId);
+    const available = microsFromCredits(
+      getAiCreditBalance(db, userId).available,
+    );
+    if (available < amountCreditMicros) return null;
+    db.prepare(
+      `INSERT INTO ai_credit_reservations
+       (operation_id, user_id, run_id, amount_credit_micros, status)
+       VALUES (?, ?, ?, ?, 'active')`,
+    ).run(operationId, userId, runId, amountCreditMicros);
+    db.prepare(
+      `UPDATE ai_credit_accounts
+       SET reserved_credit_micros = reserved_credit_micros + ?,
+         updated_at = datetime('now') WHERE user_id = ?`,
+    ).run(amountCreditMicros, userId);
+    const topUp = db
+      .prepare(
+        "SELECT top_up_credit_micros AS value FROM ai_credit_accounts WHERE user_id = ?",
+      )
+      .get(userId) as { value: number };
+    db.prepare(
+      `INSERT INTO ai_credit_ledger
+       (id, user_id, kind, delta_credit_micros, top_up_after_credit_micros,
+        run_id, idempotency_key, note)
+       VALUES (?, ?, 'reserve', 0, ?, ?, ?, 'AI credit reservation')`,
+    ).run(
+      crypto.randomUUID(),
+      userId,
+      topUp.value,
+      runId,
+      `${operationId}:reserve`,
+    );
+    return getAiCreditBalance(db, userId);
   })();
 }
 
@@ -601,60 +783,138 @@ export function reserveAiCredits(
   db: Database,
   userId: string,
   runId: string,
-  amount: number,
+  amountCreditMicros: number,
 ): AiCreditBalance | null {
-  return db.transaction(() => {
-    ensureAccount(db, userId);
-    const account = getAiCreditBalance(db, userId);
-    if (account.balance < amount) return null;
-    db.prepare(
-      `UPDATE ai_credit_accounts SET balance = balance - ?, reserved = reserved + ?,
-       updated_at = datetime('now') WHERE user_id = ?`,
-    ).run(amount, amount, userId);
-    const balance = getAiCreditBalance(db, userId);
-    db.prepare(
-      `INSERT INTO ai_credit_ledger
-       (id, user_id, kind, delta, balance_after, run_id, idempotency_key, note)
-       VALUES (?, ?, 'reserve', ?, ?, ?, ?, 'AI run credit reservation')`,
-    ).run(
-      crypto.randomUUID(),
-      userId,
-      -amount,
-      balance.balance,
-      runId,
-      `run:${runId}:reserve`,
-    );
-    return balance;
-  })();
+  return reserveCredits(db, userId, `run:${runId}`, runId, amountCreditMicros);
 }
 
 export function reserveAiOperationCredits(
   db: Database,
   userId: string,
   operationId: string,
-  amount: number,
+  amountCreditMicros: number,
 ): AiCreditBalance | null {
+  return reserveCredits(
+    db,
+    userId,
+    `operation:${operationId}`,
+    null,
+    amountCreditMicros,
+  );
+}
+
+function settleCredits(
+  db: Database,
+  userId: string,
+  operationId: string,
+  runId: string | null,
+  chargedCreditMicros: number,
+): AiCreditBalance {
   return db.transaction(() => {
-    ensureAccount(db, userId);
-    const account = getAiCreditBalance(db, userId);
-    if (account.balance < amount) return null;
+    ensureBillingState(db, userId);
+    const reservation = db
+      .prepare(
+        `SELECT amount_credit_micros, status FROM ai_credit_reservations
+       WHERE operation_id = ? AND user_id = ?`,
+      )
+      .get(operationId, userId) as
+      { amount_credit_micros: number; status: string } | undefined;
+    if (!reservation || reservation.status !== "active") {
+      return getAiCreditBalance(db, userId);
+    }
+    const actual = Math.max(
+      0,
+      Math.min(
+        reservation.amount_credit_micros,
+        Math.round(chargedCreditMicros),
+      ),
+    );
+    const policy = billingPolicyRow(db);
+    const keys = aiAccountingWindow();
+    const usage = quotaUsage(db, userId, keys);
+    const enrollment = db
+      .prepare(
+        `SELECT (starts_at <= datetime('now') AND datetime('now') < ends_at) AS active
+       FROM ai_plan_enrollments WHERE user_id = ?`,
+      )
+      .get(userId) as { active: number };
+    const planAvailable = enrollment.active
+      ? Math.max(
+          0,
+          Math.min(
+            policy.daily_credit_micros - usage.daily,
+            policy.weekly_credit_micros - usage.weekly,
+          ),
+        )
+      : 0;
+    const planCharge = Math.min(actual, planAvailable);
+    const topUpCharge = actual - planCharge;
+    const account = db
+      .prepare(
+        `SELECT top_up_credit_micros FROM ai_credit_accounts WHERE user_id = ?`,
+      )
+      .get(userId) as { top_up_credit_micros: number };
+    const collectibleTopUp = Math.min(
+      topUpCharge,
+      account.top_up_credit_micros,
+    );
+    const collected = planCharge + collectibleTopUp;
     db.prepare(
-      `UPDATE ai_credit_accounts SET balance = balance - ?, reserved = reserved + ?,
-       updated_at = datetime('now') WHERE user_id = ?`,
-    ).run(amount, amount, userId);
-    const balance = getAiCreditBalance(db, userId);
+      `UPDATE ai_credit_accounts SET
+        top_up_credit_micros = top_up_credit_micros - ?,
+        reserved_credit_micros = MAX(0, reserved_credit_micros - ?),
+        updated_at = datetime('now') WHERE user_id = ?`,
+    ).run(collectibleTopUp, reservation.amount_credit_micros, userId);
+    db.prepare(
+      `UPDATE ai_credit_reservations SET status = 'settled',
+       updated_at = datetime('now') WHERE operation_id = ?`,
+    ).run(operationId);
+    db.prepare(
+      `INSERT INTO ai_credit_usage
+       (id, operation_id, user_id, run_id, day_key, week_key,
+        charged_credit_micros, plan_credit_micros, top_up_credit_micros)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      crypto.randomUUID(),
+      operationId,
+      userId,
+      runId,
+      keys.day,
+      keys.week,
+      collected,
+      planCharge,
+      collectibleTopUp,
+    );
+    const topUpAfter = account.top_up_credit_micros - collectibleTopUp;
     db.prepare(
       `INSERT INTO ai_credit_ledger
-       (id, user_id, kind, delta, balance_after, idempotency_key, note)
-       VALUES (?, ?, 'reserve', ?, ?, ?, 'AI auxiliary operation reservation')`,
+       (id, user_id, kind, delta_credit_micros, top_up_after_credit_micros,
+        run_id, idempotency_key, note)
+       VALUES (?, ?, 'settle', ?, ?, ?, ?, ?)`,
     ).run(
       crypto.randomUUID(),
       userId,
-      -amount,
-      balance.balance,
-      `operation:${operationId}:reserve`,
+      -collectibleTopUp,
+      topUpAfter,
+      runId,
+      `${operationId}:settle`,
+      `Charged ${creditsFromMicros(collected)} credits`,
     );
-    return balance;
+    if (actual < reservation.amount_credit_micros) {
+      db.prepare(
+        `INSERT INTO ai_credit_ledger
+         (id, user_id, kind, delta_credit_micros, top_up_after_credit_micros,
+          run_id, idempotency_key, note)
+         VALUES (?, ?, 'release', 0, ?, ?, ?, 'Unused reservation released')`,
+      ).run(
+        crypto.randomUUID(),
+        userId,
+        topUpAfter,
+        runId,
+        `${operationId}:release`,
+      );
+    }
+    return getAiCreditBalance(db, userId);
   })();
 }
 
@@ -662,99 +922,26 @@ export function settleAiOperationCredits(
   db: Database,
   userId: string,
   operationId: string,
-  reserved: number,
-  charged: number,
+  _reservedCreditMicros: number,
+  chargedCreditMicros: number,
 ): AiCreditBalance {
-  return db.transaction(() => {
-    const existing = db
-      .prepare("SELECT 1 FROM ai_credit_ledger WHERE idempotency_key = ?")
-      .get(`operation:${operationId}:settle`);
-    if (existing) return getAiCreditBalance(db, userId);
-    const actual = Math.max(0, Math.min(reserved, charged));
-    const release = reserved - actual;
-    db.prepare(
-      `UPDATE ai_credit_accounts SET balance = balance + ?,
-       reserved = MAX(0, reserved - ?), updated_at = datetime('now')
-       WHERE user_id = ?`,
-    ).run(release, reserved, userId);
-    const balance = getAiCreditBalance(db, userId);
-    db.prepare(
-      `INSERT INTO ai_credit_ledger
-       (id, user_id, kind, delta, balance_after, idempotency_key, note)
-       VALUES (?, ?, 'settle', 0, ?, ?, ?)`,
-    ).run(
-      crypto.randomUUID(),
-      userId,
-      balance.balance,
-      `operation:${operationId}:settle`,
-      `Charged ${actual} of ${reserved} auxiliary credits`,
-    );
-    if (release > 0) {
-      db.prepare(
-        `INSERT INTO ai_credit_ledger
-         (id, user_id, kind, delta, balance_after, idempotency_key, note)
-         VALUES (?, ?, 'release', ?, ?, ?, 'Unused auxiliary reservation')`,
-      ).run(
-        crypto.randomUUID(),
-        userId,
-        release,
-        balance.balance,
-        `operation:${operationId}:release`,
-      );
-    }
-    return balance;
-  })();
+  return settleCredits(
+    db,
+    userId,
+    `operation:${operationId}`,
+    null,
+    chargedCreditMicros,
+  );
 }
 
 export function settleAiCredits(
   db: Database,
   userId: string,
   runId: string,
-  reserved: number,
-  charged: number,
+  _reservedCreditMicros: number,
+  chargedCreditMicros: number,
 ): AiCreditBalance {
-  return db.transaction(() => {
-    ensureAccount(db, userId);
-    const already = db
-      .prepare("SELECT 1 FROM ai_credit_ledger WHERE idempotency_key = ?")
-      .get(`run:${runId}:settle`);
-    if (already) return getAiCreditBalance(db, userId);
-    const actual = Math.max(0, Math.min(reserved, charged));
-    const release = reserved - actual;
-    db.prepare(
-      `UPDATE ai_credit_accounts SET balance = balance + ?,
-       reserved = MAX(0, reserved - ?), updated_at = datetime('now')
-       WHERE user_id = ?`,
-    ).run(release, reserved, userId);
-    const balance = getAiCreditBalance(db, userId);
-    db.prepare(
-      `INSERT INTO ai_credit_ledger
-       (id, user_id, kind, delta, balance_after, run_id, idempotency_key, note)
-       VALUES (?, ?, 'settle', 0, ?, ?, ?, ?)`,
-    ).run(
-      crypto.randomUUID(),
-      userId,
-      balance.balance,
-      runId,
-      `run:${runId}:settle`,
-      `Charged ${actual} of ${reserved} reserved credits`,
-    );
-    if (release > 0) {
-      db.prepare(
-        `INSERT INTO ai_credit_ledger
-         (id, user_id, kind, delta, balance_after, run_id, idempotency_key, note)
-         VALUES (?, ?, 'release', ?, ?, ?, ?, 'Unused AI run reservation')`,
-      ).run(
-        crypto.randomUUID(),
-        userId,
-        release,
-        balance.balance,
-        runId,
-        `run:${runId}:release`,
-      );
-    }
-    return balance;
-  })();
+  return settleCredits(db, userId, `run:${runId}`, runId, chargedCreditMicros);
 }
 
 export function listAiCreditLedger(
@@ -762,19 +949,115 @@ export function listAiCreditLedger(
   userId: string,
   limit = 30,
 ): AiCreditLedgerEntry[] {
-  return db
+  const rows = db
     .prepare(
-      `SELECT id, user_id, kind, delta, balance_after, run_id, admin_id,
+      `SELECT id, user_id, kind, delta_credit_micros,
+        top_up_after_credit_micros, run_id, admin_id,
         note, created_at FROM ai_credit_ledger WHERE user_id = ?
        ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     )
-    .all(userId, limit) as AiCreditLedgerEntry[];
+    .all(userId, limit) as Array<
+    Omit<AiCreditLedgerEntry, "delta" | "top_up_after"> & {
+      delta_credit_micros: number;
+      top_up_after_credit_micros: number;
+    }
+  >;
+  return rows.map(
+    ({ delta_credit_micros, top_up_after_credit_micros, ...row }) => ({
+      ...row,
+      delta: creditsFromMicros(delta_credit_micros),
+      top_up_after: creditsFromMicros(top_up_after_credit_micros),
+    }),
+  );
+}
+
+export function getAiBillingPolicy(db: Database): AiBillingPolicy {
+  const row = billingPolicyRow(db);
+  return {
+    daily_allowance: creditsFromMicros(row.daily_credit_micros),
+    weekly_allowance: creditsFromMicros(row.weekly_credit_micros),
+    default_plan_duration_days: row.default_plan_duration_days,
+    updated_at: row.updated_at,
+  };
+}
+
+export function updateAiBillingPolicy(
+  db: Database,
+  input: {
+    dailyAllowance: number;
+    weeklyAllowance: number;
+    defaultPlanDurationDays: number;
+    adminId: string;
+  },
+): AiBillingPolicy {
+  const daily = microsFromCredits(input.dailyAllowance);
+  const weekly = microsFromCredits(input.weeklyAllowance);
+  db.prepare(
+    `UPDATE ai_billing_policy SET daily_credit_micros = ?,
+      weekly_credit_micros = ?, default_plan_duration_days = ?,
+      updated_by = ?, updated_at = datetime('now') WHERE id = 1`,
+  ).run(daily, weekly, input.defaultPlanDurationDays, input.adminId);
+  return getAiBillingPolicy(db);
+}
+
+export function assignAiPlan(
+  db: Database,
+  input: { userId: string; durationDays: number; adminId: string },
+): AiCreditBalance {
+  ensureAccount(db, input.userId);
+  db.prepare(
+    `INSERT INTO ai_plan_enrollments
+      (user_id, starts_at, ends_at, assigned_by, updated_at)
+     VALUES (?, datetime('now'), datetime('now', '+' || ? || ' days'), ?, datetime('now'))
+     ON CONFLICT(user_id) DO UPDATE SET starts_at = excluded.starts_at,
+       ends_at = excluded.ends_at, assigned_by = excluded.assigned_by,
+       updated_at = excluded.updated_at`,
+  ).run(input.userId, input.durationDays, input.adminId);
+  return getAiCreditBalance(db, input.userId);
+}
+
+export function getAiBillingSummary(db: Database): AiBillingSummary {
+  const policy = billingPolicyRow(db);
+  const activePlans = db
+    .prepare(
+      `SELECT COUNT(*) AS value FROM ai_plan_enrollments
+     WHERE starts_at <= datetime('now') AND datetime('now') < ends_at`,
+    )
+    .get() as { value: number };
+  const topUp = db
+    .prepare(
+      `SELECT COALESCE(SUM(top_up_credit_micros), 0) AS value
+     FROM ai_credit_accounts`,
+    )
+    .get() as { value: number };
+  const consumption = db
+    .prepare(
+      `SELECT day_key AS date, SUM(charged_credit_micros) AS value
+     FROM ai_credit_usage
+     WHERE day_key >= date('now', '-29 days')
+     GROUP BY day_key ORDER BY day_key`,
+    )
+    .all() as Array<{ date: string; value: number }>;
+  const weeklyPlan = activePlans.value * policy.weekly_credit_micros;
+  return {
+    policy: getAiBillingPolicy(db),
+    stock: {
+      weekly_plan: creditsFromMicros(weeklyPlan),
+      top_up: creditsFromMicros(topUp.value),
+      total: creditsFromMicros(weeklyPlan + topUp.value),
+    },
+    consumption_by_day: consumption.map((item) => ({
+      date: item.date,
+      credits: creditsFromMicros(item.value),
+    })),
+  };
 }
 
 export function getAiRunBilling(db: Database, runId: string) {
   return db
-    .prepare(`SELECT user_id, reserved_credits FROM ai_runs WHERE id = ?`)
-    .get(runId) as { user_id: string; reserved_credits: number } | undefined;
+    .prepare(`SELECT user_id, reserved_credit_micros FROM ai_runs WHERE id = ?`)
+    .get(runId) as
+    { user_id: string; reserved_credit_micros: number } | undefined;
 }
 
 export function getAiFileOperation(
@@ -807,23 +1090,32 @@ export function getAiFileOperation(
 export function listInterruptedAiRuns(db: Database): Array<{
   id: string;
   user_id: string;
-  reserved_credits: number;
+  reserved_credit_micros: number;
 }> {
   return db
     .prepare(
-      `SELECT id, user_id, reserved_credits FROM ai_runs
+      `SELECT id, user_id, reserved_credit_micros FROM ai_runs
        WHERE status IN ('queued', 'routing', 'running')`,
     )
     .all() as Array<{
     id: string;
     user_id: string;
-    reserved_credits: number;
+    reserved_credit_micros: number;
   }>;
 }
 
-export function purgeAiUserData(db: Database, userId: string): void {
+export function purgeAiConversationData(db: Database, userId: string): void {
+  db.prepare("DELETE FROM ai_conversations WHERE user_id = ?").run(userId);
+}
+
+export function purgeAiBillingData(db: Database, userId: string): void {
   db.transaction(() => {
-    db.prepare("DELETE FROM ai_conversations WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM ai_credit_reservations WHERE user_id = ?").run(
+      userId,
+    );
+    db.prepare("DELETE FROM ai_credit_usage WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM ai_credit_ledger WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM ai_plan_enrollments WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM ai_credit_accounts WHERE user_id = ?").run(userId);
   })();
 }

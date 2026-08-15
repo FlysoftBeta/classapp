@@ -34,6 +34,7 @@ import { publishConversationUpdate } from "@/server/services/conversationsServic
 import { publishRemoteResubscribe } from "@/server/services/eventBus";
 import type { AdminGroup, Group, GroupMember } from "@/shared/types/api";
 import { groupConvId } from "@/shared/conversations/id";
+import { Facts, fact, type Fact } from "@/server/runtime/facts";
 
 const HANDLE_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 
@@ -96,7 +97,33 @@ export type JoinGroupResult =
   | { ok: false; error: string; needs_password: boolean };
 
 export class GroupService {
+  private readonly facts = new Facts();
+  private readonly membershipFacts = new Map<string, Fact<boolean>>();
+
   constructor(private readonly db: Database) {}
+
+  /** Request-local membership fact. Mutating methods update it for read-your-writes. */
+  isMember(userId: string, groupId: string): boolean {
+    const key = `${userId}:${groupId}`;
+    let entry = this.membershipFacts.get(key);
+    if (!entry) {
+      entry = fact<boolean>(`group.membership:${key}`);
+      this.membershipFacts.set(key, entry);
+    }
+    return this.facts.getOrInit(entry, () =>
+      isGroupMember(this.db, userId, groupId),
+    );
+  }
+
+  private setMembership(userId: string, groupId: string, value: boolean): void {
+    const key = `${userId}:${groupId}`;
+    let entry = this.membershipFacts.get(key);
+    if (!entry) {
+      entry = fact<boolean>(`group.membership:${key}`);
+      this.membershipFacts.set(key, entry);
+    }
+    this.facts.set(entry, value);
+  }
 
   private ensureUniqueHandle(handle: string, exceptId?: string): void {
     if (groupHandleExists(this.db, handle, exceptId)) {
@@ -162,6 +189,7 @@ export class GroupService {
   removeUserFromAllGroups(userId: string): void {
     for (const groupId of listUserGroupIds(this.db, userId)) {
       removeGroupMember(this.db, userId, groupId);
+      this.setMembership(userId, groupId, false);
       publishConversationUpdate(this.db, userId, {
         type: "group",
         id: groupId,
@@ -215,6 +243,7 @@ export class GroupService {
       });
       if (options.creatorId) {
         addGroupMember(this.db, options.creatorId, groupId);
+        this.setMembership(options.creatorId, groupId, true);
       }
     })();
 
@@ -291,6 +320,7 @@ export class GroupService {
       }
     }
     addGroupMember(this.db, userId, group.id);
+    this.setMembership(userId, group.id, true);
     publishConversationUpdate(this.db, userId, { type: "group", id: group.id });
     publishRemoteResubscribe(userId, "membership");
     return { ok: true, group };
@@ -309,6 +339,7 @@ export class GroupService {
       throw new PublicError("未加入该群组");
     }
     removeGroupMember(this.db, userId, group.id);
+    this.setMembership(userId, group.id, false);
     publishConversationUpdate(this.db, userId, {
       type: "group",
       id: group.id,
@@ -450,6 +481,7 @@ export class GroupService {
       throw new PublicError("干员不存在");
     }
     addGroupMember(this.db, userId, group.id);
+    this.setMembership(userId, group.id, true);
     publishConversationUpdate(this.db, userId, { type: "group", id: group.id });
     publishRemoteResubscribe(userId, "membership");
   }
@@ -457,6 +489,7 @@ export class GroupService {
   adminRemoveMember(groupId: string, userId: string): void {
     const group = this.requireGroup(groupId);
     removeGroupMember(this.db, userId, group.id);
+    this.setMembership(userId, group.id, false);
     publishConversationUpdate(this.db, userId, {
       type: "group",
       id: group.id,

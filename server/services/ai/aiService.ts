@@ -8,32 +8,24 @@ import {
   createAiRunRecords,
   finishAiRun,
   getAiConversationDetail,
-  getAiCreditBalance,
   getAiMessage,
   getAiRun,
-  getAiRunBilling,
   isAiRunCancellationRequested,
   latestAiContextSnapshot,
   listAiBranchMessages,
   listAiConversations,
-  listInterruptedAiRuns,
-  listAiCreditLedger,
   markAiConversationRead,
   moveAiRunToConversation,
-  purgeAiUserData,
+  purgeAiConversationData,
   requestAiRunCancellation,
-  reserveAiCredits,
-  reserveAiOperationCredits,
   saveAiContextSnapshot,
   searchAiConversations,
-  settleAiCredits,
-  settleAiOperationCredits,
-  topUpAiCredits,
   updateAiConversationMetadata,
   updateAiRunRouting,
   updateAiRunStream,
 } from "@/server/data/ai";
-import { userExists } from "@/server/data/users";
+import type { AiExecutionRuntime } from "@/server/runtime/aiExecutionRuntime";
+import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import {
   aiModelsStatus,
   resolveAiModels,
@@ -67,6 +59,7 @@ import {
   ROUTER_PROMPT,
   SEARCH_TAGS_PROMPT,
 } from "./prompts";
+import { providerCostMicros } from "./pricing";
 
 type Usage = {
   inputTokens: number;
@@ -141,18 +134,6 @@ const COMPACTION_SCHEMA = {
   additionalProperties: false,
 };
 
-function cost(config: AiModelsConfig, modelName: string, usage: Usage): number {
-  const model = config.providerModels[modelName];
-  if (!model) return 0;
-  const uncached = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
-  return Math.ceil(
-    (uncached * model.input +
-      usage.cachedInputTokens * model.cachedInput +
-      usage.outputTokens * model.output) /
-      1_000_000,
-  );
-}
-
 function reservationFor(
   config: AiModelsConfig,
   content: string,
@@ -176,8 +157,7 @@ function reservationFor(
     maximum = Math.max(
       maximum,
       Math.ceil(
-        (inputTokens * model.input + model.maxOutputTokens * model.output) /
-          1_000_000,
+        inputTokens * model.input + model.maxOutputTokens * model.output,
       ),
     );
   }
@@ -189,9 +169,8 @@ function reservationFor(
       return Math.max(
         highest,
         Math.ceil(
-          (inputTokens * model.input +
-            Math.min(model.maxOutputTokens, 4096) * model.output) /
-            1_000_000,
+          inputTokens * model.input +
+            Math.min(model.maxOutputTokens, 4096) * model.output,
         ),
       );
     }, 0);
@@ -216,9 +195,8 @@ function auxiliaryReservation(
     maximum = Math.max(
       maximum,
       Math.ceil(
-        (inputTokens * model.input +
-          Math.min(model.maxOutputTokens, 4096) * model.output) /
-          1_000_000,
+        inputTokens * model.input +
+          Math.min(model.maxOutputTokens, 4096) * model.output,
       ),
     );
   }
@@ -300,24 +278,11 @@ async function messageItems(
 }
 
 export class AiService {
-  private readonly controllers = new Map<string, AbortController>();
-
-  constructor(readonly db: Database) {
-    // Reservations are durable, but in-memory streams are not. Reconcile them
-    // when the first AI capability is created after a server restart.
-    for (const run of listInterruptedAiRuns(db)) {
-      finishAiRun(db, run.id, {
-        status: "failed",
-        content: "服务重启中断了本次生成，请重新发送。",
-        error: "AI run interrupted by server restart",
-        chargedCredits: 0,
-        inputTokens: 0,
-        cachedInputTokens: 0,
-        outputTokens: 0,
-      });
-      settleAiCredits(db, run.user_id, run.id, run.reserved_credits, 0);
-    }
-  }
+  constructor(
+    private readonly db: Database,
+    private readonly executions: AiExecutionRuntime,
+    private readonly billing: AiBillingService,
+  ) {}
 
   status() {
     const models = aiModelsStatus();
@@ -329,7 +294,7 @@ export class AiService {
   list(user: User) {
     return {
       conversations: listAiConversations(this.db, user.id),
-      credits: getAiCreditBalance(this.db, user.id),
+      credits: this.billing.balance(user.id),
       status: this.status(),
     };
   }
@@ -341,31 +306,9 @@ export class AiService {
   }
 
   async purgeUser(userId: string): Promise<void> {
-    for (const [runId, controller] of this.controllers) {
-      const billing = getAiRunBilling(this.db, runId);
-      if (billing?.user_id === userId) controller.abort();
-    }
-    purgeAiUserData(this.db, userId);
+    this.executions.abortUser(userId);
+    purgeAiConversationData(this.db, userId);
     await removeAiFileStore(userId);
-  }
-
-  adminCredits(userId: string) {
-    if (!userExists(this.db, userId)) throw new PublicError("干员不存在");
-    return {
-      credits: getAiCreditBalance(this.db, userId),
-      ledger: listAiCreditLedger(this.db, userId),
-    };
-  }
-
-  adminTopUp(input: {
-    userId: string;
-    adminId: string;
-    amount: number;
-    idempotencyKey: string;
-    note: string;
-  }) {
-    if (!userExists(this.db, input.userId)) throw new PublicError("干员不存在");
-    return topUpAiCredits(this.db, input);
   }
 
   async search(user: User, query: string) {
@@ -380,8 +323,7 @@ export class AiService {
         "search_tags",
         query,
       );
-      const reservation = reserveAiOperationCredits(
-        this.db,
+      const reservation = this.billing.reserveOperation(
         user.id,
         operationId,
         reserved,
@@ -400,20 +342,18 @@ export class AiService {
           userId: user.id,
         });
         tags = response.value.tags.map(normalizeAiSearchText);
-        charged = cost(models.config, response.providerModel, response.usage);
+        charged = providerCostMicros(
+          models.config,
+          response.providerModel,
+          response.usage,
+        );
       } catch (error) {
         recordContainedServerIncident(this.db, BUILD_ID, error, {
           component: "ai-search-tags",
           user_id: user.id,
         });
       } finally {
-        settleAiOperationCredits(
-          this.db,
-          user.id,
-          operationId,
-          reserved,
-          charged,
-        );
+        this.billing.settleOperation(user.id, operationId, charged);
         publishUser(user.id, {
           kind: "ai.sidebar.updated",
           data: { refresh: true },
@@ -501,12 +441,12 @@ export class AiService {
       reservationContent,
       priorImages + imageInputs.length,
     );
-    const balance = getAiCreditBalance(this.db, user.id);
-    if (balance.balance < reserved) {
+    const quote = this.billing.quoteReservation(user.id, reserved);
+    if (!quote.sufficient) {
       return {
         status: "insufficient_credits",
-        required: reserved,
-        available: balance.balance,
+        required: quote.required,
+        available: quote.available,
       };
     }
 
@@ -548,7 +488,7 @@ export class AiService {
           attachments,
           reservedCredits: reserved,
         });
-        if (!reserveAiCredits(this.db, user.id, runId, reserved)) {
+        if (!this.billing.reserveRun(user.id, runId, reserved)) {
           throw new PublicError("Credits 不足");
         }
       })();
@@ -561,10 +501,11 @@ export class AiService {
         error instanceof PublicError &&
         error.publicMessage === "Credits 不足"
       ) {
+        const currentQuote = this.billing.quoteReservation(user.id, reserved);
         return {
           status: "insufficient_credits",
-          required: reserved,
-          available: getAiCreditBalance(this.db, user.id).balance,
+          required: currentQuote.required,
+          available: currentQuote.available,
         };
       }
       throw error;
@@ -588,7 +529,7 @@ export class AiService {
 
   cancel(user: User, runId: string): boolean {
     const changed = requestAiRunCancellation(this.db, user.id, runId);
-    this.controllers.get(runId)?.abort();
+    this.executions.abort(runId);
     return changed;
   }
 
@@ -634,7 +575,11 @@ export class AiService {
         : routeFallback(config, content, hasFork, hasImages);
       return {
         decision,
-        charged: cost(config, response.providerModel, response.usage),
+        charged: providerCostMicros(
+          config,
+          response.providerModel,
+          response.usage,
+        ),
       };
     } catch (error) {
       recordContainedServerIncident(this.db, BUILD_ID, error, {
@@ -707,7 +652,11 @@ export class AiService {
     return {
       summary: response.value.summary,
       recent: input.messages.slice(split),
-      charged: cost(input.config, response.providerModel, response.usage),
+      charged: providerCostMicros(
+        input.config,
+        response.providerModel,
+        response.usage,
+      ),
     };
   }
 
@@ -721,8 +670,7 @@ export class AiService {
     hasImages: boolean;
     config: AiModelsConfig;
   }): Promise<void> {
-    const controller = new AbortController();
-    this.controllers.set(input.runId, controller);
+    const controller = this.executions.begin(input.runId);
     const usage: Usage = {
       inputTokens: 0,
       cachedInputTokens: 0,
@@ -854,7 +802,11 @@ export class AiService {
           },
         });
         addUsage(usage, response.usage);
-        charged += cost(input.config, response.providerModel, response.usage);
+        charged += providerCostMicros(
+          input.config,
+          response.providerModel,
+          response.usage,
+        );
         updateAiRunRouting(this.db, input.runId, {
           status: "running",
           providerModel: response.providerModel,
@@ -898,7 +850,11 @@ export class AiService {
           userId: input.user.id,
         });
         addUsage(usage, metadata.usage);
-        charged += cost(input.config, metadata.providerModel, metadata.usage);
+        charged += providerCostMicros(
+          input.config,
+          metadata.providerModel,
+          metadata.usage,
+        );
         const title = metadata.value.title.trim().slice(0, 60);
         const tags = metadata.value.tags
           .map((display) => ({
@@ -921,23 +877,17 @@ export class AiService {
           user_id: input.user.id,
         });
       }
-      const billing = getAiRunBilling(this.db, input.runId)!;
-      const finalCharge = Math.min(billing.reserved_credits, charged);
+      const billing = this.billing.runReservation(input.runId)!;
+      const finalCharge = Math.min(billing.reserved_credit_micros, charged);
       finishAiRun(this.db, input.runId, {
         status: "completed",
         content: output,
-        chargedCredits: finalCharge,
+        chargedCreditMicros: finalCharge,
         inputTokens: usage.inputTokens,
         cachedInputTokens: usage.cachedInputTokens,
         outputTokens: usage.outputTokens,
       });
-      settleAiCredits(
-        this.db,
-        input.user.id,
-        input.runId,
-        billing.reserved_credits,
-        finalCharge,
-      );
+      this.billing.settleRun(input.user.id, input.runId, finalCharge);
       this.publish(input.user.id, input.runId);
       publishUser(input.user.id, {
         kind: "ai.sidebar.updated",
@@ -946,25 +896,22 @@ export class AiService {
     } catch (error) {
       const cancelled =
         error instanceof DOMException && error.name === "AbortError";
-      const billing = getAiRunBilling(this.db, input.runId);
-      const finalCharge = Math.min(billing?.reserved_credits ?? 0, charged);
+      const billing = this.billing.runReservation(input.runId);
+      const finalCharge = Math.min(
+        billing?.reserved_credit_micros ?? 0,
+        charged,
+      );
       finishAiRun(this.db, input.runId, {
         status: cancelled ? "cancelled" : "failed",
         content: output,
         error: cancelled ? null : "AI 暂时无法完成请求",
-        chargedCredits: finalCharge,
+        chargedCreditMicros: finalCharge,
         inputTokens: usage.inputTokens,
         cachedInputTokens: usage.cachedInputTokens,
         outputTokens: usage.outputTokens,
       });
       if (billing) {
-        settleAiCredits(
-          this.db,
-          input.user.id,
-          input.runId,
-          billing.reserved_credits,
-          finalCharge,
-        );
+        this.billing.settleRun(input.user.id, input.runId, finalCharge);
       }
       this.publish(input.user.id, input.runId);
       publishUser(input.user.id, {
@@ -979,18 +926,15 @@ export class AiService {
         });
       }
     } finally {
-      this.controllers.delete(input.runId);
+      this.executions.finish(input.runId);
     }
   }
 }
 
-const services = new WeakMap<Database, AiService>();
-
-export function createAiService(db: Database): AiService {
-  let service = services.get(db);
-  if (!service) {
-    service = new AiService(db);
-    services.set(db, service);
-  }
-  return service;
+export function createAiService(
+  db: Database,
+  executions: AiExecutionRuntime,
+  billing: AiBillingService,
+): AiService {
+  return new AiService(db, executions, billing);
 }

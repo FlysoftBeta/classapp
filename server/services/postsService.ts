@@ -11,15 +11,10 @@ import {
   publishConversationUpdateForPost,
 } from "@/server/services/conversationsService";
 import {
-  assertCanAccessPost,
-  assertCanCreatePost,
-  assertCanDeletePost,
-  assertCanEditPost,
-} from "@/server/domain/policy/posts";
-import {
   normalizeCreatePost,
   normalizeUpdatePost,
   type CreatePostInput,
+  type NormalizedCreatePost,
 } from "@/server/validation/posts";
 import {
   pushRecentSticker,
@@ -27,8 +22,7 @@ import {
 } from "@/server/infra/stickerLoader";
 import { USER_CONFIG } from "@/shared/userConfig/keys";
 import { getUserConfig, setUserConfig } from "./userConfig";
-import type { User, Post } from "@/shared/types/api";
-import { hasFeature } from "@/shared/features";
+import type { PostEntity } from "@/shared/types/api";
 import {
   findSharedVisibleGroup,
   getPostAccessRow,
@@ -38,6 +32,7 @@ import {
   insertPost,
   listAdminPosts,
   markPostDeleted,
+  postUserMetadata,
   parsePostStoredContent,
   queryDmPosts,
   queryFeedPosts,
@@ -96,7 +91,10 @@ function buildAfterClause(
   return { clause: "AND p.sequence > ?", val: [cursor] };
 }
 
-export function getPost(db: BetterSqlite3.Database, id: string): Post | null {
+export function getPost(
+  db: BetterSqlite3.Database,
+  id: string,
+): PostEntity | null {
   return getPostById(db, id);
 }
 
@@ -124,7 +122,7 @@ export function getFeedPosts(
     limit = 30,
     offset = 0,
   }: GetPostsParams = {},
-): Post[] {
+): PostEntity[] {
   const bc = buildBeforeClause(db, before_id, before_sequence);
   const ac = buildAfterClause(db, after_id, after_sequence);
   const revisionClause =
@@ -162,7 +160,7 @@ export function getGroupPosts(
     offset = 0,
   }: GetPostsParams = {},
   isAdmin = false,
-): Post[] {
+): PostEntity[] {
   if (!groupMembershipExists(db, userId, groupId) && !isAdmin) {
     throw new PublicError("你不在该群组中");
   }
@@ -203,7 +201,7 @@ export function getDmPosts(
     limit = 30,
     offset = 0,
   }: GetPostsParams = {},
-): Post[] {
+): PostEntity[] {
   const bc = buildBeforeClause(db, before_id, before_sequence);
   const ac = buildAfterClause(db, after_id, after_sequence);
   const revisionClause =
@@ -229,21 +227,40 @@ export function getDmPosts(
 export interface CreatePostOptions {
   /** Defer event publication until the caller commits a surrounding transaction. */
   deferNotify?: boolean;
+  /** Direct-message target already authorized by the ActorFacade. */
+  authorizedDirectPeerId?: string;
+}
+
+function ensureDirectConversation(
+  db: BetterSqlite3.Database,
+  userId: string,
+  peerId: string,
+): void {
+  if (!userExists(db, peerId)) throw new PublicError("干员不存在");
+  if (findDmConversation(db, userId, peerId)) return;
+  const proofGroupId = findSharedVisibleGroup(db, userId, peerId);
+  if (!proofGroupId) {
+    throw new PublicError("你与该干员没有互相可见的共同群组，无法私信");
+  }
+  insertDmConversation(db, userId, peerId, proofGroupId);
 }
 
 export function notifyPostCreated(
   db: BetterSqlite3.Database,
-  user: User,
-  post: Post,
+  post: PostEntity,
 ): void {
+  const users = postUserMetadata(db, [post]);
   const parsed = parseConvId(post.conv_id);
   if (parsed?.type === "group") {
-    publishGroupPost(parsed.groupId, { kind: "post.created", data: { post } });
+    publishGroupPost(parsed.groupId, {
+      kind: "post.created",
+      data: { post, users },
+    });
     publishConversationUpdateForPost(db, post);
   } else if (parsed?.type === "dm") {
     publishDmPost(parsed.peerA, parsed.peerB, {
       kind: "post.created",
-      data: { post },
+      data: { post, users },
     });
     publishConversationUpdateForPost(db, post);
     publishRemoteResubscribe(parsed.peerA, "dm");
@@ -253,36 +270,21 @@ export function notifyPostCreated(
 
 export function createPost(
   db: BetterSqlite3.Database,
-  user: User,
-  raw: CreatePostInput,
+  userId: string,
+  params: NormalizedCreatePost,
   opts?: CreatePostOptions,
-): Post {
-  const params = normalizeCreatePost(raw);
+): PostEntity {
   if (params.brief.length > POST_CONTENT_MAX) {
     throw new PublicError("内容过长（最多 500 万字符）");
   }
   const id = crypto.randomUUID();
   db.transaction(() => {
-    const parsed = parseConvId(params.conv_id);
-    if (!parsed) throw new PublicError("会话 ID 无效");
-    if (parsed.type === "dm") {
-      if (parsed.peerA !== user.id && parsed.peerB !== user.id) {
-        throw new PublicError("无权建立该私信");
-      }
-      const peerId = parsed.peerA === user.id ? parsed.peerB : parsed.peerA;
-      if (!userExists(db, peerId)) throw new PublicError("干员不存在");
-      if (!findDmConversation(db, parsed.peerA, parsed.peerB)) {
-        const proofGroupId = findSharedVisibleGroup(db, user.id, peerId);
-        if (!proofGroupId) {
-          throw new PublicError("你与该干员没有互相可见的共同群组，无法私信");
-        }
-        insertDmConversation(db, user.id, peerId, proofGroupId);
-      }
+    if (opts?.authorizedDirectPeerId) {
+      ensureDirectConversation(db, userId, opts.authorizedDirectPeerId);
     }
-    assertCanCreatePost(db, user, params);
     insertPost(db, {
       id,
-      userId: user.id,
+      userId,
       convId: params.conv_id,
       brief: params.brief,
       contentJson: params.content_json,
@@ -290,7 +292,7 @@ export function createPost(
     });
   })();
 
-  recordRecentSticker(db, user.id, params.content_json);
+  recordRecentSticker(db, userId, params.content_json);
 
   const post = getPostById(db, id);
   if (!post) {
@@ -298,7 +300,7 @@ export function createPost(
   }
 
   if (!opts?.deferNotify) {
-    notifyPostCreated(db, user, post);
+    notifyPostCreated(db, post);
   }
 
   return post;
@@ -307,10 +309,8 @@ export function createPost(
 export function updatePost(
   db: BetterSqlite3.Database,
   postId: string,
-  user: User,
   text: string,
-): Post {
-  assertCanEditPost(db, user, postId);
+): PostEntity {
   const params = normalizeUpdatePost(text);
   if (params.brief.length > POST_CONTENT_MAX) {
     throw new PublicError("内容过长（最多 500 万字符）");
@@ -324,16 +324,17 @@ export function updatePost(
   }
 
   const parsed = parseConvId(updated.conv_id);
+  const users = postUserMetadata(db, [updated]);
   if (parsed?.type === "group") {
     publishGroupPost(parsed.groupId, {
       kind: "post.updated",
-      data: { post: updated },
+      data: { post: updated, users },
     });
     publishConversationUpdateForPost(db, updated);
   } else if (parsed?.type === "dm") {
     publishDmPost(parsed.peerA, parsed.peerB, {
       kind: "post.updated",
-      data: { post: updated },
+      data: { post: updated, users },
     });
     publishConversationUpdateForPost(db, updated);
   }
@@ -343,9 +344,9 @@ export function updatePost(
 export function softDeletePost(
   db: BetterSqlite3.Database,
   postId: string,
-  user: User,
-): Post {
-  const post = assertCanDeletePost(db, user, postId);
+): PostEntity {
+  const post = getPostAccessRow(db, postId);
+  if (!post) throw new PublicError("帖子不存在");
   return softDeletePostRow(db, postId, post);
 }
 
@@ -356,22 +357,23 @@ function softDeletePostRow(
     user_id: string | null;
     conv_id: string;
   },
-): Post {
+): PostEntity {
   markPostDeleted(db, postId);
   const tombstone = getPostById(db, postId);
   if (!tombstone) throw new PublicError("帖子不存在");
 
   const parsed = parseConvId(post.conv_id);
+  const users = postUserMetadata(db, [tombstone]);
   if (parsed?.type === "group") {
     publishGroupPost(parsed.groupId, {
       kind: "post.deleted",
-      data: { post: tombstone },
+      data: { post: tombstone, users },
     });
     publishConversationUpdateForPost(db, tombstone);
   } else if (parsed?.type === "dm") {
     publishDmPost(parsed.peerA, parsed.peerB, {
       kind: "post.deleted",
-      data: { post: tombstone },
+      data: { post: tombstone, users },
     });
     publishConversationUpdateForPost(db, tombstone);
   }
@@ -381,9 +383,9 @@ function softDeletePostRow(
 export function adminDeletePost(
   db: BetterSqlite3.Database,
   postId: string,
-): void {
+): PostEntity | null {
   const post = getPostAccessRow(db, postId);
-  if (post) softDeletePostRow(db, postId, post);
+  return post ? softDeletePostRow(db, postId, post) : null;
 }
 
 export interface ListAdminPostsParams {
@@ -395,7 +397,7 @@ export interface ListAdminPostsParams {
 export function listAllPosts(
   db: BetterSqlite3.Database,
   { q = "", userId = "", offset = 0 }: ListAdminPostsParams = {},
-): { posts: Post[]; total: number } {
+): { posts: PostEntity[]; total: number } {
   return listAdminPosts(db, { q, userId, offset });
 }
 
@@ -415,7 +417,7 @@ export interface PostListInput {
 export class PostService {
   constructor(private readonly db: BetterSqlite3.Database) {}
 
-  list(user: User, input: PostListInput): Post[] {
+  list(userId: string, input: PostListInput) {
     if (
       input.changed_through_revision != null &&
       input.changed_after_revision == null
@@ -434,52 +436,59 @@ export class PostService {
       const parsed = parseConvId(input.conv_id);
       if (!parsed) throw new PublicError("会话 ID 无效");
       if (parsed.type === "group") {
-        return getGroupPosts(
+        const posts = getGroupPosts(
           this.db,
-          user.id,
+          userId,
           parsed.groupId,
           input,
-          hasFeature(user, "admin"),
+          true,
         );
+        return { posts, users: postUserMetadata(this.db, posts) };
       }
-      const peerId = parsed.peerA === user.id ? parsed.peerB : parsed.peerA;
-      if (parsed.peerA !== user.id && parsed.peerB !== user.id) {
-        throw new PublicError("无权访问");
-      }
-      if (!findDmConversation(this.db, parsed.peerA, parsed.peerB)) {
-        throw new PublicError("对话不存在");
-      }
-      return getDmPosts(this.db, user.id, peerId, input);
+      const peerId = parsed.peerA === userId ? parsed.peerB : parsed.peerA;
+      const posts = getDmPosts(this.db, userId, peerId, input);
+      return { posts, users: postUserMetadata(this.db, posts) };
     }
     if (input.changed_after_revision != null) {
       throw new PublicError("feed 不支持对话 revision 补拉");
     }
-    return getFeedPosts(this.db, user.id, input);
+    const posts = getFeedPosts(this.db, userId, input);
+    return { posts, users: postUserMetadata(this.db, posts) };
   }
 
-  get(user: User, postId: string): Post {
-    assertCanAccessPost(this.db, user, postId);
+  get(postId: string) {
     const post = getPost(this.db, postId);
     if (!post) {
       throw new PublicError("帖子不存在");
     }
-    return post;
+    return { post, users: postUserMetadata(this.db, [post]) };
   }
 
-  create(user: User, raw: CreatePostInput, opts?: CreatePostOptions): Post {
-    return createPost(this.db, user, raw, opts);
+  normalizeCreate(raw: CreatePostInput): NormalizedCreatePost {
+    return normalizeCreatePost(raw);
   }
 
-  update(user: User, postId: string, text: string): Post {
-    return updatePost(this.db, postId, user, text);
+  create(
+    userId: string,
+    input: NormalizedCreatePost,
+    opts?: CreatePostOptions,
+  ) {
+    const post = createPost(this.db, userId, input, opts);
+    return { post, users: postUserMetadata(this.db, [post]) };
   }
 
-  softDelete(user: User, postId: string): Post {
-    return softDeletePost(this.db, postId, user);
+  update(postId: string, text: string) {
+    const post = updatePost(this.db, postId, text);
+    return { post, users: postUserMetadata(this.db, [post]) };
+  }
+
+  softDelete(postId: string) {
+    const post = softDeletePost(this.db, postId);
+    return { post, users: postUserMetadata(this.db, [post]) };
   }
 
   adminList(input: ListAdminPostsParams = {}): {
-    posts: Post[];
+    posts: PostEntity[];
     total: number;
   } {
     return listAllPosts(this.db, input);
@@ -489,21 +498,38 @@ export class PostService {
     adminDeletePost(this.db, postId);
   }
 
+  forceDelete(postId: string) {
+    const post = adminDeletePost(this.db, postId);
+    if (!post) throw new PublicError("帖子不存在");
+    return { post, users: postUserMetadata(this.db, [post]) };
+  }
+
+  access(postId: string) {
+    const post = getPostAccessRow(this.db, postId);
+    if (!post) throw new PublicError("帖子不存在");
+    return post;
+  }
+
+  directConversationExists(peerA: string, peerB: string): boolean {
+    return findDmConversation(this.db, peerA, peerB) !== null;
+  }
+
   purgeUser(userId: string): void {
     const affected = purgePostsByUser(this.db, userId);
     for (const post of affected.posts) {
       const tombstone = getPostById(this.db, post.id);
       if (!tombstone) continue;
       const parsed = parseConvId(post.conv_id);
+      const users = postUserMetadata(this.db, [tombstone]);
       if (parsed?.type === "group") {
         publishGroupPost(parsed.groupId, {
           kind: "post.deleted",
-          data: { post: tombstone },
+          data: { post: tombstone, users },
         });
       } else if (parsed?.type === "dm") {
         publishDmPost(parsed.peerA, parsed.peerB, {
           kind: "post.deleted",
-          data: { post: tombstone },
+          data: { post: tombstone, users },
         });
       }
     }

@@ -7,7 +7,7 @@ import {
   listGhostUsers,
 } from "@/server/data/ghostUsers";
 import { findUserPinOwnerId } from "@/server/data/users";
-import { hashPin } from "@/server/infra/auth";
+import { createPinHasher } from "@/server/infra/credentials";
 import { PublicError } from "@/server/services/incidentService";
 
 export interface GhostUserServiceDeps {
@@ -15,10 +15,12 @@ export interface GhostUserServiceDeps {
   hashPinValue: (pin: string) => string;
 }
 
-const defaultDeps: GhostUserServiceDeps = {
-  generatePin: () => String(randomInt(100000, 1_000_000)),
-  hashPinValue: hashPin,
-};
+function defaultDeps(db: BetterSqlite3.Database): GhostUserServiceDeps {
+  return {
+    generatePin: () => String(randomInt(100000, 1_000_000)),
+    hashPinValue: createPinHasher(db),
+  };
+}
 
 export class GhostUserService {
   constructor(
@@ -59,5 +61,5 @@ export function createGhostUserService(
   db: BetterSqlite3.Database,
   deps: Partial<GhostUserServiceDeps> = {},
 ): GhostUserService {
-  return new GhostUserService(db, { ...defaultDeps, ...deps });
+  return new GhostUserService(db, { ...defaultDeps(db), ...deps });
 }

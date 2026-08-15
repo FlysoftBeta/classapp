@@ -102,7 +102,18 @@ const EMPTY_SIDEBAR: ArticleSidebarPayload = {
   articles: [],
 };
 
-const EMPTY_AI_CREDITS: AiCreditBalance = { balance: 0, reserved: 0 };
+const EMPTY_AI_CREDITS: AiCreditBalance = {
+  available: 0,
+  reserved: 0,
+  top_up: 0,
+  plan: {
+    active: false,
+    starts_at: null,
+    ends_at: null,
+    daily: { allowance: 0, used: 0, remaining: 0, used_percent: 0 },
+    weekly: { allowance: 0, used: 0, remaining: 0, used_percent: 0 },
+  },
+};
 
 function sortAiConversations(entries: AiConversation[]): AiConversation[] {
   return [...entries].sort((left, right) =>

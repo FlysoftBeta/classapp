@@ -3,11 +3,6 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
@@ -37,6 +32,7 @@ import {
 } from "@/client/components/shared/HelpTip";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
 import { GroupMembersDialog } from "./GroupMembersDialog";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
 const GROUP_TYPE_LABELS: Record<string, string> = {
   normal: "普通",
@@ -44,7 +40,7 @@ const GROUP_TYPE_LABELS: Record<string, string> = {
   announcement: "公告群",
 };
 
-export function GroupsTab() {
+export function GroupsTab({ canManage }: { canManage: boolean }) {
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useActionQuery<{
     groups: AdminGroupRecord[];
@@ -181,6 +177,99 @@ export function GroupsTab() {
     setEditErr("");
   };
 
+  const groupAttributes = (group: AdminGroupRecord): string[] => [
+    ...(group.discoverable ? ["可发现"] : []),
+    ...(group.members_hidden ? ["隐藏成员"] : []),
+    ...(group.admin_only ? ["仅管理员发言"] : []),
+    ...(group.no_leave ? ["禁止退出"] : []),
+  ];
+  const columns: AdminGridColumn<AdminGroupRecord>[] = [
+    {
+      id: "identity",
+      label: "群组标识",
+      width: 260,
+      render: (group) => group.handle ?? group.id,
+      longText: (group) =>
+        group.handle ? `Handle: ${group.handle}\nID: ${group.id}` : group.id,
+    },
+    {
+      id: "name",
+      label: "名称",
+      width: 220,
+      render: (group) => group.name,
+      longText: (group) => group.name,
+    },
+    {
+      id: "type",
+      label: "类型",
+      width: 130,
+      render: (group) => (
+        <Chip
+          label={GROUP_TYPE_LABELS[group.type || "normal"] ?? group.type}
+          size="small"
+          color={
+            group.type === "wild"
+              ? "warning"
+              : group.type === "announcement"
+                ? "info"
+                : "default"
+          }
+        />
+      ),
+    },
+    {
+      id: "members",
+      label: "成员",
+      width: 120,
+      render: (group) => (
+        <Button
+          size="small"
+          variant="text"
+          onClick={() => setMembersGroup(group)}
+        >
+          {group.member_count ?? 0} 人
+        </Button>
+      ),
+    },
+    {
+      id: "attributes",
+      label: "群组规则",
+      width: 360,
+      render: (group) => groupAttributes(group).join("、") || "默认规则",
+      longText: (group) => groupAttributes(group).join("\n"),
+    },
+    {
+      id: "parent",
+      label: "父群组",
+      width: 240,
+      render: (group) => group.parent_group_id ?? "—",
+      longText: (group) => group.parent_group_id,
+      hiddenByDefault: true,
+    },
+    {
+      id: "actions",
+      label: "操作",
+      width: 110,
+      render: (group) =>
+        canManage ? (
+          <Box sx={{ display: "flex" }}>
+            <IconButton size="small" onClick={() => openEdit(group)}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+            {group.type !== "wild" && group.type !== "announcement" ? (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => void handleDelete(group.id)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            ) : null}
+          </Box>
+        ) : null,
+    },
+  ];
+
   return (
     <Box>
       <Box sx={{ mb: 2 }}>
@@ -196,82 +285,12 @@ export function GroupsTab() {
       {loading ? (
         <CircularProgress size={24} />
       ) : (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Handle</TableCell>
-              <TableCell>名称</TableCell>
-              <TableCell>类型</TableCell>
-              <TableCell>成员数</TableCell>
-              <TableCell>属性</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {(data?.groups || []).map((g) => (
-              <TableRow key={g.id}>
-                <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>
-                  {g.handle ?? g.id}
-                </TableCell>
-                <TableCell>{g.name}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={GROUP_TYPE_LABELS[g.type || "normal"] ?? g.type}
-                    size="small"
-                    color={
-                      g.type === "wild"
-                        ? "warning"
-                        : g.type === "announcement"
-                          ? "info"
-                          : "default"
-                    }
-                  />
-                </TableCell>
-                <TableCell>
-                  <Button
-                    size="small"
-                    variant="text"
-                    sx={{ minWidth: 0, fontSize: 12 }}
-                    onClick={() => setMembersGroup(g)}
-                  >
-                    {(g as { member_count?: number }).member_count ?? 0} 人
-                  </Button>
-                </TableCell>
-                <TableCell>
-                  {!!g.discoverable && (
-                    <Chip
-                      label="可发现"
-                      size="small"
-                      color="success"
-                      sx={{ mr: 0.5 }}
-                    />
-                  )}
-                  {!!g.members_hidden && (
-                    <Chip label="隐藏成员" size="small" sx={{ mr: 0.5 }} />
-                  )}
-                  {!!g.admin_only && (
-                    <Chip label="仅管理员发言" size="small" sx={{ mr: 0.5 }} />
-                  )}
-                  {!!g.no_leave && <Chip label="禁止退出" size="small" />}
-                </TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => openEdit(g)}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                  {g.type !== "wild" && g.type !== "announcement" && (
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => handleDelete(g.id)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <AdminDataGrid
+          rows={data?.groups ?? []}
+          columns={columns}
+          rowKey={(group) => group.id}
+          empty="暂无群组"
+        />
       )}
       {data && data.total > 50 && (
         <Box sx={{ mt: 1, display: "flex", alignItems: "center" }}>
@@ -759,6 +778,7 @@ export function GroupsTab() {
       {membersGroup && (
         <GroupMembersDialog
           group={membersGroup}
+          canManage={canManage}
           onClose={() => setMembersGroup(null)}
         />
       )}

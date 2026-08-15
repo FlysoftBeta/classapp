@@ -1,11 +1,10 @@
 import { ContractViolationError } from "@/server/services/incidentService";
-import { Session } from "@/server/session/session";
+import { currentScope, type Scope } from "@/server/runtime/scope";
 
-export async function withActionSession<T>(
-  handler: (session: Session) => Promise<T>,
+export async function withActionScope<T>(
+  handler: (scope: Scope) => Promise<T>,
 ): Promise<T> {
-  const session = await Session.fromActionContext();
-  return handler(session);
+  return handler(currentScope());
 }
 
 export function expectString(

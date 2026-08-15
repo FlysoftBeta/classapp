@@ -1,6 +1,9 @@
 import crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import { generateToken, hashPin } from "@/server/infra/auth";
+import {
+  createPinHasher,
+  generateSessionToken,
+} from "@/server/infra/credentials";
 import {
   canClientLogin,
   checkClientThrottled,
@@ -34,7 +37,7 @@ import {
   PublicError,
 } from "@/server/services/incidentService";
 import type { User } from "@/shared/types/api";
-import { DEFAULT_FEATURE_MASK } from "@/shared/features";
+import { DEFAULT_USER_FEATURES } from "@/shared/features";
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
 
 export interface LoginResult {
@@ -125,11 +128,13 @@ export interface AuthServiceDeps {
   hashPinValue: (pin: string) => string;
 }
 
-const defaultDeps: AuthServiceDeps = {
-  createUserId: () => crypto.randomUUID(),
-  generateSessionToken: generateToken,
-  hashPinValue: hashPin,
-};
+function defaultDeps(db: Database): AuthServiceDeps {
+  return {
+    createUserId: () => crypto.randomUUID(),
+    generateSessionToken,
+    hashPinValue: createPinHasher(db),
+  };
+}
 
 export class AuthService {
   constructor(
@@ -285,7 +290,7 @@ export class AuthService {
         id: userId,
         handle,
         username: displayName,
-        featureMask: DEFAULT_FEATURE_MASK,
+        features: DEFAULT_USER_FEATURES,
         pinHashes: nextPinHashes,
       });
       insertSession(this.db, { token, userId, clientId });
@@ -306,5 +311,5 @@ export function createAuthService(
   identity: ClientIdentity,
   deps: Partial<AuthServiceDeps> = {},
 ): AuthService {
-  return new AuthService(db, identity, { ...defaultDeps, ...deps });
+  return new AuthService(db, identity, { ...defaultDeps(db), ...deps });
 }

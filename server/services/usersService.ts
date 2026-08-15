@@ -1,5 +1,6 @@
 import type BetterSqlite3 from "better-sqlite3";
-import { hashPin } from "@/server/infra/auth";
+import { createPinHasher } from "@/server/infra/credentials";
+import { UnitOfWork } from "@/server/runtime/unitOfWork";
 import { ghostPinHashExists } from "@/server/data/ghostUsers";
 import {
   countUsers,
@@ -18,8 +19,7 @@ import {
   updateUserBanUntil,
   updateUserHandle,
   updateUserMuted,
-  updateUserRole,
-  updateUserFeatureMask,
+  updateUserFeatures,
   updateUserUsername,
   userExists,
   userHasPinHash,
@@ -29,10 +29,12 @@ import { PublicError } from "@/server/services/incidentService";
 import { toDbTimestamp } from "@/shared/time";
 import { publishUser } from "./eventBus";
 import type { User } from "@/shared/types/api";
-import { DEFAULT_FEATURE_MASK, isValidFeatureMask } from "@/shared/features";
+import {
+  DEFAULT_USER_FEATURES,
+  userFeaturesSchema,
+  type UserFeatures,
+} from "@/shared/features";
 import { insertDeletedUser } from "@/server/data/deletedUsers";
-import { createArticleService } from "./articlesService";
-import { createWordsService } from "./wordsService";
 
 export interface UserServiceDeps {
   createId: () => string;
@@ -41,25 +43,31 @@ export interface UserServiceDeps {
   publishUserEvent: typeof publishUser;
 }
 
-const defaultDeps: UserServiceDeps = {
-  createId: () => crypto.randomUUID(),
-  hashPinValue: hashPin,
-  now: () => Date.now(),
-  publishUserEvent: publishUser,
-};
+function defaultDeps(
+  db: BetterSqlite3.Database,
+  unitOfWork: UnitOfWork,
+): UserServiceDeps {
+  return {
+    createId: () => crypto.randomUUID(),
+    hashPinValue: createPinHasher(db),
+    now: () => Date.now(),
+    publishUserEvent: (userId, event) =>
+      unitOfWork.afterCommit(() => publishUser(userId, event)),
+  };
+}
 
 export interface CreateUserParams {
   handle?: string;
   username?: string;
   pin?: string;
-  feature_mask?: number;
+  features?: UserFeatures;
 }
 
 export interface UpdateUserParams {
   handle?: string;
   username?: string;
   pin?: string;
-  feature_mask?: number;
+  features?: UserFeatures;
 }
 
 export interface UpdateSelfProfileParams {
@@ -115,10 +123,10 @@ export class UserService {
       throw new PublicError("PIN 必须为 6 位数字");
     }
     if (
-      params.feature_mask !== undefined &&
-      !isValidFeatureMask(params.feature_mask)
+      params.features !== undefined &&
+      !userFeaturesSchema.safeParse(params.features).success
     ) {
-      throw new PublicError("feature_mask 无效");
+      throw new PublicError("功能设置无效");
     }
 
     if (findUserIdByHandle(this.db, params.handle)) {
@@ -134,7 +142,7 @@ export class UserService {
         id: userId,
         handle: params.handle!,
         username: (params.username || params.handle!).trim(),
-        featureMask: params.feature_mask ?? DEFAULT_FEATURE_MASK,
+        features: params.features ?? DEFAULT_USER_FEATURES,
         pinHashes: [pinHash],
       });
     })();
@@ -165,17 +173,11 @@ export class UserService {
       updateUserUsername(this.db, id, name);
     }
 
-    if (params.feature_mask !== undefined) {
-      if (!isValidFeatureMask(params.feature_mask)) {
-        throw new PublicError("feature_mask 无效");
+    if (params.features !== undefined) {
+      if (!userFeaturesSchema.safeParse(params.features).success) {
+        throw new PublicError("功能设置无效");
       }
-      updateUserFeatureMask(this.db, id, params.feature_mask);
-      // Keep the legacy column synchronized for old database tooling only.
-      updateUserRole(
-        this.db,
-        id,
-        (params.feature_mask & 1) !== 0 ? "admin" : "user",
-      );
+      updateUserFeatures(this.db, id, params.features);
     }
 
     if (params.pin !== undefined) {
@@ -197,50 +199,42 @@ export class UserService {
     return updated;
   }
 
-  async remove(
-    id: string,
-    selfId: string,
-    mode: UserRemovalMode,
-  ): Promise<void> {
-    if (id === selfId) {
-      throw new PublicError("不能删除自己");
+  updateFeaturesBatch(
+    updates: Array<{ userId: string; features: UserFeatures }>,
+  ): User[] {
+    const ids = new Set<string>();
+    for (const update of updates) {
+      if (ids.has(update.userId)) throw new PublicError("批量更新包含重复用户");
+      ids.add(update.userId);
+      if (!userFeaturesSchema.safeParse(update.features).success) {
+        throw new PublicError("功能设置无效");
+      }
+      if (!userExists(this.db, update.userId)) {
+        throw new PublicError("干员不存在");
+      }
     }
-    const user = this.get(id);
-    if (mode === "deactivate") {
-      const { createGroupService } = await import("./groupsService");
-      this.db.transaction(() => {
-        createGroupService(this.db).removeUserFromAllGroups(id);
-        insertDeletedUser(this.db, user);
-        revokeUserCredentials(this.db, id);
-      })();
-      return;
+    this.db.transaction(() => {
+      for (const update of updates) {
+        updateUserFeatures(this.db, update.userId, update.features);
+      }
+    })();
+    const users = updates.map((update) => this.get(update.userId));
+    for (const user of users) {
+      this.deps.publishUserEvent(user.id, {
+        kind: "user.profile_changed",
+        data: { user },
+      });
     }
+    return users;
+  }
 
-    // Purge is deliberately explicit: every owning service controls deletion
-    // of its own state and side effects before the identity row is removed.
-    const [
-      { createGroupService },
-      { createConversationService },
-      { createPostService },
-      { createClientService },
-      { createUserConfigService },
-      { createAiService },
-    ] = await Promise.all([
-      import("./groupsService"),
-      import("./conversationsService"),
-      import("./postsService"),
-      import("./clientsService"),
-      import("./userConfig"),
-      import("./ai/aiService"),
-    ]);
-    createGroupService(this.db).purgeUser(id);
-    createConversationService(this.db).purgeUser(id);
-    createPostService(this.db).purgeUser(id);
-    await createArticleService(this.db).purgeUser(id);
-    createWordsService(this.db).purgeUser(id);
-    createClientService(this.db).purgeUser(id);
-    createUserConfigService(this.db).purgeUser(id);
-    await createAiService(this.db).purgeUser(id);
+  deactivate(id: string): void {
+    const user = this.get(id);
+    insertDeletedUser(this.db, user);
+    revokeUserCredentials(this.db, id);
+  }
+
+  purgeIdentity(id: string): void {
     deleteUserById(this.db, id);
   }
 
@@ -357,7 +351,8 @@ export class UserService {
 
 export function createUserService(
   db: BetterSqlite3.Database,
+  unitOfWork = new UnitOfWork(db),
   deps: Partial<UserServiceDeps> = {},
 ): UserService {
-  return new UserService(db, { ...defaultDeps, ...deps });
+  return new UserService(db, { ...defaultDeps(db, unitOfWork), ...deps });
 }

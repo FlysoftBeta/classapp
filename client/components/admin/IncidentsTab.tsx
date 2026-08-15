@@ -9,11 +9,6 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import {
@@ -26,6 +21,7 @@ import {
 } from "@/client/api/admin";
 import { captureClientOperation } from "@/client/interact/clientIncidents";
 import { RemoteIncidentError } from "@/shared/protocol/errors";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
 export function IncidentsTab({ token }: { token: string }) {
   const [groups, setGroups] = useState<AdminIncidentGroup[]>([]);
@@ -34,6 +30,41 @@ export function IncidentsTab({ token }: { token: string }) {
   const [selected, setSelected] = useState<AdminIncidentGroup | null>(null);
   const [details, setDetails] = useState<AdminIncidentDetail[]>([]);
   const [testMessage, setTestMessage] = useState("");
+  const columns: AdminGridColumn<AdminIncidentGroup>[] = [
+    { id: "id", label: "ID", width: 110, render: (group) => group.id },
+    {
+      id: "environment",
+      label: "环境",
+      width: 100,
+      render: (group) => group.environment,
+    },
+    {
+      id: "build",
+      label: "Build",
+      width: 180,
+      render: (group) => group.build_id,
+      longText: (group) => group.build_id,
+    },
+    {
+      id: "location",
+      label: "位置",
+      width: 520,
+      render: (group) => group.top_frame,
+      longText: (group) => group.top_frame,
+    },
+    {
+      id: "count",
+      label: "次数",
+      width: 90,
+      render: (group) => group.occurrence_count,
+    },
+    {
+      id: "last",
+      label: "最后发生",
+      width: 180,
+      render: (group) => group.last_at,
+    },
+  ];
 
   const refresh = useCallback(async () => {
     setGroups(
@@ -127,35 +158,12 @@ export function IncidentsTab({ token }: { token: string }) {
         </Button>
       </Box>
       {testMessage && <Typography variant="body2">{testMessage}</Typography>}
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>环境</TableCell>
-            <TableCell>Build</TableCell>
-            <TableCell>位置</TableCell>
-            <TableCell align="right">次数</TableCell>
-            <TableCell>最后发生</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {groups.map((group) => (
-            <TableRow
-              hover
-              key={group.id}
-              onClick={() => void open(group)}
-              sx={{ cursor: "pointer" }}
-            >
-              <TableCell>{group.environment}</TableCell>
-              <TableCell>{group.build_id}</TableCell>
-              <TableCell sx={{ maxWidth: 520, overflow: "hidden" }}>
-                {group.top_frame}
-              </TableCell>
-              <TableCell align="right">{group.occurrence_count}</TableCell>
-              <TableCell>{group.last_at}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <AdminDataGrid
+        rows={groups}
+        columns={columns}
+        rowKey={(group) => group.id}
+        onRowClick={(group) => void open(group)}
+      />
       <Dialog
         open={!!selected}
         onClose={() => setSelected(null)}

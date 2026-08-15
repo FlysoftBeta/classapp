@@ -1,5 +1,5 @@
 import { BUILD_ID } from "@/server/infra/env";
-import { getDb } from "@/server/infra/db";
+import type { Database } from "better-sqlite3";
 import { createIncidentService } from "@/server/services/incidentService";
 import { ResultTools, type ActionResult } from "@/shared/protocol/result";
 
@@ -15,7 +15,8 @@ export interface ErrorCaptureContext {
 export class ServerResultCodec {
   static async capture<T>(
     operation: () => Promise<T>,
-    context: ErrorCaptureContext = {},
+    context: ErrorCaptureContext,
+    db: Database,
   ): Promise<ActionResult<T>> {
     const meta = { buildId: BUILD_ID };
     try {
@@ -23,7 +24,7 @@ export class ServerResultCodec {
     } catch (error) {
       let captured: { incidentId: string; publicMessage: string };
       try {
-        captured = createIncidentService(getDb(), BUILD_ID).capture({
+        captured = createIncidentService(db, BUILD_ID).capture({
           environment: "server",
           error,
           context: { ...context },

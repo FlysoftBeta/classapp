@@ -1,4 +1,3 @@
-import type { Post } from "@/shared/types/api";
 import type { ActionArgs, ActionData } from "@/shared/protocol/actions";
 import { observeActionResult, apiFetch, authHeaders } from "./runtime";
 import { client } from "@/client/interact/remote/client";
@@ -12,7 +11,6 @@ const {
   adminDeleteClientAction,
   adminDeleteGhostUserAction,
   adminDeleteGroupAction,
-  adminDeletePostAction,
   adminDeleteUserAction,
   adminFetchBackupsAction,
   adminFetchTeachDocumentsAction,
@@ -21,7 +19,6 @@ const {
   adminFetchGhostUsersAction,
   adminFetchGroupsAction,
   adminFetchHttpsStatusAction,
-  adminFetchPostsAction,
   adminFetchUpdateStatusAction,
   adminFetchUsersAction,
   adminPromoteClientAction,
@@ -33,12 +30,17 @@ const {
   adminUpdateConfigAction,
   adminUpdateGroupAction,
   adminUpdateUserAction,
+  adminBatchUpdateUserFeaturesAction,
   adminWhitelistCurrentClientAction,
   adminFetchIncidentGroupsAction,
   adminFetchIncidentDetailsAction,
   adminTestIncidentAction,
   adminFetchAiCreditsAction,
   adminTopUpAiCreditsAction,
+  adminFetchAiBillingAction,
+  adminUpdateAiBillingPolicyAction,
+  adminAssignAiPlanAction,
+  adminFetchAuditLogAction,
 } = client.actions;
 
 export type AdminMutationData = {
@@ -49,6 +51,16 @@ export type AdminToolData = {
   message?: string;
   error?: string;
 };
+
+export type AdminAuditEntry =
+  ActionData<"adminFetchAuditLogAction">["entries"][number];
+
+export async function adminFetchAuditLog(offset = 0) {
+  const result = await adminFetchAuditLogAction({ offset });
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.entries;
+}
 
 // ── Users ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +99,15 @@ export async function adminUpdateUser(
   };
 }
 
+export async function adminBatchUpdateUserFeatures(
+  updates: ActionArgs<"adminBatchUpdateUserFeaturesAction">[0]["updates"],
+) {
+  const result = await adminBatchUpdateUserFeaturesAction({ updates });
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.users;
+}
+
 export async function adminDeleteUser(
   userId: string,
   mode: "purge" | "deactivate",
@@ -114,6 +135,31 @@ export async function adminTopUpAiCredits(input: {
   note: string;
 }) {
   const result = await adminTopUpAiCreditsAction(input);
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data.credits;
+}
+
+export async function adminFetchAiBilling() {
+  const result = await adminFetchAiBillingAction();
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+export async function adminUpdateAiBillingPolicy(
+  input: ActionArgs<"adminUpdateAiBillingPolicyAction">[0],
+) {
+  const result = await adminUpdateAiBillingPolicyAction(input);
+  observeActionResult(result);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
+}
+
+export async function adminAssignAiPlan(
+  input: ActionArgs<"adminAssignAiPlanAction">[0],
+) {
+  const result = await adminAssignAiPlanAction(input);
   observeActionResult(result);
   if (!result.ok) throw new Error(result.error.message);
   return result.data.credits;
@@ -202,23 +248,6 @@ export async function adminRemoveGroupMember(groupId: string, userId: string) {
       user_id: userId,
     }),
   );
-}
-
-// ── Posts ─────────────────────────────────────────────────────────────────────
-
-export type AdminPostRecord = Post;
-
-export async function adminFetchPosts(query: string, offset = 0, user = "") {
-  const result = await adminFetchPostsAction({ q: query, offset, user });
-  observeActionResult(result);
-  if (!result.ok) {
-    throw new Error(result.error.message);
-  }
-  return result.data;
-}
-
-export async function adminDeletePost(postId: string) {
-  return observeActionResult(await adminDeletePostAction(postId));
 }
 
 // ── Clients ───────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
-export const FEATURE_GATES = [
-  "admin",
+import { z } from "zod";
+
+export const FEATURES = [
   "offline",
   "articles",
   "article_reader",
@@ -9,10 +10,9 @@ export const FEATURE_GATES = [
   "ai",
 ] as const;
 
-export type FeatureGate = (typeof FEATURE_GATES)[number];
+export type Feature = (typeof FEATURES)[number];
 
-export const FEATURE_GATE_LABELS: Record<FeatureGate, string> = {
-  admin: "管理员功能",
+export const FEATURE_LABELS: Record<Feature, string> = {
   offline: "离线功能",
   articles: "文章",
   article_reader: "文章阅读器",
@@ -22,27 +22,22 @@ export const FEATURE_GATE_LABELS: Record<FeatureGate, string> = {
   ai: "AI 对话",
 };
 
-export const MAX_FEATURE_MASK = 2 ** FEATURE_GATES.length - 1;
+const featureShape = Object.fromEntries(
+  FEATURES.map((feature) => [feature, z.boolean()]),
+) as Record<Feature, z.ZodBoolean>;
 
-export function featureBit(gate: FeatureGate): number {
-  return 1 << FEATURE_GATES.indexOf(gate);
-}
+export const userFeaturesSchema = z.object(featureShape).strict();
+export type UserFeatures = z.infer<typeof userFeaturesSchema>;
 
-export const DEFAULT_FEATURE_MASK = MAX_FEATURE_MASK & ~featureBit("admin");
-export const ADMIN_FEATURE_MASK = MAX_FEATURE_MASK;
-
-export function isValidFeatureMask(mask: number): boolean {
-  return Number.isInteger(mask) && mask >= 0 && mask <= MAX_FEATURE_MASK;
-}
+export const DEFAULT_USER_FEATURES = Object.freeze(
+  Object.fromEntries(
+    FEATURES.map((feature) => [feature, true]),
+  ) as UserFeatures,
+);
 
 export function hasFeature(
-  user: { feature_mask: number } | null | undefined,
-  gate: FeatureGate,
+  user: { features: UserFeatures } | null | undefined,
+  feature: Feature,
 ): boolean {
-  return !!user && (user.feature_mask & featureBit(gate)) !== 0;
-}
-
-export function setFeature(mask: number, gate: FeatureGate, enabled: boolean) {
-  const bit = featureBit(gate);
-  return enabled ? mask | bit : mask & ~bit;
+  return user?.features[feature] === true;
 }

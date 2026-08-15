@@ -26,12 +26,11 @@ import {
   saveConversationDraft,
 } from "@/client/interact/conversations";
 import { StickerPicker } from "@/client/components/chat/StickerPicker";
-import { hasFeature } from "@/shared/features";
 import { parseDbTime } from "@/shared/time";
 
 function isPostingRestricted(conv: Conversation, user: User): boolean {
   return (
-    conv.type === "group" && !!conv.admin_only && !hasFeature(user, "admin")
+    conv.type === "group" && !!conv.admin_only && !user.administration.available
   );
 }
 

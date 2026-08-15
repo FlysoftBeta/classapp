@@ -2,8 +2,25 @@ import crypto from "crypto";
 import type BetterSqlite3 from "better-sqlite3";
 import { parseDbTime } from "@/shared/time";
 import type { Group, User } from "@/shared/types/api";
+import type { UserFeatures } from "@/shared/features";
+import {
+  decodeFeatureBitset,
+  encodeFeatureBitset,
+} from "@/server/data/featureBitset";
+import { listUserRoles } from "@/server/data/roles";
 
-export const USER_SELECT = `SELECT u.id, u.handle, u.username, u.feature_mask,
+export interface UserRow {
+  id: string;
+  handle: string;
+  username: string;
+  feature_bitset: number;
+  is_muted: number;
+  muted_until: string | null;
+  banned_until: string | null;
+  created_at: string;
+}
+
+export const USER_SELECT = `SELECT u.id, u.handle, u.username, u.feature_bitset,
    CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
    u.muted_until, u.banned_until, u.created_at
    FROM users u LEFT JOIN deleted_users du ON du.id = u.id
@@ -13,7 +30,7 @@ export interface NewUserData {
   id: string;
   handle: string;
   username: string;
-  featureMask: number;
+  features: UserFeatures;
   pinHashes: string[];
 }
 
@@ -32,13 +49,12 @@ export function insertNewUser(
   data: NewUserData,
 ): void {
   db.prepare(
-    "INSERT INTO users (id, handle, username, role, feature_mask) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO users (id, handle, username, feature_bitset) VALUES (?, ?, ?, ?)",
   ).run(
     data.id,
     data.handle,
     data.username,
-    data.featureMask & 1 ? "admin" : "user",
-    data.featureMask,
+    encodeFeatureBitset(data.features),
   );
   for (const pinHash of data.pinHashes) {
     db.prepare(
@@ -51,8 +67,27 @@ export function insertNewUser(
   ).run(data.id);
 }
 
+export function hydrateUser(db: BetterSqlite3.Database, row: UserRow): User {
+  const roles = listUserRoles(db, row.id);
+  return {
+    id: row.id,
+    handle: row.handle,
+    username: row.username,
+    features: decodeFeatureBitset(row.feature_bitset),
+    administration: {
+      available: roles.includes("administrator"),
+      roles,
+    },
+    is_muted: row.is_muted,
+    muted_until: row.muted_until,
+    banned_until: row.banned_until,
+    created_at: row.created_at,
+  };
+}
+
 export function getUser(db: BetterSqlite3.Database, id: string): User | null {
-  return (db.prepare(USER_SELECT).get(id) as User | undefined) ?? null;
+  const row = db.prepare(USER_SELECT).get(id) as UserRow | undefined;
+  return row ? hydrateUser(db, row) : null;
 }
 
 export function searchUsers(
@@ -60,27 +95,28 @@ export function searchUsers(
   q = "",
   offset = 0,
 ): User[] {
-  return q
+  const rows = q
     ? (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.feature_mask,
+          `SELECT u.id, u.handle, u.username, u.feature_bitset,
            CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
            u.muted_until, u.banned_until, u.created_at FROM users u
            LEFT JOIN deleted_users du ON du.id = u.id
            WHERE du.id IS NULL AND (handle LIKE ? OR u.username LIKE ?)
            ORDER BY created_at DESC LIMIT 50 OFFSET ?`,
         )
-        .all(`%${q}%`, `%${q}%`, offset) as User[])
+        .all(`%${q}%`, `%${q}%`, offset) as UserRow[])
     : (db
         .prepare(
-          `SELECT u.id, u.handle, u.username, u.feature_mask,
+          `SELECT u.id, u.handle, u.username, u.feature_bitset,
            CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
            u.muted_until, u.banned_until, u.created_at FROM users u
            LEFT JOIN deleted_users du ON du.id = u.id
            WHERE du.id IS NULL
            ORDER BY created_at DESC LIMIT 50 OFFSET ?`,
         )
-        .all(offset) as User[]);
+        .all(offset) as UserRow[]);
+  return rows.map((row) => hydrateUser(db, row));
 }
 
 export function countUsers(db: BetterSqlite3.Database, q = ""): number {
@@ -208,21 +244,13 @@ export function updateUserUsername(
   );
 }
 
-export function updateUserRole(
+export function updateUserFeatures(
   db: BetterSqlite3.Database,
   userId: string,
-  role: "admin" | "user",
+  features: UserFeatures,
 ): void {
-  db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
-}
-
-export function updateUserFeatureMask(
-  db: BetterSqlite3.Database,
-  userId: string,
-  featureMask: number,
-): void {
-  db.prepare("UPDATE users SET feature_mask = ? WHERE id = ?").run(
-    featureMask,
+  db.prepare("UPDATE users SET feature_bitset = ? WHERE id = ?").run(
+    encodeFeatureBitset(features),
     userId,
   );
 }
@@ -271,7 +299,7 @@ export function revokeUserCredentials(
   db.prepare("DELETE FROM user_pins WHERE user_id = ?").run(userId);
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
   db.prepare(
-    `UPDATE users SET handle = ?, role = 'user', feature_mask = 0,
+    `UPDATE users SET handle = ?, feature_bitset = 0,
        is_muted = 0, muted_until = NULL, banned_until = NULL
      WHERE id = ?`,
   ).run(`deleted_${userId.replace(/-/g, "")}`, userId);
@@ -281,7 +309,7 @@ export function getUserProfile(
   db: BetterSqlite3.Database,
   id: string,
 ): { user: User; pinCount: number; groups: Group[] } {
-  const user = db.prepare(USER_SELECT).get(id) as User;
+  const user = getUser(db, id);
   if (!user) throw new Error("干员不存在");
   const pinCount = (
     db

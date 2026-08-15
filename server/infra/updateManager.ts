@@ -150,7 +150,7 @@ export class UpdateManager {
 
     // Keep staging/ intact after successful extraction. The launcher/runtime
     // controller consumes it after the process exits.
-    const dbBackup = await createDbBackup();
+    const dbBackup = await createDbBackup(this.db);
     if (!dbBackup) {
       // No deployment will be requested, so the successfully extracted but
       // now unusable staging tree should not be left behind.

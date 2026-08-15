@@ -173,7 +173,7 @@ Shell 只做最小 bootstrap：打开库、读 active pointer、读 bundle、关
 | `domain_article_segments` | `[article_id, start_offset]` | `[article_id, start_offset]`                 |
 | `domain_users`            | `id`                         | `handle`                                     |
 
-`domain_users` 对普通用户只保存 `(id, handle, name)`。登录过的完整用户及其 capability
+`domain_users` 对普通用户只保存 `(id, handle, username)`。登录过的完整用户及其 capability
 投影放在 `domain_me`。
 
 Post 的 `(id, conv_id, sequence)` 不可变，body/tombstone 由 `revision` 仲裁。收到较旧

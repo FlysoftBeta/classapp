@@ -1,16 +1,12 @@
-import { requireActiveAdmin } from "@/server/domain/policy/auth";
-import { getDb } from "@/server/infra/db";
-import { BUILD_ID } from "@/server/infra/env";
 import { handleHttpError } from "@/server/http/errorResponse";
-import { buildIncidentLogArchive } from "@/server/services/incidentLogArchiveService";
+import { currentScope } from "@/server/runtime/scope";
 
-export async function GET(req: Request) {
-  const auth = requireActiveAdmin(req, { allowQueryToken: true });
-  if ("error" in auth)
-    return Response.json({ error: auth.error }, { status: auth.status });
-
+export async function GET() {
   try {
-    const { zipName, zipData } = buildIncidentLogArchive(getDb(), BUILD_ID);
+    const { zipName, zipData } = currentScope()
+      .facades()
+      .incidents()
+      .downloadLogs();
     return new Response(zipData.slice(), {
       status: 200,
       headers: {

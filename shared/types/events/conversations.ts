@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { conversationSchema } from "../api/conversation";
-import { postSchema } from "../api/post";
+import { postSchema, type Post } from "../api/post";
+import { userMetadataSchema } from "../api/user";
+import type { UserMetadata } from "../api/user";
 
 export const convEventSpecSchema = z.union([
   z.object({ type: z.enum(["group", "dm"]), id: z.string() }).strict(),
@@ -33,6 +35,7 @@ export type ConvUpdatedPayload = z.infer<typeof convUpdatedPayloadSchema>;
 export const postChangedPayloadSchema = z
   .object({
     post: postSchema,
+    users: z.array(userMetadataSchema),
   })
   .strict();
 /**
@@ -45,11 +48,11 @@ export const postDeletedPayloadSchema = postChangedPayloadSchema;
 export type PostStreamEvent =
   | {
       kind: "post.created" | "post.updated";
-      data?: z.infer<typeof postChangedPayloadSchema>;
+      data?: { post: Post; users: UserMetadata[] };
     }
   | {
       kind: "post.deleted";
-      data?: z.infer<typeof postDeletedPayloadSchema>;
+      data?: { post: Post; users: UserMetadata[] };
     };
 
 export const userConfigChangedEventSchema = z

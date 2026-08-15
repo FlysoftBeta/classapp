@@ -1,13 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -25,11 +19,14 @@ import {
   adminAddGroupMember,
   adminRemoveGroupMember,
 } from "@/client/api/admin";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 export function GroupMembersDialog({
   group,
+  canManage,
   onClose,
 }: {
   group: Group & { discoverable?: number; member_count: number };
+  canManage: boolean;
   onClose: () => void;
 }) {
   const [members, setMembers] = useState<
@@ -82,34 +79,88 @@ export function GroupMembersDialog({
       setAddErr(data.error || "失败");
     }
   };
+  type Member = (typeof members)[number];
+  const columns: AdminGridColumn<Member>[] = [
+    {
+      id: "identity",
+      label: "干员",
+      width: 240,
+      render: (member) => `@${member.handle}`,
+      longText: (member) => `@${member.handle}\nID: ${member.id}`,
+    },
+    {
+      id: "name",
+      label: "显示名称",
+      width: 200,
+      render: (member) => member.username,
+      longText: (member) => member.username,
+    },
+    {
+      id: "visibility",
+      label: "可见性",
+      width: 150,
+      render: (member) =>
+        member.hide_self ? (
+          <Chip
+            label="隐藏成员"
+            size="small"
+            color="default"
+            variant="outlined"
+          />
+        ) : (
+          "正常显示"
+        ),
+    },
+    ...(canManage
+      ? [
+          {
+            id: "actions",
+            label: "操作",
+            width: 100,
+            render: (member: Member) => (
+              <IconButton
+                size="small"
+                color="error"
+                title="移出群组"
+                onClick={() => void handleKick(member.id)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            ),
+          } satisfies AdminGridColumn<Member>,
+        ]
+      : []),
+  ];
 
   return (
-    <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>成员管理 — {group.name}</DialogTitle>
       <DialogContent>
-        <Box sx={{ display: "flex", ...flexGap(1), mb: 1.5, mt: 0.5 }}>
-          <TextField
-            size="small"
-            placeholder="输入 @handle 强制加入"
-            value={addHandle}
-            onChange={(e) => {
-              setAddHandle(e.target.value);
-              setAddErr("");
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleAdd();
-            }}
-            sx={{ flex: 1 }}
-          />
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={handleAdd}
-            disabled={adding || !addHandle.trim()}
-          >
-            加入
-          </Button>
-        </Box>
+        {canManage ? (
+          <Box sx={{ display: "flex", ...flexGap(1), mb: 1.5, mt: 0.5 }}>
+            <TextField
+              size="small"
+              placeholder="输入 @handle 强制加入"
+              value={addHandle}
+              onChange={(e) => {
+                setAddHandle(e.target.value);
+                setAddErr("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAdd();
+              }}
+              sx={{ flex: 1 }}
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAdd}
+              disabled={adding || !addHandle.trim()}
+            >
+              加入
+            </Button>
+          </Box>
+        ) : null}
         {addErr && (
           <Alert severity="error" sx={{ mb: 1 }}>
             {addErr}
@@ -118,48 +169,13 @@ export function GroupMembersDialog({
         {loading ? (
           <CircularProgress size={20} />
         ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>干员</TableCell>
-                <TableCell>状态</TableCell>
-                <TableCell align="right">操作</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {members.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight={500}>
-                      {m.username}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      @{m.handle}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    {!!m.hide_self && (
-                      <Chip
-                        label="隐藏成员"
-                        size="small"
-                        color="default"
-                        variant="outlined"
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell align="right">
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => handleKick(m.id)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <AdminDataGrid
+            rows={members}
+            columns={columns}
+            rowKey={(member) => member.id}
+            empty="暂无成员"
+            height={420}
+          />
         )}
       </DialogContent>
       <DialogActions>

@@ -6,7 +6,6 @@ import {
   orderedDmPeers,
   parseConvId,
 } from "@/shared/conversations/id";
-import { featureBit } from "@/shared/features";
 
 function sortConvEntries(entries: Conversation[]): Conversation[] {
   return entries.sort((a, b) => {
@@ -33,7 +32,10 @@ export function listConversations(
          (g.password_hash IS NOT NULL) AS has_password,
          g.members_hidden, g.admin_only, g.no_leave,
          (COALESCE(me.is_muted, 0) = 0 AND
-           (g.admin_only = 0 OR (COALESCE(me.feature_mask, 0) & :admin_bit) != 0)) AS can_post,
+           (g.admin_only = 0 OR EXISTS (
+             SELECT 1 FROM user_admin_roles ar
+             WHERE ar.user_id = me.id AND ar.role = 'community_manager'
+           ))) AS can_post,
          (g.no_leave = 0) AS can_leave,
          ${LAST_MESSAGE_SQL} AS last_message,
          lp.created_at AS last_at,
@@ -62,9 +64,7 @@ export function listConversations(
          ORDER BY p.sequence DESC LIMIT 1)
        WHERE member.user_id = :uid`,
     )
-    .all({ uid: userId, admin_bit: featureBit("admin") }) as Array<
-    Record<string, unknown>
-  >;
+    .all({ uid: userId }) as Array<Record<string, unknown>>;
 
   const dms = db
     .prepare(

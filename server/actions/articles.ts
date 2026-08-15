@@ -1,12 +1,12 @@
-import { withActionSession, expectString } from "./_base";
+import { withActionScope, expectString } from "./_base";
 import { ContractViolationError } from "@/server/services/incidentService";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function listArticlesAction(
   input: ActionInput<"listArticlesAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).list({
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().list({
       view: input.view,
       cursor: input.cursor,
       direction: input.direction,
@@ -16,32 +16,32 @@ export async function listArticlesAction(
 }
 
 export async function fetchArticleSidebarAction() {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).sidebar();
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().sidebar();
   });
 }
 
 export async function createArticleAction(
   input: ActionInput<"createArticleAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).createText(input);
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().createText(input);
   });
 }
 
 export async function fetchArticleAction(
   articleId: ActionInput<"fetchArticleAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).getMeta(articleId);
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().getMeta(articleId);
   });
 }
 
 export async function fetchArticleSegmentAction(
   input: ActionInput<"fetchArticleSegmentAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).segment({
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().segment({
       articleId: input.articleId,
       offset: input.offset,
     });
@@ -51,52 +51,57 @@ export async function fetchArticleSegmentAction(
 export async function openArticleBundleAction(
   input: ActionInput<"openArticleBundleAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).openBundle(input);
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().openBundle(input);
   });
 }
 
 export async function fetchArticleBundleItemsAction(
   input: ActionInput<"fetchArticleBundleItemsAction">,
 ) {
-  return withActionSession(async (session) => {
-    return (await (await session.asActor()).articles()).fetchBundle(input);
+  return withActionScope(async (scope) => {
+    return scope.facades().articles().fetchBundle(input);
   });
 }
 
 export async function setArticleBookmarkAction(
   input: ActionInput<"setArticleBookmarkAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     if (!Number.isSafeInteger(input.updatedAt) || input.updatedAt < 0) {
       throw new ContractViolationError("书签时间戳无效");
     }
-    return await (
-      await (await session.asActor()).articles()
-    ).setBookmark(input.articleId, input.bookmarked, input.updatedAt);
+    return await scope
+      .facades()
+      .articles()
+      .setBookmark(input.articleId, input.bookmarked, input.updatedAt);
   });
 }
 
 export async function saveArticleProgressAction(
   input: ActionInput<"saveArticleProgressAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     if (!Number.isSafeInteger(input.updatedAt) || input.updatedAt < 0) {
       throw new ContractViolationError("阅读进度时间戳无效");
     }
-    return await (
-      await (await session.asActor()).articles()
-    ).saveProgress(input.articleId, input.offset, input.updatedAt, input.merge);
+    return await scope
+      .facades()
+      .articles()
+      .saveProgress(
+        input.articleId,
+        input.offset,
+        input.updatedAt,
+        input.merge,
+      );
   });
 }
 
 export async function reportArticleReadingAction(
   input: ActionInput<"reportArticleReadingAction">,
 ) {
-  return withActionSession(async (session) => {
-    await (
-      await (await session.asActor()).articles()
-    ).recordReading(input.articleId, {
+  return withActionScope(async (scope) => {
+    await scope.facades().articles().recordReading(input.articleId, {
       seconds: input.seconds,
       active: input.active,
     });
@@ -107,10 +112,11 @@ export async function reportArticleReadingAction(
 export async function deleteArticleAction(
   articleId: ActionInput<"deleteArticleAction">,
 ) {
-  return withActionSession(async (session) => {
-    await (
-      await (await session.asActor()).articles()
-    ).delete(expectString(articleId, "文章不存在"));
+  return withActionScope(async (scope) => {
+    await scope
+      .facades()
+      .articles()
+      .delete(expectString(articleId, "文章不存在"));
     return { ok: true as const };
   });
 }
@@ -118,25 +124,24 @@ export async function deleteArticleAction(
 export async function searchNetworkArticlesAction(
   input: ActionInput<"searchNetworkArticlesAction">,
 ) {
-  return withActionSession(async (session) =>
-    (await (await session.asActor()).articles()).searchNetwork(input.query),
+  return withActionScope(async (scope) =>
+    scope.facades().articles().searchNetwork(input.query),
   );
 }
 
 export async function startNetworkArticleDownloadAction(
   input: ActionInput<"startNetworkArticleDownloadAction">,
 ) {
-  return withActionSession(async (session) =>
-    (await (await session.asActor()).articles()).startNetworkDownload(
-      input.book_id,
-      input.group_id,
-      input.title,
-    ),
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .articles()
+      .startNetworkDownload(input.book_id, input.group_id, input.title),
   );
 }
 
 export async function listNetworkArticleDownloadsAction() {
-  return withActionSession(async (session) =>
-    (await (await session.asActor()).articles()).listNetworkDownloads(),
+  return withActionScope(async (scope) =>
+    scope.facades().articles().listNetworkDownloads(),
   );
 }

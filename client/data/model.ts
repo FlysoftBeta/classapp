@@ -3,7 +3,10 @@ import type { ContinuousCoverage } from "./coverage";
 
 export type EvictionTier = 0 | 1 | 2;
 
-export type StoredPost = Post & {
+export type StoredPost = Omit<
+  Post,
+  "username" | "handle" | "reply_username" | "reply_handle"
+> & {
   sequence: number;
   size: number;
   touched_at: number;
@@ -57,8 +60,8 @@ export interface ObjectiveArticle {
 
 export interface ObjectiveUser {
   id: string;
-  handle: string;
-  name: string;
+  handle: string | null;
+  username: string;
 }
 
 export interface MeRow {

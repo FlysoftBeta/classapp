@@ -28,6 +28,7 @@ import { resourceQueries } from "./resources";
 import { client } from "./remote/client";
 import { session } from "./remote/session";
 import { captureDetachedClientIncident } from "./clientIncidents";
+import { materializePost } from "./posts";
 
 type RemoteCallbacks = {
   onArticleListUpdated: () => void;
@@ -224,8 +225,12 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     const repository = repositoryForActor(actor);
     recovery.enqueue(async () => {
       if (!isActorContextCurrent(actor)) return;
+      await repository.saveUserMetadata(data.users);
       await repository.applyPostVersion(data.post, kind === "post.created");
-      postEvents.emit({ kind, data });
+      postEvents.emit({
+        kind,
+        data: { ...data, post: materializePost(data.post, data.users) },
+      });
     });
   };
 

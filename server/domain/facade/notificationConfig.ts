@@ -1,4 +1,4 @@
-import type { Actor } from "@/server/session/session";
+import type { Actor } from "@/server/runtime/actor";
 import type {
   NotificationConfig,
   NotificationConfigService,

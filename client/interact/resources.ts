@@ -104,7 +104,18 @@ const aiSidebar = new RefreshCoordinator(async (generation) => {
   if (!hasFeature(store.user, "ai")) {
     store.setAiSidebar({
       conversations: [],
-      credits: { balance: 0, reserved: 0 },
+      credits: {
+        available: 0,
+        reserved: 0,
+        top_up: 0,
+        plan: {
+          active: false,
+          starts_at: null,
+          ends_at: null,
+          daily: { allowance: 0, used: 0, remaining: 0, used_percent: 0 },
+          weekly: { allowance: 0, used: 0, remaining: 0, used_percent: 0 },
+        },
+      },
       status: { available: false, error: "未启用 AI 功能" },
     });
     return;

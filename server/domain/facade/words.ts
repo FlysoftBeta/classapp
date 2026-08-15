@@ -1,4 +1,4 @@
-import type { Actor } from "@/server/session/session";
+import type { Actor } from "@/server/runtime/actor";
 import type { WordsService } from "@/server/services/wordsService";
 import type {
   UserWordProgress,
@@ -60,7 +60,7 @@ export class WordsActorFacade {
   }
 
   async importWords(text: string): Promise<{ imported: number }> {
-    await this.actor.requireAdmin();
+    this.actor.requireRole("feature_manager");
     return { imported: this.words.importFromText(text) };
   }
 
@@ -77,7 +77,7 @@ export class WordsActorFacade {
   async adminGetSelfDisciplineMode(
     userId: string,
   ): Promise<{ enabled: boolean }> {
-    await this.actor.requireAdmin();
+    this.actor.requireRole("feature_manager");
     return { enabled: this.words.getSelfDisciplineMode(userId) };
   }
 
@@ -85,7 +85,7 @@ export class WordsActorFacade {
     userId: string,
     enabled: boolean,
   ): Promise<{ enabled: boolean }> {
-    await this.actor.requireAdmin();
+    this.actor.requireRole("feature_manager");
     return { enabled: this.words.setSelfDisciplineMode(userId, enabled) };
   }
 }

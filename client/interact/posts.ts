@@ -1,4 +1,9 @@
-import type { Conversation, Post } from "@/shared/types/api";
+import type {
+  Conversation,
+  Post,
+  PostEntity,
+  UserMetadata,
+} from "@/shared/types/api";
 import type { CreatePostPayload } from "@/shared/validation/posts";
 import { observeActionResult } from "@/client/api/runtime";
 const {
@@ -14,13 +19,33 @@ import { captureDetachedClientIncident } from "@/client/interact/clientIncidents
 
 export type PostMutationData = {
   post?: Post;
+  users?: UserMetadata[];
   error?: string;
 };
 
 export type PostDeleteData = {
   post?: Post;
+  users?: UserMetadata[];
   error?: string;
 };
+
+export function materializePost(
+  post: PostEntity,
+  users: readonly UserMetadata[],
+): Post {
+  const byId = new Map(users.map((user) => [user.id, user]));
+  const author = post.user_id ? byId.get(post.user_id) : undefined;
+  const replyAuthor = post.reply_user_id
+    ? byId.get(post.reply_user_id)
+    : undefined;
+  return {
+    ...post,
+    username: author?.username ?? null,
+    handle: author?.handle ?? null,
+    reply_username: replyAuthor?.username ?? null,
+    reply_handle: replyAuthor?.handle ?? null,
+  };
+}
 
 export async function fetchCachedPosts(
   conv: Pick<Conversation, "type" | "id" | "conv_id">,
@@ -147,6 +172,7 @@ export async function fetchRemotePosts(
   if (!result.ok) return null;
   const data = result.data;
   try {
+    await offlineRepository.saveUserMetadata(data.users);
     if (data.posts?.length) {
       if (params.changed_after_revision) {
         // Revision pages contain changed rows, not a contiguous history page.
@@ -169,7 +195,10 @@ export async function fetchRemotePosts(
     // Post rows remain usable even if their evictable projection cannot commit.
     captureDetachedClientIncident("post.page-cache", error);
   }
-  return data;
+  return {
+    ...data,
+    posts: data.posts.map((post) => materializePost(post, data.users)),
+  };
 }
 
 export function commitPostRevisionRange(
@@ -189,8 +218,12 @@ export function commitPostRevisionRange(
 export async function fetchPost(postId: string) {
   const result = await fetchPostAction(postId);
   const res = observeActionResult(result);
+  if (result.ok) await offlineRepository.saveUserMetadata(result.data.users);
   const data: PostMutationData = result.ok
-    ? result.data
+    ? {
+        ...result.data,
+        post: materializePost(result.data.post, result.data.users),
+      }
     : { error: result.error.message };
   return { res, data };
 }
@@ -204,8 +237,12 @@ export type CreatePostBody = {
 export async function createPost(body: CreatePostBody) {
   const result = await createPostAction(body);
   const res = observeActionResult(result);
+  if (result.ok) await offlineRepository.saveUserMetadata(result.data.users);
   const data: PostMutationData = result.ok
-    ? result.data
+    ? {
+        ...result.data,
+        post: materializePost(result.data.post, result.data.users),
+      }
     : { error: result.error.message };
   return { res, data };
 }
@@ -213,8 +250,12 @@ export async function createPost(body: CreatePostBody) {
 export async function updatePost(postId: string, text: string) {
   const result = await updatePostAction({ postId, text });
   const res = observeActionResult(result);
+  if (result.ok) await offlineRepository.saveUserMetadata(result.data.users);
   const data: PostMutationData = result.ok
-    ? result.data
+    ? {
+        ...result.data,
+        post: materializePost(result.data.post, result.data.users),
+      }
     : { error: result.error.message };
   return { res, data };
 }
@@ -222,8 +263,12 @@ export async function updatePost(postId: string, text: string) {
 export async function deletePost(postId: string) {
   const result = await deletePostAction(postId);
   const res = observeActionResult(result);
+  if (result.ok) await offlineRepository.saveUserMetadata(result.data.users);
   const data: PostDeleteData = result.ok
-    ? result.data
+    ? {
+        ...result.data,
+        post: materializePost(result.data.post, result.data.users),
+      }
     : { error: result.error.message };
   return { res, data };
 }

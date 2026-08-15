@@ -1,28 +1,29 @@
-import { expectString, withActionSession } from "./_base";
+import { expectString, withActionScope } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function fetchStickerPacksAction() {
-  return withActionSession(async (session) => ({
-    packs: (await (await session.asActor()).stickers()).listPacks(),
+  return withActionScope(async (scope) => ({
+    packs: scope.facades().stickers().listPacks(),
   }));
 }
 
 export async function fetchStickerPackAction(
   packId: ActionInput<"fetchStickerPackAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     return {
-      pack: (await (await session.asActor()).stickers()).getPack(
-        expectString(packId, "贴纸包不存在"),
-      ),
+      pack: scope
+        .facades()
+        .stickers()
+        .getPack(expectString(packId, "贴纸包不存在")),
     };
   });
 }
 
 export async function fetchRecentStickersAction() {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     return {
-      recent: await (await (await session.asActor()).stickers()).getRecent(),
+      recent: await scope.facades().stickers().getRecent(),
     };
   });
 }
@@ -30,14 +31,15 @@ export async function fetchRecentStickersAction() {
 export async function touchRecentStickerAction(
   input: ActionInput<"touchRecentStickerAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     return {
-      recent: await (
-        await (await session.asActor()).stickers()
-      ).touchRecent(
-        expectString(input.pack, "贴纸参数无效"),
-        expectString(input.id, "贴纸参数无效"),
-      ),
+      recent: await scope
+        .facades()
+        .stickers()
+        .touchRecent(
+          expectString(input.pack, "贴纸参数无效"),
+          expectString(input.id, "贴纸参数无效"),
+        ),
     };
   });
 }
@@ -45,7 +47,7 @@ export async function touchRecentStickerAction(
 export async function sendStickerPostAction(
   input: ActionInput<"sendStickerPostAction">,
 ) {
-  return withActionSession(async (session) => ({
-    post: await (await (await session.asActor()).posts()).create(input),
-  }));
+  return withActionScope(async (scope) =>
+    scope.facades().posts().create(input),
+  );
 }

@@ -1,6 +1,8 @@
 import type { CreatePostPayload } from "@/shared/validation/posts";
 import { observeActionResult } from "./runtime";
 import { client } from "@/client/interact/remote/client";
+import { currentActorRepository } from "@/client/interact/actorContext";
+import { materializePost } from "@/client/interact/posts";
 
 const {
   fetchRecentStickersAction,
@@ -37,6 +39,14 @@ export async function sendStickerPost(body: {
 }) {
   const result = await sendStickerPostAction(body);
   const res = observeActionResult(result);
-  const data = result.ok ? result.data : { error: result.error.message };
+  if (result.ok) {
+    await currentActorRepository.saveUserMetadata(result.data.users);
+  }
+  const data = result.ok
+    ? {
+        ...result.data,
+        post: materializePost(result.data.post, result.data.users),
+      }
+    : { error: result.error.message };
   return { res, data };
 }

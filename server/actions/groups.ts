@@ -1,12 +1,11 @@
-import { expectBoolean, expectString, withActionSession } from "./_base";
+import { expectBoolean, expectString, withActionScope } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function createGroupAction(
   input: ActionInput<"createGroupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const groups = await actor.groups();
+  return withActionScope(async (scope) => {
+    const groups = scope.facades().groups();
     const discoverable =
       input.discoverable === undefined
         ? undefined
@@ -42,12 +41,12 @@ export async function createGroupAction(
 export async function discoverGroupsAction(
   input?: ActionInput<"discoverGroupsAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
+  return withActionScope(async (scope) => {
     return {
-      sections: await (
-        await actor.groups()
-      ).discoverSections(typeof input?.query === "string" ? input.query : ""),
+      sections: await scope
+        .facades()
+        .groups()
+        .discoverSections(typeof input?.query === "string" ? input.query : ""),
     };
   });
 }
@@ -55,9 +54,8 @@ export async function discoverGroupsAction(
 export async function discoverSubgroupsAction(
   input: ActionInput<"discoverSubgroupsAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const groups = await actor.groups();
+  return withActionScope(async (scope) => {
+    const groups = scope.facades().groups();
     return {
       groups: await groups.discoverSubgroups(
         expectString(input.groupId, "群组不存在"),
@@ -68,9 +66,8 @@ export async function discoverSubgroupsAction(
 }
 
 export async function joinGroupAction(input: ActionInput<"joinGroupAction">) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const groups = await actor.groups();
+  return withActionScope(async (scope) => {
+    const groups = scope.facades().groups();
     const source =
       input.source.type === "search"
         ? ({ type: "search" } as const)
@@ -89,9 +86,8 @@ export async function joinGroupAction(input: ActionInput<"joinGroupAction">) {
 export async function leaveGroupAction(
   groupId: ActionInput<"leaveGroupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await (await actor.groups()).leave(expectString(groupId, "群组不存在"));
+  return withActionScope(async (scope) => {
+    await scope.facades().groups().leave(expectString(groupId, "群组不存在"));
     return { ok: true as const };
   });
 }
@@ -99,11 +95,11 @@ export async function leaveGroupAction(
 export async function fetchGroupMembersAction(
   groupId: ActionInput<"fetchGroupMembersAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const result = await (
-      await actor.groups()
-    ).members(expectString(groupId, "群组不存在"));
+  return withActionScope(async (scope) => {
+    const result = await scope
+      .facades()
+      .groups()
+      .members(expectString(groupId, "群组不存在"));
     return {
       members: result.members,
       hidden: result.hidden,
@@ -116,15 +112,15 @@ export async function fetchGroupMembersAction(
 export async function patchMyGroupMembershipAction(
   input: ActionInput<"patchMyGroupMembershipAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
+  return withActionScope(async (scope) => {
     const hideSelf = expectBoolean(
       input.hide_self,
       "hide_self must be boolean",
     );
-    await (
-      await actor.groups()
-    ).setSelfHidden(expectString(input.groupId, "群组不存在"), hideSelf);
+    await scope
+      .facades()
+      .groups()
+      .setSelfHidden(expectString(input.groupId, "群组不存在"), hideSelf);
     return { ok: true as const, hide_self: hideSelf };
   });
 }

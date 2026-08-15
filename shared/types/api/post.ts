@@ -12,15 +12,11 @@ const postCommonShape = {
   /** 摘要：列表预览、搜索；短文本即正文 */
   brief: z.string(),
   reply_to: z.string().nullable(),
+  reply_user_id: z.string().nullable(),
   deleted_at: z.string().nullable(),
   edited_at: z.string().nullable(),
   created_at: z.string(),
-  username: z.string().nullable().optional(),
-  handle: z.string().nullable().optional(),
-  group_name: z.string().nullable().optional(),
-  reply_username: z.string().nullable().optional(),
-  reply_handle: z.string().nullable().optional(),
-  reply_brief: z.string().nullable().optional(),
+  reply_brief: z.string().nullable(),
   is_truncated: z.boolean().optional(),
 };
 
@@ -31,7 +27,6 @@ export const textPostSchema = z
     text: z.string(),
   })
   .strict();
-export type TextPost = z.infer<typeof textPostSchema>;
 
 export const stickerPostSchema = z
   .object({
@@ -43,7 +38,6 @@ export const stickerPostSchema = z
     name: z.string(),
   })
   .strict();
-export type StickerPost = z.infer<typeof stickerPostSchema>;
 
 export const deletedPostSchema = z
   .object({
@@ -51,14 +45,25 @@ export const deletedPostSchema = z
     type: z.literal("deleted"),
   })
   .strict();
-export type DeletedPost = z.infer<typeof deletedPostSchema>;
 
 export const postSchema = z.discriminatedUnion("type", [
   textPostSchema,
   stickerPostSchema,
   deletedPostSchema,
 ]);
-export type Post = z.infer<typeof postSchema>;
+export type PostEntity = z.infer<typeof postSchema>;
+
+/** Client presentation assembled from PostEntity + domain_users. */
+export type Post = PostEntity & {
+  username?: string | null;
+  handle?: string | null;
+  reply_username?: string | null;
+  reply_handle?: string | null;
+};
+
+export type TextPost = Extract<Post, { type: "text" }>;
+export type StickerPost = Extract<Post, { type: "sticker" }>;
+export type DeletedPost = Extract<Post, { type: "deleted" }>;
 
 export function isTextPost(post: Post): post is TextPost {
   return post.type === "text";

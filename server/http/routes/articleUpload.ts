@@ -1,25 +1,12 @@
-import { getDb } from "@/server/infra/db";
-import { createArticleService } from "@/server/services/articlesService";
 import {
   removeArticleBundle,
   storeArticleBundle,
 } from "@/server/infra/articleArtifacts";
 import { handleHttpError } from "@/server/http/errorResponse";
-import { requireActiveAuth } from "@/server/domain/policy/auth";
-import { assertCanCreateArticle } from "@/server/domain/policy/articles";
-import { hasFeature } from "@/shared/features";
 import { attachSuppressedError } from "@/server/services/incidentService";
+import { currentScope } from "@/server/runtime/scope";
 
 export async function POST(req: Request) {
-  const auth = requireActiveAuth(req);
-  if ("error" in auth)
-    return Response.json({ error: auth.error }, { status: auth.status });
-  if (
-    !hasFeature(auth.user, "articles") ||
-    !hasFeature(auth.user, "ebook_reader")
-  )
-    return Response.json({ error: "无权限" }, { status: 403 });
-
   try {
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("multipart/form-data")) {
@@ -44,21 +31,23 @@ export async function POST(req: Request) {
     }
 
     // Reject an inaccessible target before consuming a bounded render slot.
-    assertCanCreateArticle(getDb(), auth.user, groupId);
+    await currentScope().facades().articles().authorizeBundleUpload(groupId);
     const stored = await storeArticleBundle(file);
     try {
-      const articles = createArticleService(getDb());
-      const result = articles.createBundle(auth.user, {
-        title: title || stored.originalFilename.replace(/\.pdf$/i, ""),
-        source_path: stored.sourcePath,
-        archive_path: stored.archivePath,
-        source_mime: stored.sourceMime,
-        source_size: stored.sourceSize,
-        archive_size: stored.archiveSize,
-        original_filename: stored.originalFilename,
-        item_count: stored.itemCount,
-        group_id: groupId,
-      });
+      const result = await currentScope()
+        .facades()
+        .articles()
+        .createBundle({
+          title: title || stored.originalFilename.replace(/\.pdf$/i, ""),
+          source_path: stored.sourcePath,
+          archive_path: stored.archivePath,
+          source_mime: stored.sourceMime,
+          source_size: stored.sourceSize,
+          archive_size: stored.archiveSize,
+          original_filename: stored.originalFilename,
+          item_count: stored.itemCount,
+          group_id: groupId,
+        });
       return Response.json({ article: result.article }, { status: 201 });
     } catch (e) {
       try {

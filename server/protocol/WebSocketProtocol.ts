@@ -1,13 +1,13 @@
 import type { IncomingMessage, Server } from "node:http";
+import type { Database } from "better-sqlite3";
 import { WebSocketServer, type WebSocket } from "ws";
-import { getDb } from "@/server/infra/db";
-import { getUserFromToken } from "@/server/infra/auth";
 import { getClientIdFromToken, getOrCreateClient } from "@/server/data/clients";
+import { findUserBySessionToken } from "@/server/data/auth";
+import { getUserBanStatus } from "@/server/data/users";
 import {
   listEventDmPartnerIds,
   listEventGroupIds,
 } from "@/server/data/eventSubscriptions";
-import { isUserBanned } from "@/server/domain/policy/auth";
 import {
   clientChannel,
   dmPostChannel,
@@ -19,7 +19,8 @@ import {
   userConvChannel,
   type BusEvent,
 } from "@/server/services/eventBus";
-import { withRequestContext } from "@/server/session/requestContext";
+import { withScope } from "@/server/runtime/scope";
+import type { Runtime } from "@/server/runtime/runtime";
 import {
   authenticateFrameSchema,
   actionNameSchema,
@@ -46,8 +47,7 @@ function send(socket: WebSocket, frame: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
 }
 
-function userChannels(userId: string): string[] {
-  const db = getDb();
+function userChannels(db: Database, userId: string): string[] {
   const channels = [userChannel(userId), userConvChannel(userId)];
   for (const groupId of listEventGroupIds(db, userId)) {
     channels.push(groupPostChannel(groupId), groupArticleChannel(groupId));
@@ -74,8 +74,9 @@ class ProtocolSession {
   constructor(
     private readonly socket: WebSocket,
     private readonly identity: ClientIdentity,
+    private readonly runtime: Runtime,
   ) {
-    this.anonymousClientId = getOrCreateClient(getDb(), identity);
+    this.anonymousClientId = getOrCreateClient(runtime.db, identity);
     this.unsubscribeBase = subscribe(
       [systemChannel(), clientChannel(this.anonymousClientId)],
       (event) => this.sendEvent(null, event),
@@ -86,12 +87,16 @@ class ProtocolSession {
     const result = await ServerResultCodec.capture(
       async () => {
         const normalized = token.trim();
-        const user = normalized ? getUserFromToken(normalized) : null;
+        const user = normalized
+          ? findUserBySessionToken(this.runtime.db, normalized)
+          : null;
         if (!user) throw new PublicError("会话认证失败");
         if (user.id !== claimedUserId) {
           throw new ContractViolationError("认证用户与 token 不匹配");
         }
-        if (isUserBanned(user.id)) throw new PublicError("当前用户已被封禁");
+        if (getUserBanStatus(this.runtime.db, user.id).banned) {
+          throw new PublicError("当前用户已被封禁");
+        }
         this.bind(user, normalized);
         return undefined;
       },
@@ -99,6 +104,7 @@ class ProtocolSession {
         action: "remote.authenticate",
         userId: claimedUserId,
       },
+      this.runtime.db,
     );
     send(this.socket, {
       v: PROTOCOL_VERSION,
@@ -123,13 +129,14 @@ class ProtocolSession {
           throw new ContractViolationError("未知 Action", action.error.issues);
         }
         dispatchedAction = action.data;
-        return withRequestContext(
-          {
+        return withScope(
+          this.runtime.scope({
             token: binding?.token ?? null,
             userId: binding?.userId ?? null,
             clientId: binding?.clientId ?? this.anonymousClientId,
             ...this.identity,
-          },
+            requestId: frame.id,
+          }),
           () => dispatchAction(action.data, frame.args),
         );
       },
@@ -160,7 +167,7 @@ class ProtocolSession {
   }
 
   recordProtocolViolation(error: unknown): string {
-    return createIncidentService(getDb(), BUILD_ID).capture({
+    return createIncidentService(this.runtime.db, BUILD_ID).capture({
       environment: "server",
       error,
       context: { transport: "websocket", phase: "frame" },
@@ -175,9 +182,10 @@ class ProtocolSession {
 
   private bind(user: User, token: string): void {
     this.bindings.get(user.id)?.unsubscribe();
-    const clientId = getClientIdFromToken(getDb(), token) ?? null;
-    const unsubscribe = subscribe(userChannels(user.id), (event) =>
-      this.sendEvent(user.id, event),
+    const clientId = getClientIdFromToken(this.runtime.db, token) ?? null;
+    const unsubscribe = subscribe(
+      userChannels(this.runtime.db, user.id),
+      (event) => this.sendEvent(user.id, event),
     );
     this.bindings.set(user.id, {
       userId: user.id,
@@ -198,11 +206,15 @@ class ProtocolSession {
     operation: () => Promise<unknown>,
     action?: string,
   ): Promise<boolean> {
-    const result = await ServerResultCodec.capture(operation, {
-      action,
-      requestId: id,
-      userId: user,
-    });
+    const result = await ServerResultCodec.capture(
+      operation,
+      {
+        action,
+        requestId: id,
+        userId: user,
+      },
+      this.runtime.db,
+    );
     send(this.socket, {
       v: PROTOCOL_VERSION,
       kind: "response",
@@ -227,7 +239,10 @@ class ProtocolSession {
 export class WebSocketProtocol {
   private readonly wss = new WebSocketServer({ noServer: true });
 
-  constructor(private readonly buildId: string) {
+  constructor(
+    private readonly buildId: string,
+    private readonly runtime: Runtime,
+  ) {
     this.wss.on("connection", (socket, request) =>
       this.connected(socket, request),
     );
@@ -250,7 +265,11 @@ export class WebSocketProtocol {
   }
 
   private connected(socket: WebSocket, request: IncomingMessage): void {
-    const session = new ProtocolSession(socket, identifyClientRequest(request));
+    const session = new ProtocolSession(
+      socket,
+      identifyClientRequest(request),
+      this.runtime,
+    );
     send(socket, { v: PROTOCOL_VERSION, kind: "hello", buildId: this.buildId });
 
     socket.on("message", (bytes) => {

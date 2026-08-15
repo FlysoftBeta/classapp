@@ -2,11 +2,6 @@ import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
@@ -26,7 +21,6 @@ import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import EditIcon from "@mui/icons-material/Edit";
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd";
-import { flexGap } from "@/client/lib/css";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import {
   type AdminClientRecord as ClientRecord,
@@ -42,6 +36,7 @@ import {
 } from "@/client/api/admin";
 import { isFuture, formatRemaining } from "@/shared/time";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
 type IdentityMethod = "mac" | "ip" | "user_agent";
 type UserOption = { id: string; label: string };
@@ -207,6 +202,177 @@ export function ClientsTab() {
     reload();
   };
 
+  const columns: AdminGridColumn<ClientRecord>[] = [
+    {
+      id: "id",
+      label: "客户端 ID",
+      width: 280,
+      render: (client) => (
+        <Box sx={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontFamily: "monospace",
+              fontWeight: 600,
+            }}
+          >
+            {client.id}
+          </Typography>
+          <Tooltip title="复制 ID">
+            <IconButton
+              size="small"
+              onClick={(event) => {
+                event.stopPropagation();
+                void navigator.clipboard.writeText(client.id);
+              }}
+            >
+              <ContentCopyIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      ),
+      longText: (client) => client.id,
+    },
+    {
+      id: "remark",
+      label: "备注",
+      width: 180,
+      render: (client) => client.remark || "—",
+      longText: (client) => client.remark,
+    },
+    {
+      id: "state",
+      label: "准入状态",
+      width: 210,
+      render: (client) => (
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Chip
+            size="small"
+            label={client.persistent ? "持久" : "临时"}
+            color={client.persistent ? "primary" : "default"}
+            variant={client.persistent ? "filled" : "outlined"}
+          />
+          {client.persistent ? (
+            <Chip
+              size="small"
+              label={client.whitelisted ? "白名单" : "未授权"}
+              color={client.whitelisted ? "success" : "default"}
+            />
+          ) : null}
+        </Box>
+      ),
+    },
+    {
+      id: "last_seen",
+      label: "最近活跃",
+      width: 180,
+      render: (client) => client.last_seen?.slice(0, 16) ?? "尚未活跃",
+    },
+    {
+      id: "mac",
+      label: "MAC",
+      width: 190,
+      render: (client) => client.mac || "—",
+      longText: (client) => client.mac,
+    },
+    {
+      id: "ips",
+      label: "IP",
+      width: 260,
+      render: (client) => client.ips.join(", ") || "—",
+      longText: (client) => client.ips.join("\n"),
+    },
+    {
+      id: "user_agent",
+      label: "User Agent",
+      width: 520,
+      render: (client) => client.user_agent || "—",
+      longText: (client) => client.user_agent,
+    },
+    {
+      id: "sessions",
+      label: "活跃会话",
+      width: 260,
+      render: (client) =>
+        client.active_sessions
+          ? `${client.active_sessions} 个 · ${client.session_users}`
+          : "无活跃会话",
+      longText: (client) => client.session_users,
+    },
+    {
+      id: "binding",
+      label: "绑定用户",
+      width: 220,
+      render: (client) =>
+        client.bound_user_id
+          ? `@${client.bound_user_handle ?? client.bound_user_id}`
+          : "未绑定",
+      longText: (client) => client.bound_user_id,
+    },
+    {
+      id: "protection",
+      label: "登录保护",
+      width: 240,
+      render: (client) => {
+        if (client.throttled_until && isFuture(client.throttled_until)) {
+          return `登录节流 · 剩余 ${formatRemaining(client.throttled_until)}`;
+        }
+        if (client.konami_locked) return "已锁定";
+        return client.attempts > 0 ? `${client.attempts} 次失败` : "正常";
+      },
+    },
+    {
+      id: "actions",
+      label: "操作",
+      width: 150,
+      render: (client) => (
+        <Box sx={{ display: "flex" }}>
+          {!client.persistent ? (
+            <Tooltip title="转为持久客户端">
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => void handlePromote(client)}
+              >
+                <BookmarkAddIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Tooltip title="编辑属性">
+              <IconButton size="small" onClick={() => openEdit(client)}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title={client.konami_locked ? "解锁" : "锁定"}>
+            <IconButton
+              size="small"
+              onClick={() => void handleToggleLock(client)}
+            >
+              {client.konami_locked ? (
+                <LockOpenIcon fontSize="small" />
+              ) : (
+                <LockIcon fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="删除">
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => void handleDelete(client)}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      ),
+    },
+  ];
+
   return (
     <Box>
       <Box
@@ -306,184 +472,12 @@ export function ClientsTab() {
           <CircularProgress size={28} />
         </Box>
       ) : (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>客户端</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>标识与最近活跃</TableCell>
-              <TableCell>会话 / 绑定</TableCell>
-              <TableCell>登录保护</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {(data?.clients ?? []).map((client) => (
-              <TableRow key={client.id} hover>
-                <TableCell sx={{ minWidth: 170 }}>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      ...flexGap(0.75),
-                    }}
-                  >
-                    <Typography
-                      sx={{
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {client.id}
-                    </Typography>
-                    <Tooltip title="复制 ID">
-                      <IconButton
-                        size="small"
-                        onClick={() =>
-                          void navigator.clipboard.writeText(client.id)
-                        }
-                      >
-                        <ContentCopyIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                  <Typography
-                    variant="caption"
-                    color={client.remark ? "text.secondary" : "text.disabled"}
-                  >
-                    {client.remark || "暂无备注"}
-                  </Typography>
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    size="small"
-                    label={client.persistent ? "持久" : "临时"}
-                    color={client.persistent ? "primary" : "default"}
-                    variant={client.persistent ? "filled" : "outlined"}
-                  />
-                  {client.persistent && (
-                    <Chip
-                      size="small"
-                      sx={{ ml: 0.5 }}
-                      label={client.whitelisted ? "白名单" : "未授权"}
-                      color={client.whitelisted ? "success" : "default"}
-                    />
-                  )}
-                </TableCell>
-                <TableCell sx={{ fontSize: 11, maxWidth: 300 }}>
-                  <Typography variant="caption" sx={{ display: "block" }}>
-                    {client.last_seen
-                      ? client.last_seen.slice(0, 16)
-                      : "尚未活跃"}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", overflowWrap: "anywhere" }}
-                  >
-                    MAC {client.mac || "—"} · IP {client.ips.join(", ") || "—"}
-                    <br />
-                    UA {client.user_agent || "—"}
-                  </Typography>
-                </TableCell>
-                <TableCell sx={{ fontSize: 12 }}>
-                  <Typography variant="caption" sx={{ display: "block" }}>
-                    {client.active_sessions
-                      ? `${client.active_sessions} 个会话 ${client.session_users}`
-                      : "无活跃会话"}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    color={client.bound_user_id ? "primary" : "text.disabled"}
-                  >
-                    {client.bound_user_id
-                      ? `绑定 @${client.bound_user_handle ?? client.bound_user_id}`
-                      : "未绑定用户"}
-                  </Typography>
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    label={client.konami_locked ? "已锁定" : "已解锁"}
-                    size="small"
-                    color={client.konami_locked ? "warning" : "success"}
-                    icon={
-                      client.konami_locked ? <LockIcon /> : <LockOpenIcon />
-                    }
-                  />
-                  {client.throttled_until &&
-                  isFuture(client.throttled_until) ? (
-                    <Typography
-                      variant="caption"
-                      color="warning.main"
-                      sx={{ display: "block", mt: 0.5 }}
-                    >
-                      登录节流剩余 {formatRemaining(client.throttled_until)}
-                    </Typography>
-                  ) : client.attempts > 0 ? (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mt: 0.5 }}
-                    >
-                      {client.attempts} 次失败
-                    </Typography>
-                  ) : null}
-                </TableCell>
-                <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                  {!client.persistent ? (
-                    <Tooltip title="转为持久客户端">
-                      <IconButton
-                        size="small"
-                        color="primary"
-                        onClick={() => void handlePromote(client)}
-                      >
-                        <BookmarkAddIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  ) : (
-                    <Tooltip title="编辑属性">
-                      <IconButton size="small" onClick={() => openEdit(client)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                  <Tooltip title={client.konami_locked ? "解锁" : "锁定"}>
-                    <IconButton
-                      size="small"
-                      onClick={() => void handleToggleLock(client)}
-                    >
-                      {client.konami_locked ? (
-                        <LockOpenIcon fontSize="small" />
-                      ) : (
-                        <LockIcon fontSize="small" />
-                      )}
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="删除">
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => void handleDelete(client)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(data?.clients ?? []).length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={6}
-                  sx={{ py: 5, textAlign: "center", color: "text.disabled" }}
-                >
-                  没有匹配的客户端
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+        <AdminDataGrid
+          rows={data?.clients ?? []}
+          columns={columns}
+          rowKey={(client) => client.id}
+          empty="没有匹配的客户端"
+        />
       )}
 
       {data && data.total > 50 && (

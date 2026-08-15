@@ -1,9 +1,6 @@
 import path from "node:path";
-import { getDb } from "@/server/infra/db";
-import { findTeachDocument } from "@/server/data/teachDocuments";
-import { readTeachDocumentBlob } from "@/server/infra/teachDocumentBlobs";
-import { requireActiveAdmin } from "@/server/domain/policy/auth";
-import { handleHttpError, PublicError } from "@/server/http/errorResponse";
+import { handleHttpError } from "@/server/http/errorResponse";
+import { currentScope } from "@/server/runtime/scope";
 
 const MIME_TYPES: Record<string, string> = {
   ".doc": "application/msword",
@@ -30,16 +27,12 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireActiveAdmin(req, { allowQueryToken: true });
-  if ("error" in auth) {
-    return Response.json({ error: auth.error }, { status: auth.status });
-  }
-
   try {
     const { id } = await params;
-    const document = findTeachDocument(getDb(), id);
-    if (!document) throw new PublicError("文档不存在");
-    const body = await readTeachDocumentBlob(document.blob_path);
+    const { document, body } = await currentScope()
+      .facades()
+      .administration()
+      .downloadTeachDocument(id);
     const arrayBuffer = new ArrayBuffer(body.byteLength);
     new Uint8Array(arrayBuffer).set(body);
     return new Response(arrayBuffer, {

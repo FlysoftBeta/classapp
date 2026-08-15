@@ -119,3 +119,14 @@ export function buildIncidentLogArchive(
     );
   }
 }
+
+export class IncidentLogArchiveService {
+  constructor(
+    private readonly db: Database,
+    private readonly buildId: string,
+  ) {}
+
+  build() {
+    return buildIncidentLogArchive(this.db, this.buildId);
+  }
+}

@@ -1,46 +1,38 @@
-import { createAuthService } from "@/server/services/authService";
-import { withActionSession, expectString } from "./_base";
-import { actionClientIdentity } from "@/server/session/session";
-import { getDb } from "@/server/infra/db";
+import { withActionScope, expectString } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 export async function autoLoginAction() {
-  return withActionSession(async () => {
-    return createAuthService(getDb(), actionClientIdentity()).autoLogin();
+  return withActionScope(async (scope) => {
+    return scope.facades().authentication().autoLogin();
   });
 }
 
 export async function loginPinAction(pin: ActionInput<"loginPinAction">) {
-  return withActionSession(async () => {
-    return createAuthService(getDb(), actionClientIdentity()).login(
-      expectString(pin, "PIN 格式错误"),
-    );
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .authentication()
+      .login(expectString(pin, "PIN 格式错误"));
   });
 }
 
 export async function completeOobeAction(
   input: ActionInput<"completeOobeAction">,
 ) {
-  return withActionSession(async () => {
-    return createAuthService(getDb(), actionClientIdentity()).completeOobe(
-      input,
-    );
+  return withActionScope(async (scope) => {
+    return scope.facades().authentication().completeOobe(input);
   });
 }
 
 export async function logoutAction() {
-  return withActionSession(async (session) => {
-    const token = session.tokenValue();
-    if (token) {
-      createAuthService(getDb(), actionClientIdentity()).logout(token);
-    }
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope.facades().authentication().logout(scope.identity.token);
   });
 }
 
 export async function updateMeAction(input: ActionInput<"updateMeAction">) {
-  return withActionSession(async (session) => {
-    const users = await (await session.asActor()).users();
+  return withActionScope(async (scope) => {
+    const users = scope.facades().users();
     if (input.resetPins) {
       await users.resetSelfPin(input.resetPins);
       return { ok: true as const };

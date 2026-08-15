@@ -3,11 +3,6 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import IconButton from "@mui/material/IconButton";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
@@ -27,12 +22,21 @@ import AddIcon from "@mui/icons-material/Add";
 import { flexGap } from "@/client/lib/css";
 import type { User } from "@/shared/types/api";
 import {
+  ADMIN_ROLES,
+  ADMIN_ROLE_DESCRIPTIONS,
+  ADMIN_ROLE_LABELS,
+  roleDependencies,
+  type AdminRole,
+} from "@/shared/authority";
+import {
   adminFetchUsers,
   adminCreateUser,
   adminUpdateUser,
   adminDeleteUser,
   adminFetchAiCredits,
   adminTopUpAiCredits,
+  adminAssignAiPlan,
+  adminBatchUpdateUserFeatures,
 } from "@/client/api/admin";
 import type { AiCreditBalance } from "@/shared/types/api";
 import {
@@ -46,21 +50,31 @@ import {
 } from "@/client/components/shared/HelpTip";
 import { useActionQuery } from "@/client/hooks/useActionQuery";
 import {
-  DEFAULT_FEATURE_MASK,
-  hasFeature,
-  setFeature,
+  DEFAULT_USER_FEATURES,
+  FEATURES,
+  type UserFeatures,
 } from "@/shared/features";
 import {
   FeatureGatesPanel,
   aggregateFeatureGateStates,
   applyFeatureGateChanges,
   createUnchangedFeatureGateChanges,
-  featureGateChangesFromMask,
+  featureGateChangesFromFeatures,
   type FeatureGateChange,
 } from "./FeatureGatesPanel";
 import { MultiSectionDurationPicker } from "./MultiSectionDurationPicker";
+import { AdminDataGrid, type AdminGridColumn } from "./AdminDataGrid";
 
-export function UsersTab() {
+export function UsersTab({ currentUser }: { currentUser: User }) {
+  const hasRole = (role: AdminRole) =>
+    currentUser.administration.roles.includes(role);
+  const canRoot = hasRole("root");
+  const canManageFeatures = hasRole("feature_manager");
+  const canCreateUsers = hasRole("access_manager");
+  const canModerate = hasRole("community_manager");
+  const canManageProfiles = hasRole("advanced_community_manager");
+  const canEdit =
+    canRoot || canManageFeatures || canModerate || canManageProfiles;
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
   const { data, loading, reload } = useActionQuery<{
@@ -71,7 +85,10 @@ export function UsersTab() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editHandle, setEditHandle] = useState("");
   const [editUsername, setEditUsername] = useState("");
-  const [editFeatureMask, setEditFeatureMask] = useState(DEFAULT_FEATURE_MASK);
+  const [editFeatures, setEditFeatures] = useState<UserFeatures>({
+    ...DEFAULT_USER_FEATURES,
+  });
+  const [editRoles, setEditRoles] = useState<AdminRole[]>([]);
   const [editPin, setEditPin] = useState("");
   const [editMuted, setEditMuted] = useState(false);
   const [editMuteDays, setEditMuteDays] = useState(1);
@@ -88,13 +105,16 @@ export function UsersTab() {
   const [topUpAmount, setTopUpAmount] = useState("");
   const [topUpNote, setTopUpNote] = useState("");
   const [topUpSaving, setTopUpSaving] = useState(false);
+  const [planDays, setPlanDays] = useState("30");
   const editLoadRef = useRef(0);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newHandle, setNewHandle] = useState("");
   const [newUsername, setNewUsername] = useState("");
   const [newPin, setNewPin] = useState("");
-  const [newFeatureMask, setNewFeatureMask] = useState(DEFAULT_FEATURE_MASK);
+  const [newFeatures, setNewFeatures] = useState<UserFeatures>({
+    ...DEFAULT_USER_FEATURES,
+  });
   const [createErr, setCreateErr] = useState("");
   const [creating, setCreating] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -110,7 +130,8 @@ export function UsersTab() {
     setEditUser(u);
     setEditHandle(u.handle);
     setEditUsername(u.username);
-    setEditFeatureMask(u.feature_mask);
+    setEditFeatures({ ...u.features });
+    setEditRoles([...u.administration.roles]);
     setEditPin("");
     setEditMuted(!!u.is_muted);
     setEditMuteDays(1);
@@ -123,6 +144,7 @@ export function UsersTab() {
     setTopUpAmount("");
     setTopUpNote("");
 
+    if (!canManageFeatures) return;
     try {
       const [discipline, credits] = await Promise.all([
         adminFetchSelfDisciplineMode(u.id),
@@ -172,6 +194,26 @@ export function UsersTab() {
     }
   };
 
+  const handleAssignPlan = async () => {
+    if (!editUser) return;
+    const durationDays = Number(planDays);
+    if (!Number.isSafeInteger(durationDays) || durationDays <= 0) {
+      setEditErr("套餐天数必须是正整数");
+      return;
+    }
+    setTopUpSaving(true);
+    setEditErr("");
+    try {
+      setEditAiCredits(
+        await adminAssignAiPlan({ userId: editUser.id, durationDays }),
+      );
+    } catch (error) {
+      setEditErr(error instanceof Error ? error.message : "套餐分配失败");
+    } finally {
+      setTopUpSaving(false);
+    }
+  };
+
   const isBanned = (u: User) => isFuture(u.banned_until);
 
   const handleSaveEdit = async () => {
@@ -190,24 +232,32 @@ export function UsersTab() {
       setEditErr("时长不能为 0");
       return;
     }
-    const body: Record<string, unknown> = {
-      handle: editHandle,
-      username: editUsername,
-      feature_mask: editFeatureMask,
-    };
-    if (wasMuted && !editMuted) body.unmute = true;
-    if (!wasMuted && editMuted) body.mute_hours = muteHours;
-    if (wasBanned && !editBanned) body.unban = true;
-    if (!wasBanned && editBanned) body.ban_hours = banHours;
-    if (editPin) body.pin = editPin;
-    const { res, data } = await adminUpdateUser(editUser.id, body);
-    if (!res.ok) {
-      setEditSaving(false);
-      setEditErr(("error" in data && data.error) || "失败");
-      return;
+    const body: Record<string, unknown> = {};
+    if (canManageProfiles) {
+      body.handle = editHandle;
+      body.username = editUsername;
+    }
+    if (canManageFeatures) body.features = editFeatures;
+    if (canRoot) body.roles = editRoles;
+    if (canModerate) {
+      if (wasMuted && !editMuted) body.unmute = true;
+      if (!wasMuted && editMuted) body.mute_hours = muteHours;
+      if (wasBanned && !editBanned) body.unban = true;
+      if (!wasBanned && editBanned) body.ban_hours = banHours;
+      if (editPin) body.pin = editPin;
+    }
+    if (Object.keys(body).length > 0) {
+      const { res, data } = await adminUpdateUser(editUser.id, body);
+      if (!res.ok) {
+        setEditSaving(false);
+        setEditErr(("error" in data && data.error) || "失败");
+        return;
+      }
     }
 
-    await adminUpdateSelfDisciplineMode(editUser.id, editSelfDiscipline);
+    if (canManageFeatures) {
+      await adminUpdateSelfDisciplineMode(editUser.id, editSelfDiscipline);
+    }
 
     setEditSaving(false);
     setEditUser(null);
@@ -231,7 +281,7 @@ export function UsersTab() {
       handle: newHandle,
       username: newUsername || newHandle,
       pin: newPin,
-      feature_mask: newFeatureMask,
+      ...(canManageFeatures ? { features: newFeatures } : {}),
     });
     setCreating(false);
     if (!res.ok) {
@@ -242,7 +292,7 @@ export function UsersTab() {
     setNewHandle("");
     setNewUsername("");
     setNewPin("");
-    setNewFeatureMask(DEFAULT_FEATURE_MASK);
+    setNewFeatures({ ...DEFAULT_USER_FEATURES });
     reload();
   };
 
@@ -268,26 +318,18 @@ export function UsersTab() {
       const updates = selectedUsers
         .map((user) => ({
           user,
-          featureMask: applyFeatureGateChanges(
-            user.feature_mask,
-            batchGateChanges,
-          ),
+          features: applyFeatureGateChanges(user.features, batchGateChanges),
         }))
-        .filter(({ user, featureMask }) => featureMask !== user.feature_mask);
-      const results = await Promise.all(
-        updates.map(({ user, featureMask }) =>
-          adminUpdateUser(user.id, { feature_mask: featureMask }),
-        ),
-      );
-      const failed = results.find(({ res }) => !res.ok);
-      if (failed) {
-        setBatchErr(
-          ("error" in failed.data && failed.data.error) || "应用失败",
+        .filter(({ user, features }) =>
+          FEATURES.some(
+            (feature) => features[feature] !== user.features[feature],
+          ),
         );
-      } else {
-        setBatchGateChanges(createUnchangedFeatureGateChanges());
-        setBatchAnchorEl(null);
-      }
+      await adminBatchUpdateUserFeatures(
+        updates.map(({ user, features }) => ({ userId: user.id, features })),
+      );
+      setBatchGateChanges(createUnchangedFeatureGateChanges());
+      setBatchAnchorEl(null);
       reload();
     } catch (error) {
       setBatchErr(error instanceof Error ? error.message : "应用失败");
@@ -306,6 +348,156 @@ export function UsersTab() {
     setBatchErr("");
     setBatchGateChanges(createUnchangedFeatureGateChanges());
   };
+  const columns: AdminGridColumn<User>[] = [
+    {
+      id: "identity",
+      label: (
+        <Box sx={{ display: "flex", alignItems: "center" }}>
+          {canManageFeatures ? (
+            <Checkbox
+              size="small"
+              checked={
+                (data?.users.length ?? 0) > 0 &&
+                (data?.users ?? []).every((user) => selectedIds.has(user.id))
+              }
+              indeterminate={
+                (data?.users ?? []).some((user) => selectedIds.has(user.id)) &&
+                !(data?.users ?? []).every((user) => selectedIds.has(user.id))
+              }
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                setSelectedIds(
+                  event.target.checked
+                    ? new Set((data?.users ?? []).map((user) => user.id))
+                    : new Set(),
+                )
+              }
+            />
+          ) : null}
+          账号
+        </Box>
+      ),
+      width: 250,
+      render: (user) => (
+        <Box sx={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+          {canManageFeatures ? (
+            <Checkbox
+              size="small"
+              checked={selectedIds.has(user.id)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                setSelectedIds((current) => {
+                  const next = new Set(current);
+                  if (event.target.checked) next.add(user.id);
+                  else next.delete(user.id);
+                  return next;
+                })
+              }
+            />
+          ) : null}
+          <Typography
+            variant="body2"
+            sx={{ fontFamily: "monospace", overflow: "hidden" }}
+          >
+            @{user.handle}
+          </Typography>
+        </Box>
+      ),
+    },
+    {
+      id: "name",
+      label: "显示名称",
+      width: 180,
+      render: (user) => user.username,
+      longText: (user) => user.username,
+    },
+    {
+      id: "roles",
+      label: "管理职责",
+      width: 320,
+      render: (user) =>
+        user.administration.roles.length
+          ? user.administration.roles
+              .map((role) => ADMIN_ROLE_LABELS[role])
+              .join("、")
+          : "—",
+      longText: (user) =>
+        user.administration.roles
+          .map(
+            (role) =>
+              `${ADMIN_ROLE_LABELS[role]}：${ADMIN_ROLE_DESCRIPTIONS[role]}`,
+          )
+          .join("\n"),
+    },
+    {
+      id: "status",
+      label: "状态",
+      width: 240,
+      render: (user) => (
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          {user.is_muted ? (
+            <Chip label="禁言" size="small" color="warning" />
+          ) : null}
+          {isBanned(user) ? (
+            <Chip label="已封禁" size="small" color="error" />
+          ) : null}
+          {!user.is_muted && !isBanned(user) ? "正常" : null}
+        </Box>
+      ),
+    },
+    {
+      id: "created",
+      label: "注册时间",
+      width: 180,
+      render: (user) => user.created_at.slice(0, 16),
+    },
+    {
+      id: "actions",
+      label: "操作",
+      width: 150,
+      render: (user) => (
+        <Box sx={{ display: "flex" }}>
+          {canEdit ? (
+            <IconButton
+              size="small"
+              title="编辑"
+              onClick={(event) => {
+                event.stopPropagation();
+                void openEdit(user);
+              }}
+            >
+              <EditIcon fontSize="small" />
+            </IconButton>
+          ) : null}
+          {canManageProfiles ? (
+            <IconButton
+              size="small"
+              title="注销账号并保留历史数据"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(user.id, "deactivate");
+              }}
+            >
+              <PersonOffIcon fontSize="small" />
+            </IconButton>
+          ) : null}
+          {canManageProfiles ? (
+            <IconButton
+              size="small"
+              color="error"
+              title="彻底清除账号和业务数据"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(user.id, "purge");
+              }}
+            >
+              <DeleteForeverIcon fontSize="small" />
+            </IconButton>
+          ) : null}
+        </Box>
+      ),
+    },
+  ];
 
   return (
     <Box>
@@ -317,17 +509,20 @@ export function UsersTab() {
           onChange={(e) => {
             setQ(e.target.value);
             setOffset(0);
+            setSelectedIds(new Set());
           }}
           sx={{ flex: 1, mr: 1 }}
         />
-        <Button
-          startIcon={<AddIcon />}
-          variant="contained"
-          size="small"
-          onClick={() => setCreateOpen(true)}
-        >
-          新建干员
-        </Button>
+        {canCreateUsers ? (
+          <Button
+            startIcon={<AddIcon />}
+            variant="contained"
+            size="small"
+            onClick={() => setCreateOpen(true)}
+          >
+            新建干员
+          </Button>
+        ) : null}
       </Box>
 
       {selectedUsers.length > 0 ? (
@@ -388,100 +583,12 @@ export function UsersTab() {
       {loading ? (
         <CircularProgress size={24} />
       ) : (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell padding="checkbox">
-                <Checkbox
-                  size="small"
-                  checked={
-                    (data?.users.length ?? 0) > 0 &&
-                    selectedIds.size === data?.users.length
-                  }
-                  indeterminate={
-                    selectedIds.size > 0 &&
-                    selectedIds.size < (data?.users.length ?? 0)
-                  }
-                  onChange={(e) =>
-                    setSelectedIds(
-                      e.target.checked
-                        ? new Set((data?.users || []).map((u) => u.id))
-                        : new Set(),
-                    )
-                  }
-                />
-              </TableCell>
-              <TableCell>@ID</TableCell>
-              <TableCell>显示名称</TableCell>
-              <TableCell>注册时间</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {(data?.users || []).map((u) => (
-              <TableRow key={u.id}>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    size="small"
-                    checked={selectedIds.has(u.id)}
-                    onChange={(e) =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(u.id);
-                        else next.delete(u.id);
-                        return next;
-                      })
-                    }
-                  />
-                </TableCell>
-                <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>
-                  @{u.handle}
-                </TableCell>
-                <TableCell>{u.username}</TableCell>
-                <TableCell sx={{ fontSize: 12 }}>
-                  {u.created_at.slice(0, 16)}
-                </TableCell>
-                <TableCell>
-                  {u.is_muted ? (
-                    <Chip
-                      label="禁言"
-                      size="small"
-                      color="warning"
-                      sx={{ mr: 0.5 }}
-                    />
-                  ) : null}
-                  {isBanned(u) ? (
-                    <Chip label="已封禁" size="small" color="error" />
-                  ) : null}
-                  {hasFeature(u, "admin") ? (
-                    <Chip label="管理员" size="small" color="primary" />
-                  ) : null}
-                </TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => openEdit(u)}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    title="注销账号并保留历史数据"
-                    onClick={() => handleDelete(u.id, "deactivate")}
-                  >
-                    <PersonOffIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    color="error"
-                    title="彻底清除账号和业务数据"
-                    onClick={() => handleDelete(u.id, "purge")}
-                  >
-                    <DeleteForeverIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <AdminDataGrid
+          rows={data?.users ?? []}
+          columns={columns}
+          rowKey={(user) => user.id}
+          empty="没有符合条件的人员"
+        />
       )}
 
       {data && data.total > 50 && (
@@ -489,7 +596,10 @@ export function UsersTab() {
           <Button
             size="small"
             disabled={offset === 0}
-            onClick={() => setOffset((o) => Math.max(0, o - 50))}
+            onClick={() => {
+              setSelectedIds(new Set());
+              setOffset((o) => Math.max(0, o - 50));
+            }}
           >
             上一页
           </Button>
@@ -499,7 +609,10 @@ export function UsersTab() {
           <Button
             size="small"
             disabled={offset + 50 >= data.total}
-            onClick={() => setOffset((o) => o + 50)}
+            onClick={() => {
+              setSelectedIds(new Set());
+              setOffset((o) => o + 50);
+            }}
           >
             下一页
           </Button>
@@ -517,177 +630,271 @@ export function UsersTab() {
           编辑干员
         </DialogTitleWithHelp>
         <DialogContent>
-          <TextField
-            label={
-              <LabelWithHelp
-                label="ID（@handle）"
-                help="干员唯一公开标识，可用于 @提及与登录定位。"
+          {canManageProfiles ? (
+            <>
+              <TextField
+                label={
+                  <LabelWithHelp
+                    label="ID（@handle）"
+                    help="干员唯一公开标识，可用于 @提及与登录定位。"
+                  />
+                }
+                fullWidth
+                size="small"
+                sx={{ mt: 1 }}
+                value={editHandle}
+                onChange={(e) =>
+                  setEditHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))
+                }
+                inputProps={{ maxLength: 20 }}
               />
-            }
-            fullWidth
-            size="small"
-            sx={{ mt: 1 }}
-            value={editHandle}
-            onChange={(e) =>
-              setEditHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))
-            }
-            inputProps={{ maxLength: 20 }}
-          />
-          <TextField
-            label={
-              <LabelWithHelp
-                label="显示名称"
-                help="对外展示的名称，可任意字符，不参与定位。"
+              <TextField
+                label={
+                  <LabelWithHelp
+                    label="显示名称"
+                    help="对外展示的名称，可任意字符，不参与定位。"
+                  />
+                }
+                fullWidth
+                size="small"
+                sx={{ mt: 1.5 }}
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                inputProps={{ maxLength: 30 }}
               />
-            }
-            fullWidth
-            size="small"
-            sx={{ mt: 1.5 }}
-            value={editUsername}
-            onChange={(e) => setEditUsername(e.target.value)}
-            inputProps={{ maxLength: 30 }}
-          />
-          <FeatureGatesPanel
-            value={featureGateChangesFromMask(editFeatureMask)}
-            allowUnchanged={false}
-            onChange={(gate, change) =>
-              setEditFeatureMask((mask) =>
-                setFeature(mask, gate, change === "enabled"),
-              )
-            }
-          />
-          <TextField
-            label={
-              <LabelWithHelp
-                label="重置 PIN（留空不变）"
-                help="一旦填写并保存，干员所有旧 PIN 立即失效，仅此新 PIN 可用。"
-              />
-            }
-            fullWidth
-            size="small"
-            sx={{ mt: 1.5 }}
-            type="password"
-            value={editPin}
-            onChange={(e) =>
-              setEditPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-            }
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={editMuted}
-                onChange={(e) => setEditMuted(e.target.checked)}
-              />
-            }
-            label={
-              <LabelWithHelp
-                label="禁言"
-                help="禁言后干员可登录但无法发送消息。"
-              />
-            }
-            sx={{ mt: 1 }}
-          />
-          {editUser && editMuted && !editUser.is_muted && (
-            <Box sx={{ mt: 0.5, mb: 1.5 }}>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mb: 1 }}
-              >
-                禁言时长
+            </>
+          ) : null}
+          {canManageFeatures ? (
+            <FeatureGatesPanel
+              value={featureGateChangesFromFeatures(editFeatures)}
+              allowUnchanged={false}
+              onChange={(gate, change) =>
+                setEditFeatures((features) => ({
+                  ...features,
+                  [gate]: change === "enabled",
+                }))
+              }
+            />
+          ) : null}
+          {canRoot ? (
+            <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5 }}>
+              <Typography variant="subtitle2" fontWeight={700}>
+                管理角色
               </Typography>
-              <MultiSectionDurationPicker
-                days={editMuteDays}
-                hours={editMuteHours}
-                onDaysChange={setEditMuteDays}
-                onHoursChange={setEditMuteHours}
-              />
-            </Box>
-          )}
-          <FormControlLabel
-            control={
-              <Switch
-                checked={editBanned}
-                onChange={(e) => setEditBanned(e.target.checked)}
-              />
-            }
-            label={
-              <LabelWithHelp
-                label="封禁"
-                help="封禁后，该干员所有会话立即失效，直到封禁结束。"
-              />
-            }
-            sx={{ mt: 0.5 }}
-          />
-          {editUser && editBanned && !isBanned(editUser) && (
-            <Box sx={{ mt: 0.5, mb: 1.5 }}>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mb: 1 }}
-              >
-                封禁时长
+              <Typography variant="caption" color="text.secondary">
+                角色只表达管理职责；普通产品功能在上方单独配置。
               </Typography>
-              <MultiSectionDurationPicker
-                days={editBanDays}
-                hours={editBanHours}
-                onDaysChange={setEditBanDays}
-                onHoursChange={setEditBanHours}
+              <Box sx={{ display: "grid", mt: 1 }}>
+                {ADMIN_ROLES.map((role) => (
+                  <FormControlLabel
+                    key={role}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={editRoles.includes(role)}
+                        onChange={(_, enabled) =>
+                          setEditRoles((current) => {
+                            if (!enabled) {
+                              if (role === "administrator") return [];
+                              const removed = new Set<AdminRole>([role]);
+                              for (const candidate of ADMIN_ROLES) {
+                                if (
+                                  roleDependencies(candidate).some(
+                                    (dependency) => removed.has(dependency),
+                                  )
+                                ) {
+                                  removed.add(candidate);
+                                }
+                              }
+                              return current.filter(
+                                (item) => !removed.has(item),
+                              );
+                            }
+                            return [
+                              ...new Set<AdminRole>([
+                                ...current,
+                                ...roleDependencies(role),
+                                role,
+                              ]),
+                            ];
+                          })
+                        }
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2">
+                          {ADMIN_ROLE_LABELS[role]}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {ADMIN_ROLE_DESCRIPTIONS[role]}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                ))}
+              </Box>
+            </Paper>
+          ) : null}
+          {canModerate ? (
+            <>
+              <TextField
+                label={
+                  <LabelWithHelp
+                    label="重置 PIN（留空不变）"
+                    help="一旦填写并保存，干员所有旧 PIN 立即失效，仅此新 PIN 可用。"
+                  />
+                }
+                fullWidth
+                size="small"
+                sx={{ mt: 1.5 }}
+                type="password"
+                value={editPin}
+                onChange={(e) =>
+                  setEditPin(e.target.value.replace(/\D/g, "").slice(0, 6))
+                }
               />
-            </Box>
-          )}
-          <FormControlLabel
-            control={
-              <Switch
-                checked={editSelfDiscipline}
-                onChange={(e) => setEditSelfDiscipline(e.target.checked)}
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editMuted}
+                    onChange={(e) => setEditMuted(e.target.checked)}
+                  />
+                }
+                label={
+                  <LabelWithHelp
+                    label="禁言"
+                    help="禁言后干员可登录但无法发送消息。"
+                  />
+                }
+                sx={{ mt: 1 }}
               />
-            }
-            label={
-              <LabelWithHelp
-                label="自律模式"
-                help="开启后，该干员在学习中心启用定时弹窗答题。"
+              {editUser && editMuted && !editUser.is_muted && (
+                <Box sx={{ mt: 0.5, mb: 1.5 }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 1 }}
+                  >
+                    禁言时长
+                  </Typography>
+                  <MultiSectionDurationPicker
+                    days={editMuteDays}
+                    hours={editMuteHours}
+                    onDaysChange={setEditMuteDays}
+                    onHoursChange={setEditMuteHours}
+                  />
+                </Box>
+              )}
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editBanned}
+                    onChange={(e) => setEditBanned(e.target.checked)}
+                  />
+                }
+                label={
+                  <LabelWithHelp
+                    label="封禁"
+                    help="封禁后，该干员所有会话立即失效，直到封禁结束。"
+                  />
+                }
+                sx={{ mt: 0.5 }}
               />
-            }
-            sx={{ mt: 1 }}
-          />
+              {editUser && editBanned && !isBanned(editUser) && (
+                <Box sx={{ mt: 0.5, mb: 1.5 }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 1 }}
+                  >
+                    封禁时长
+                  </Typography>
+                  <MultiSectionDurationPicker
+                    days={editBanDays}
+                    hours={editBanHours}
+                    onDaysChange={setEditBanDays}
+                    onHoursChange={setEditBanHours}
+                  />
+                </Box>
+              )}
+            </>
+          ) : null}
+          {canManageFeatures ? (
+            <>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editSelfDiscipline}
+                    onChange={(e) => setEditSelfDiscipline(e.target.checked)}
+                  />
+                }
+                label={
+                  <LabelWithHelp
+                    label="自律模式"
+                    help="开启后，该干员在学习中心启用定时弹窗答题。"
+                  />
+                }
+                sx={{ mt: 1 }}
+              />
 
-          <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5 }}>
-            <Typography variant="subtitle2" fontWeight={700}>
-              AI Credits
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              可用 {editAiCredits?.balance ?? "…"}，预留{" "}
-              {editAiCredits?.reserved ?? "…"}
-            </Typography>
-            <Box sx={{ display: "flex", ...flexGap(1), mt: 1 }}>
-              <TextField
-                label="充值数量"
-                size="small"
-                inputMode="numeric"
-                value={topUpAmount}
-                onChange={(event) =>
-                  setTopUpAmount(event.target.value.replace(/\D/g, ""))
-                }
-                sx={{ width: 130 }}
-              />
-              <TextField
-                label="备注"
-                size="small"
-                value={topUpNote}
-                onChange={(event) =>
-                  setTopUpNote(event.target.value.slice(0, 200))
-                }
-                sx={{ flex: 1 }}
-              />
-              <Button
-                disabled={topUpSaving || !topUpAmount}
-                onClick={() => void handleTopUp()}
-              >
-                充值
-              </Button>
-            </Box>
-          </Paper>
+              <Paper variant="outlined" sx={{ mt: 1.5, p: 1.5 }}>
+                <Typography variant="subtitle2" fontWeight={700}>
+                  AI Credits
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  日额度已用 {editAiCredits?.plan.daily.used_percent ?? "…"}% ·
+                  周额度已用 {editAiCredits?.plan.weekly.used_percent ?? "…"}% ·
+                  额外 {editAiCredits?.top_up ?? "…"} credits
+                </Typography>
+                <Box sx={{ display: "flex", ...flexGap(1), mt: 1 }}>
+                  <TextField
+                    label="套餐天数"
+                    size="small"
+                    inputMode="numeric"
+                    value={planDays}
+                    onChange={(event) =>
+                      setPlanDays(event.target.value.replace(/\D/g, ""))
+                    }
+                    sx={{ width: 120 }}
+                  />
+                  <Button
+                    disabled={topUpSaving || !planDays}
+                    onClick={() => void handleAssignPlan()}
+                  >
+                    分配套餐
+                  </Button>
+                </Box>
+                <Box sx={{ display: "flex", ...flexGap(1), mt: 1 }}>
+                  <TextField
+                    label="充值数量"
+                    size="small"
+                    inputMode="numeric"
+                    value={topUpAmount}
+                    onChange={(event) =>
+                      setTopUpAmount(event.target.value.replace(/\D/g, ""))
+                    }
+                    sx={{ width: 130 }}
+                  />
+                  <TextField
+                    label="备注"
+                    size="small"
+                    value={topUpNote}
+                    onChange={(event) =>
+                      setTopUpNote(event.target.value.slice(0, 200))
+                    }
+                    sx={{ flex: 1 }}
+                  />
+                  <Button
+                    disabled={topUpSaving || !topUpAmount}
+                    onClick={() => void handleTopUp()}
+                  >
+                    充值
+                  </Button>
+                </Box>
+              </Paper>
+            </>
+          ) : null}
 
           {editErr && (
             <Alert severity="error" sx={{ mt: 1 }}>
@@ -749,15 +956,18 @@ export function UsersTab() {
               setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))
             }
           />
-          <FeatureGatesPanel
-            value={featureGateChangesFromMask(newFeatureMask)}
-            allowUnchanged={false}
-            onChange={(gate, change) =>
-              setNewFeatureMask((mask) =>
-                setFeature(mask, gate, change === "enabled"),
-              )
-            }
-          />
+          {canManageFeatures ? (
+            <FeatureGatesPanel
+              value={featureGateChangesFromFeatures(newFeatures)}
+              allowUnchanged={false}
+              onChange={(gate, change) =>
+                setNewFeatures((features) => ({
+                  ...features,
+                  [gate]: change === "enabled",
+                }))
+              }
+            />
+          ) : null}
           {createErr && (
             <Alert severity="error" sx={{ mt: 1 }}>
               {createErr}

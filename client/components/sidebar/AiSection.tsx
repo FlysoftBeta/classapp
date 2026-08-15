@@ -82,7 +82,8 @@ export function AiSection({
             AI
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-            {credits.balance} credits
+            日 {Math.max(0, 100 - credits.plan.daily.used_percent)}% · 周{" "}
+            {Math.max(0, 100 - credits.plan.weekly.used_percent)}%
           </Typography>
           <Tooltip title="新对话">
             <span>

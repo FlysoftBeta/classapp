@@ -137,7 +137,7 @@ function AppShell({
   } = logic;
 
   const view = route.view;
-  const adminEnabled = hasFeature(user, "admin");
+  const adminEnabled = user?.administration.available === true;
   const offlineEnabled = hasFeature(user, "offline");
   const articlesEnabled = hasFeature(user, "articles");
   const learningEnabled = hasFeature(user, "learning");

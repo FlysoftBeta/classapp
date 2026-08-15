@@ -4,6 +4,7 @@ import {
   createDbBackup,
   deleteBackup,
   listBackupFiles,
+  buildBackupDownload,
 } from "@/server/infra/dbBackup";
 import { updateManager } from "@/server/infra/updateManager";
 import { PublicError } from "@/server/services/incidentService";
@@ -28,7 +29,7 @@ export class AdminSystemService {
   }
 
   async createBackup() {
-    if (!(await createDbBackup())) {
+    if (!(await createDbBackup(this.db))) {
       throw new PublicError("数据库文件不存在");
     }
     return this.listBackups();
@@ -36,6 +37,10 @@ export class AdminSystemService {
 
   deleteBackup(name: string): void {
     deleteBackup(name);
+  }
+
+  downloadBackup(name: string) {
+    return buildBackupDownload(name);
   }
 
   getUpdateStatus() {

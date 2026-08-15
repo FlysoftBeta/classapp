@@ -28,16 +28,19 @@ async function main(): Promise<void> {
     { createHttpHandler },
     { getDb },
     { WebSocketProtocol },
+    { Runtime },
     { startMaintenance },
   ] = await Promise.all([
     import("@/server/http/handler"),
     import("@/server/infra/db"),
     import("@/server/protocol/WebSocketProtocol"),
+    import("@/server/runtime/runtime"),
     import("@/server/services/maintenance"),
   ]);
   const db = getDb();
-  const backend = createServer(createHttpHandler(config));
-  new WebSocketProtocol("dev").attach(backend);
+  const runtime = new Runtime(db, config.buildId);
+  const backend = createServer(createHttpHandler(config, runtime));
+  new WebSocketProtocol("dev", runtime).attach(backend);
   const stopMaintenance = startMaintenance(db);
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),

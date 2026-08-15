@@ -1,4 +1,4 @@
-import type { Actor } from "@/server/session/session";
+import type { Actor } from "@/server/runtime/actor";
 import type {
   ArticleSidebarPayload,
   ArticleWithMeta,
@@ -9,6 +9,10 @@ import type {
   CreateBundleArticleInput,
 } from "@/server/services/articlesService";
 import type { ArticleImportService } from "@/server/services/articleImportService";
+import type { GroupService } from "@/server/services/groupsService";
+import { PublicError } from "@/server/services/incidentService";
+import type { User } from "@/shared/types/api";
+import type { AuditService } from "@/server/services/auditService";
 
 export type { CreateArticleInput, CreateBundleArticleInput };
 
@@ -17,7 +21,32 @@ export class ArticleActorFacade {
     private readonly actor: Actor,
     private readonly articles: ArticleService,
     private readonly imports: ArticleImportService,
+    private readonly groups: GroupService,
+    private readonly audit: AuditService,
   ) {}
+
+  private requireMember(userId: string, groupId: string): void {
+    if (!this.groups.isMember(userId, groupId)) {
+      throw new PublicError("你不在该群组中");
+    }
+  }
+
+  private requireCanPublish(user: User, groupId: string): void {
+    if (user.is_muted) throw new PublicError("你已被禁言");
+    this.requireMember(user.id, groupId);
+    if (
+      this.groups.isGroupAdminOnly(groupId) &&
+      !this.actor.hasRole("administrator")
+    ) {
+      throw new PublicError("该群组仅管理员可以发言");
+    }
+  }
+
+  private requireAccess(userId: string, articleId: string) {
+    const article = this.articles.access(articleId);
+    this.requireMember(userId, article.group_id);
+    return article;
+  }
 
   async list(input: {
     view?: "all" | "bookmarked" | "recent";
@@ -26,12 +55,13 @@ export class ArticleActorFacade {
     groupId?: string;
   }): Promise<{ articles: ArticleWithMeta[]; hasMore: boolean }> {
     const user = await this.actor.requireFeature("articles");
-    return this.articles.list(user, input);
+    if (input.groupId) this.requireMember(user.id, input.groupId);
+    return this.articles.list(user.id, input);
   }
 
   async sidebar(): Promise<ArticleSidebarPayload> {
     const user = await this.actor.requireFeature("articles");
-    return this.articles.sidebar(user);
+    return this.articles.sidebar(user.id);
   }
 
   async createText(
@@ -39,7 +69,8 @@ export class ArticleActorFacade {
   ): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
-    return this.articles.createText(user, input);
+    this.requireCanPublish(user, input.group_id);
+    return this.articles.createText(user.id, input);
   }
 
   async createBundle(
@@ -47,18 +78,32 @@ export class ArticleActorFacade {
   ): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    return this.articles.createBundle(user, input);
+    this.requireCanPublish(user, input.group_id);
+    return this.articles.createBundle(user.id, input);
+  }
+
+  /** Authorize the multipart target before the HTTP adapter renders the file. */
+  async authorizeBundleUpload(groupId: string): Promise<void> {
+    const user = await this.actor.requireFeature("articles");
+    await this.actor.requireFeature("ebook_reader");
+    this.requireCanPublish(user, groupId);
   }
 
   async getMeta(articleId: string): Promise<{ article: ArticleWithMeta }> {
     const user = await this.actor.requireFeature("articles");
-    const result = this.articles.getMeta(user, articleId);
+    this.requireAccess(user.id, articleId);
+    const result = this.articles.getMeta(user.id, articleId);
     await this.actor.requireFeature(
       result.article.content_kind === "bundle"
         ? "ebook_reader"
         : "article_reader",
     );
     return result;
+  }
+
+  async bundleResource(articleId: string) {
+    await this.getMeta(articleId);
+    return this.articles.bundleResource(articleId);
   }
 
   async segment(input: { articleId: string; offset: number }): Promise<{
@@ -69,7 +114,8 @@ export class ArticleActorFacade {
   }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
-    return this.articles.segment(user, input);
+    this.requireAccess(user.id, input.articleId);
+    return this.articles.segment(input);
   }
 
   async openBundle(input: {
@@ -80,7 +126,8 @@ export class ArticleActorFacade {
   }) {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    return this.articles.openBundle(user, input);
+    this.requireAccess(user.id, input.articleId);
+    return this.articles.openBundle(input);
   }
 
   async fetchBundle(input: {
@@ -91,7 +138,8 @@ export class ArticleActorFacade {
   }) {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    return this.articles.fetchBundle(user, input);
+    this.requireAccess(user.id, input.articleId);
+    return this.articles.fetchBundle(input);
   }
 
   async setBookmark(
@@ -100,7 +148,8 @@ export class ArticleActorFacade {
     updatedAt: number,
   ): Promise<{ value: boolean; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
-    return this.articles.setBookmark(user, articleId, bookmarked, updatedAt);
+    this.requireAccess(user.id, articleId);
+    return this.articles.setBookmark(user.id, articleId, bookmarked, updatedAt);
   }
 
   async saveProgress(
@@ -110,8 +159,9 @@ export class ArticleActorFacade {
     merge: "override" | "furthest",
   ): Promise<{ offset: number; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
+    this.requireAccess(user.id, articleId);
     return this.articles.saveProgress(
-      user,
+      user.id,
       articleId,
       offset,
       updatedAt,
@@ -124,12 +174,25 @@ export class ArticleActorFacade {
     input: { seconds?: number; active?: boolean },
   ): Promise<void> {
     const user = await this.actor.requireFeature("articles");
-    this.articles.recordReading(user, articleId, input);
+    this.requireAccess(user.id, articleId);
+    this.articles.recordReading(user.id, articleId, input);
   }
 
   async delete(articleId: string): Promise<void> {
     const user = await this.actor.requireFeature("articles");
-    await this.articles.delete(user, articleId);
+    const article = this.requireAccess(user.id, articleId);
+    if (article.user_id !== user.id) {
+      const admin = this.actor.requireRole("community_manager");
+      await this.articles.delete(user.id, articleId);
+      this.audit.record({
+        actorId: admin.id,
+        action: "article.force_delete",
+        targetKind: "article",
+        targetId: articleId,
+      });
+      return;
+    }
+    await this.articles.delete(user.id, articleId);
   }
 
   async searchNetwork(query: string) {
@@ -141,6 +204,7 @@ export class ArticleActorFacade {
   async startNetworkDownload(bookId: string, groupId: string, title?: string) {
     const user = await this.actor.requireFeature("article_download");
     await this.actor.requireFeature("article_reader");
+    this.requireCanPublish(user, groupId);
     return { task: this.imports.start(user, bookId, groupId, title) };
   }
 

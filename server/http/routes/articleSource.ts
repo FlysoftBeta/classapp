@@ -1,33 +1,20 @@
-import { getDb } from "@/server/infra/db";
-import { findArticleRecord } from "@/server/data/articles";
 import {
   articleSourceSize,
   streamArticleSource,
 } from "@/server/infra/articleArtifacts";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
-import { requireActiveAuth } from "@/server/domain/policy/auth";
-import { assertCanAccessArticle } from "@/server/domain/policy/articles";
-import { hasFeature } from "@/shared/features";
+import { currentScope } from "@/server/runtime/scope";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireActiveAuth(req);
-  if ("error" in auth)
-    return Response.json({ error: auth.error }, { status: auth.status });
-  if (
-    !hasFeature(auth.user, "articles") ||
-    !hasFeature(auth.user, "ebook_reader")
-  ) {
-    return Response.json({ error: "无权限" }, { status: 403 });
-  }
-
   try {
     const { id } = await params;
-    const db = getDb();
-    assertCanAccessArticle(db, auth.user, id);
-    const article = findArticleRecord(db, id);
+    const article = await currentScope()
+      .facades()
+      .articles()
+      .bundleResource(id);
     if (!article || article.content_kind !== "bundle" || !article.source_path) {
       throw new PublicError("原始文档不存在");
     }

@@ -4,7 +4,6 @@ import type { User } from "@/shared/types/api";
 import { ClientBusyError, createTomatoClientPool } from "@/lib/tomato";
 import type { SearchBook } from "@/lib/tomato";
 import { createArticleService } from "./articlesService";
-import { assertCanCreateArticle } from "@/server/domain/policy/articles";
 import { BUILD_ID } from "@/server/infra/env";
 import { recordContainedServerIncident } from "./incidentService";
 
@@ -45,13 +44,13 @@ function toResult(book: SearchBook): NetworkArticleResult {
   };
 }
 
-const pool = createTomatoClientPool(
-  Number.parseInt(process.env.TOMATO_CLIENT_POOL_SIZE ?? "2", 10) || 2,
-  { timeoutMs: 30_000, retries: 4 },
-);
-
-export class ArticleImportService {
+/** Process-bound queue, network pool and task registry. */
+export class ArticleImportRuntime {
   private readonly tasks = new Map<string, ArticleImportTask>();
+  private readonly pool = createTomatoClientPool(
+    Number.parseInt(process.env.TOMATO_CLIENT_POOL_SIZE ?? "2", 10) || 2,
+    { timeoutMs: 30_000, retries: 4 },
+  );
 
   constructor(private readonly db: Database) {}
 
@@ -63,7 +62,7 @@ export class ArticleImportService {
     | { status: "busy"; retry_after_ms: number; ready_at: number }
   > {
     try {
-      const books = await pool.runInteractive(userId, "search", (client) =>
+      const books = await this.pool.runInteractive(userId, "search", (client) =>
         client.searchBooks(query, { pages: 1, timeoutMs: 45_000 }),
       );
       return { status: "ready", results: books.map(toResult) };
@@ -85,7 +84,6 @@ export class ArticleImportService {
     groupId: string,
     titleHint = "",
   ): ArticleImportTask {
-    assertCanCreateArticle(this.db, user, groupId);
     this.prune();
     const existing = [...this.tasks.values()].find(
       (task) =>
@@ -128,14 +126,14 @@ export class ArticleImportService {
     try {
       task.status = "downloading";
       task.updated_at = Date.now();
-      const catalog = await pool.runQueued("download", (client) =>
+      const catalog = await this.pool.runQueued("download", (client) =>
         client.getCatalog(task.book_id),
       );
       task.title = catalog.title;
       task.total = catalog.chapters.length;
       const parts: string[] = [];
       for (const chapter of catalog.chapters) {
-        const content = await pool.runQueued("download", (client) =>
+        const content = await this.pool.runQueued("download", (client) =>
           client.getChapter(chapter.chapterId),
         );
         parts.push(`${content.title}\n\n${content.text}`);
@@ -144,7 +142,7 @@ export class ArticleImportService {
         task.updated_at = Date.now();
       }
       const header = `${catalog.title}${catalog.author ? `\n作者：${catalog.author}` : ""}`;
-      const { article } = createArticleService(this.db).createText(user, {
+      const { article } = createArticleService(this.db).createText(user.id, {
         title: catalog.title,
         content: `${header}\n\n${parts.join("\n\n")}`,
         group_id: task.group_id,
@@ -180,12 +178,25 @@ export class ArticleImportService {
   }
 }
 
-const services = new WeakMap<Database, ArticleImportService>();
-export function createArticleImportService(db: Database): ArticleImportService {
-  let service = services.get(db);
-  if (!service) {
-    service = new ArticleImportService(db);
-    services.set(db, service);
+/** Request-bound business view of the process import runtime. */
+export class ArticleImportService {
+  constructor(private readonly runtime: ArticleImportRuntime) {}
+
+  search(userId: string, query: string) {
+    return this.runtime.search(userId, query);
   }
-  return service;
+
+  start(user: User, bookId: string, groupId: string, titleHint = "") {
+    return this.runtime.start(user, bookId, groupId, titleHint);
+  }
+
+  list(userId: string) {
+    return this.runtime.list(userId);
+  }
+}
+
+export function createArticleImportService(
+  runtime: ArticleImportRuntime,
+): ArticleImportService {
+  return new ArticleImportService(runtime);
 }

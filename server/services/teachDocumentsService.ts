@@ -4,13 +4,18 @@ import {
   insertTeachDocument,
   listExpiredTeachDocuments,
   listTeachDocuments,
+  findTeachDocument,
   type TeachDocumentType,
 } from "@/server/data/teachDocuments";
 import {
   copyTeachDocument,
+  readTeachDocumentBlob,
   removeTeachDocumentBlob,
 } from "@/server/infra/teachDocumentBlobs";
-import { recordContainedServerIncident } from "@/server/services/incidentService";
+import {
+  PublicError,
+  recordContainedServerIncident,
+} from "@/server/services/incidentService";
 import { BUILD_ID } from "@/server/infra/env";
 
 export interface OpenOfficeDocument {
@@ -27,6 +32,12 @@ export class TeachDocumentsService {
 
   list() {
     return listTeachDocuments(this.db);
+  }
+
+  async download(id: string) {
+    const document = findTeachDocument(this.db, id);
+    if (!document) throw new PublicError("文档不存在");
+    return { document, body: await readTeachDocumentBlob(document.blob_path) };
   }
 
   async capture(document: OpenOfficeDocument): Promise<void> {

@@ -7,46 +7,45 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import {
-  FEATURE_GATES,
-  FEATURE_GATE_LABELS,
-  hasFeature,
-  setFeature,
-  type FeatureGate,
+  FEATURES,
+  FEATURE_LABELS,
+  type Feature,
+  type UserFeatures,
 } from "@/shared/features";
 import { flexGap } from "@/client/lib/css";
 
 export type FeatureGateChange = "unchanged" | "enabled" | "disabled";
-export type FeatureGateChanges = Record<FeatureGate, FeatureGateChange>;
+export type FeatureGateChanges = Record<Feature, FeatureGateChange>;
 export type FeatureGateAggregateState = "enabled" | "mixed" | "disabled";
 export type FeatureGateAggregateStates = Record<
-  FeatureGate,
+  Feature,
   FeatureGateAggregateState
 >;
 
 export function createUnchangedFeatureGateChanges(): FeatureGateChanges {
   return Object.fromEntries(
-    FEATURE_GATES.map((gate) => [gate, "unchanged"]),
+    FEATURES.map((feature) => [feature, "unchanged"]),
   ) as FeatureGateChanges;
 }
 
-export function featureGateChangesFromMask(
-  featureMask: number,
+export function featureGateChangesFromFeatures(
+  features: UserFeatures,
 ): FeatureGateChanges {
   return Object.fromEntries(
-    FEATURE_GATES.map((gate) => [
-      gate,
-      hasFeature({ feature_mask: featureMask }, gate) ? "enabled" : "disabled",
+    FEATURES.map((feature) => [
+      feature,
+      features[feature] ? "enabled" : "disabled",
     ]),
   ) as FeatureGateChanges;
 }
 
 export function aggregateFeatureGateStates(
-  users: Array<{ feature_mask: number }>,
+  users: Array<{ features: UserFeatures }>,
 ): FeatureGateAggregateStates {
   return Object.fromEntries(
-    FEATURE_GATES.map((gate) => {
-      const enabledCount = users.filter((user) =>
-        hasFeature(user, gate),
+    FEATURES.map((feature) => {
+      const enabledCount = users.filter(
+        (user) => user.features[feature],
       ).length;
       const state: FeatureGateAggregateState =
         enabledCount === 0
@@ -54,27 +53,30 @@ export function aggregateFeatureGateStates(
           : enabledCount === users.length
             ? "enabled"
             : "mixed";
-      return [gate, state];
+      return [feature, state];
     }),
   ) as FeatureGateAggregateStates;
 }
 
 export function applyFeatureGateChanges(
-  featureMask: number,
+  features: UserFeatures,
   changes: FeatureGateChanges,
-): number {
-  return FEATURE_GATES.reduce((mask, gate) => {
-    const change = changes[gate];
-    return change === "unchanged"
-      ? mask
-      : setFeature(mask, gate, change === "enabled");
-  }, featureMask);
+): UserFeatures {
+  return Object.fromEntries(
+    FEATURES.map((feature) => {
+      const change = changes[feature];
+      return [
+        feature,
+        change === "unchanged" ? features[feature] : change === "enabled",
+      ];
+    }),
+  ) as UserFeatures;
 }
 
 interface FeatureGatesPanelProps {
   value: FeatureGateChanges;
   aggregateValue?: FeatureGateAggregateStates;
-  onChange: (gate: FeatureGate, change: FeatureGateChange) => void;
+  onChange: (feature: Feature, change: FeatureGateChange) => void;
   allowUnchanged?: boolean;
   title?: ReactNode;
   description?: ReactNode;
@@ -140,11 +142,11 @@ export function FeatureGatesPanel({
           bgcolor: "divider",
         }}
       >
-        {FEATURE_GATES.map((gate) => {
+        {FEATURES.map((feature) => {
           const aggregateState =
-            value[gate] === "unchanged"
-              ? (aggregateValue?.[gate] ?? "mixed")
-              : value[gate];
+            value[feature] === "unchanged"
+              ? (aggregateValue?.[feature] ?? "mixed")
+              : value[feature];
           const stateLabel = allowUnchanged
             ? STATE_LABELS[aggregateState]
             : aggregateState === "enabled"
@@ -152,7 +154,7 @@ export function FeatureGatesPanel({
               : "禁用";
           return (
             <Box
-              key={gate}
+              key={feature}
               sx={{
                 px: 1,
                 py: 0.25,
@@ -161,7 +163,7 @@ export function FeatureGatesPanel({
             >
               <FormControlLabel
                 sx={{ m: 0, width: "100%" }}
-                label={FEATURE_GATE_LABELS[gate]}
+                label={FEATURE_LABELS[feature]}
                 control={
                   <Checkbox
                     size="small"
@@ -169,10 +171,10 @@ export function FeatureGatesPanel({
                     indeterminate={allowUnchanged && aggregateState === "mixed"}
                     disabled={disabled || applying}
                     inputProps={{
-                      "aria-label": `${FEATURE_GATE_LABELS[gate]}：${stateLabel}`,
+                      "aria-label": `${FEATURE_LABELS[feature]}：${stateLabel}`,
                     }}
                     onChange={(_, checked) =>
-                      onChange(gate, checked ? "enabled" : "disabled")
+                      onChange(feature, checked ? "enabled" : "disabled")
                     }
                   />
                 }

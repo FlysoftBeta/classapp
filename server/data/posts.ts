@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import type { Post } from "@/shared/types/api";
+import type { PostEntity, UserMetadata } from "@/shared/types/api";
 import { getStickerEntry } from "@/server/infra/stickerLoader";
 import {
   loadStoredContent,
@@ -20,11 +20,7 @@ export interface PostRow {
   deleted_at: string | null;
   edited_at: string | null;
   created_at: string;
-  username?: string | null;
-  handle?: string | null;
-  group_name?: string | null;
-  reply_username?: string | null;
-  reply_handle?: string | null;
+  reply_user_id: string | null;
   reply_brief?: string | null;
 }
 
@@ -39,21 +35,12 @@ export interface PostAccessRow {
 export const POST_WITH_REPLY_SQL = `
   SELECT p.id, p.sequence, p.author_id AS user_id, p.conv_id, p.revision, p.brief,
     p.content_json, p.reply_to, p.deleted_at, p.edited_at, p.created_at,
-    COALESCE(u.username, du.username) AS username, u.handle,
-    r.brief AS reply_brief,
-    COALESCE(ru.username, rdu.username) AS reply_username,
-    ru.handle AS reply_handle
+    r.author_id AS reply_user_id, r.brief AS reply_brief
   FROM posts p
-  LEFT JOIN users u ON p.author_id = u.id
-    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-  LEFT JOIN deleted_users du ON p.author_id = du.id
   LEFT JOIN posts r ON p.reply_to = r.id
-  LEFT JOIN users ru ON r.author_id = ru.id
-    AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = ru.id)
-  LEFT JOIN deleted_users rdu ON r.author_id = rdu.id
 `;
 
-export function hydratePost(row: PostRow): Post {
+export function hydratePost(row: PostRow): PostEntity {
   const stored = loadStoredContent(row);
   const base = {
     id: row.id,
@@ -63,15 +50,11 @@ export function hydratePost(row: PostRow): Post {
     revision: row.revision,
     brief: row.brief,
     reply_to: row.reply_to,
+    reply_user_id: row.reply_user_id,
     deleted_at: row.deleted_at,
     edited_at: row.edited_at,
     created_at: row.created_at,
-    username: row.username,
-    handle: row.handle,
-    group_name: row.group_name,
-    reply_username: row.reply_username,
-    reply_handle: row.reply_handle,
-    reply_brief: row.reply_brief,
+    reply_brief: row.reply_brief ?? null,
   };
   switch (stored.type) {
     case "deleted":
@@ -96,7 +79,31 @@ export function hydratePost(row: PostRow): Post {
   }
 }
 
-export function truncatePosts(posts: Post[]): Post[] {
+export function postUserMetadata(
+  db: Database,
+  posts: readonly PostEntity[],
+): UserMetadata[] {
+  const ids = [
+    ...new Set(
+      posts
+        .flatMap((post) => [post.user_id, post.reply_user_id])
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  return db
+    .prepare(
+      `SELECT u.id,
+        CASE WHEN du.id IS NULL THEN u.handle ELSE NULL END AS handle,
+        COALESCE(du.username, u.username) AS username
+       FROM users u LEFT JOIN deleted_users du ON du.id = u.id
+       WHERE u.id IN (${placeholders})`,
+    )
+    .all(...ids) as UserMetadata[];
+}
+
+export function truncatePosts(posts: PostEntity[]): PostEntity[] {
   return posts.map((post) => {
     let out = post;
     if (post.reply_brief && post.reply_brief.length > 200) {
@@ -160,7 +167,7 @@ export function getPostRowid(db: Database, id: string): number | null {
   return row?.sequence ?? null;
 }
 
-export function getPostById(db: Database, id: string): Post | null {
+export function getPostById(db: Database, id: string): PostEntity | null {
   const row = db.prepare(`${POST_WITH_REPLY_SQL} WHERE p.id = ?`).get(id) as
     PostRow | undefined;
   return row ? hydratePost(row) : null;
@@ -180,7 +187,7 @@ function queryPostsForConv(
   db: Database,
   convId: string,
   input: PageQuery,
-): Post[] {
+): PostEntity[] {
   const rows = db
     .prepare(
       `${POST_WITH_REPLY_SQL}
@@ -196,7 +203,7 @@ export function queryFeedPosts(
   db: Database,
   userId: string,
   input: PageQuery,
-): Post[] {
+): PostEntity[] {
   const rows = db
     .prepare(
       `${POST_WITH_REPLY_SQL}
@@ -224,7 +231,7 @@ export function queryGroupPosts(
   db: Database,
   convId: string,
   input: PageQuery,
-): Post[] {
+): PostEntity[] {
   return queryPostsForConv(db, convId, input);
 }
 
@@ -232,7 +239,7 @@ export function queryDmPosts(
   db: Database,
   convId: string,
   input: PageQuery,
-): Post[] {
+): PostEntity[] {
   return queryPostsForConv(db, convId, input);
 }
 
@@ -308,7 +315,7 @@ export function purgePostsByUser(
 export function listAdminPosts(
   db: Database,
   input: { q?: string; userId?: string; offset?: number },
-): { posts: Post[]; total: number } {
+): { posts: PostEntity[]; total: number } {
   const q = input.q ?? "";
   const userId = input.userId ?? "";
   const offset = input.offset ?? 0;
@@ -324,21 +331,7 @@ export function listAdminPosts(
   }
   const rows = db
     .prepare(
-      `SELECT p.id, p.sequence, p.author_id AS user_id, p.conv_id, p.revision, p.brief,
-              p.content_json, p.reply_to, p.deleted_at, p.edited_at, p.created_at,
-              COALESCE(u.username, du.username) AS username, u.handle,
-              g.name AS group_name,
-              r.brief AS reply_brief,
-              COALESCE(ru.username, rdu.username) AS reply_username,
-              ru.handle AS reply_handle
-       FROM posts p
-       LEFT JOIN users u ON p.author_id = u.id
-         AND NOT EXISTS (SELECT 1 FROM deleted_users x WHERE x.id = u.id)
-       LEFT JOIN deleted_users du ON p.author_id = du.id
-       LEFT JOIN groups g ON g.conv_id = p.conv_id
-       LEFT JOIN posts r ON p.reply_to = r.id
-       LEFT JOIN users ru ON r.author_id = ru.id
-       LEFT JOIN deleted_users rdu ON r.author_id = rdu.id
+      `${POST_WITH_REPLY_SQL}
        ${where} ORDER BY p.sequence DESC LIMIT 50 OFFSET ?`,
     )
     .all(...args, offset) as PostRow[];

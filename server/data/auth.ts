@@ -1,22 +1,22 @@
 import type BetterSqlite3 from "better-sqlite3";
 import type { User } from "@/shared/types/api";
+import { hydrateUser, type UserRow } from "@/server/data/users";
 
 export function findUserByPinHash(
   db: BetterSqlite3.Database,
   pinHash: string,
 ): User | null {
-  return (
-    (db
-      .prepare(
-        `SELECT u.id, u.handle, u.username, u.feature_mask,
+  const row = db
+    .prepare(
+      `SELECT u.id, u.handle, u.username, u.feature_bitset,
          CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
          u.muted_until, u.banned_until, u.created_at
          FROM user_pins up
          JOIN users u ON up.user_id = u.id
          WHERE up.pin_hash = ?`,
-      )
-      .get(pinHash) as User | undefined) ?? null
-  );
+    )
+    .get(pinHash) as UserRow | undefined;
+  return row ? hydrateUser(db, row) : null;
 }
 
 export function replaceClientUserSession(
@@ -70,7 +70,7 @@ export function findRecentSessionByClientId(
 ): { user: User; token: string } | null {
   const row = db
     .prepare(
-      `SELECT u.id, u.handle, u.username, u.feature_mask,
+      `SELECT u.id, u.handle, u.username, u.feature_bitset,
        CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
        u.muted_until, u.banned_until, u.created_at, s.token
        FROM sessions s
@@ -78,12 +78,12 @@ export function findRecentSessionByClientId(
        WHERE s.client_id = ? AND s.created_at > datetime('now', '-1 day')
        ORDER BY s.created_at DESC LIMIT 1`,
     )
-    .get(clientId) as (User & { token: string }) | undefined;
+    .get(clientId) as (UserRow & { token: string }) | undefined;
   if (!row) {
     return null;
   }
   const { token, ...user } = row;
-  return { user: user as User, token };
+  return { user: hydrateUser(db, user), token };
 }
 
 export function deleteSessionByToken(
@@ -103,15 +103,27 @@ export function findUserBySessionToken(
   db: BetterSqlite3.Database,
   token: string,
 ): User | null {
-  return (
-    (db
-      .prepare(
-        `SELECT u.id, u.handle, u.username, u.feature_mask,
+  const row = db
+    .prepare(
+      `SELECT u.id, u.handle, u.username, u.feature_bitset,
          CASE WHEN u.is_muted = 1 AND (u.muted_until IS NULL OR u.muted_until > datetime('now')) THEN 1 ELSE 0 END AS is_muted,
          u.muted_until, u.banned_until, u.created_at
      FROM sessions s JOIN users u ON s.user_id = u.id
      WHERE s.token = ? AND s.created_at > datetime('now', '-1 day')`,
-      )
-      .get(token) as User | undefined) ?? null
-  );
+    )
+    .get(token) as UserRow | undefined;
+  return row ? hydrateUser(db, row) : null;
+}
+
+export function findSessionIdentityByToken(
+  db: BetterSqlite3.Database,
+  token: string,
+): { userId: string; clientId: string } | null {
+  const row = db
+    .prepare(
+      `SELECT user_id, client_id FROM sessions
+       WHERE token = ? AND created_at > datetime('now', '-1 day')`,
+    )
+    .get(token) as { user_id: string; client_id: string } | undefined;
+  return row ? { userId: row.user_id, clientId: row.client_id } : null;
 }

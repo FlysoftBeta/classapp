@@ -1,4 +1,4 @@
-import { withActionSession, expectString } from "./_base";
+import { withActionScope, expectString } from "./_base";
 import { ContractViolationError } from "@/server/services/incidentService";
 import { OFFLINE_WRITABLE_USER_CONFIG } from "@/shared/userConfig/keys";
 import type { ActionInput } from "@/shared/protocol/actions";
@@ -14,27 +14,24 @@ function keyOf(value: unknown): string {
 export async function fetchVersionedUserConfigAction(
   input: ActionInput<"fetchVersionedUserConfigAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     if (!Array.isArray(input.keys))
       throw new ContractViolationError("配置键无效");
-    return (await (await session.asActor()).versionedUserConfig()).get(
-      input.keys.map(keyOf),
-    );
+    return scope.facades().versionedUserConfig().get(input.keys.map(keyOf));
   });
 }
 
 export async function patchVersionedUserConfigAction(
   input: ActionInput<"patchVersionedUserConfigAction">,
 ) {
-  return withActionSession(async (session) => {
+  return withActionScope(async (scope) => {
     const key = keyOf(input.key);
     const value = expectString(input.value, "配置值无效", { trim: false });
     if (!Number.isSafeInteger(input.updatedAt) || input.updatedAt < 0)
       throw new ContractViolationError("配置时间戳无效");
-    return (await (await session.asActor()).versionedUserConfig()).set(
-      key,
-      value,
-      input.updatedAt,
-    );
+    return scope
+      .facades()
+      .versionedUserConfig()
+      .set(key, value, input.updatedAt);
   });
 }

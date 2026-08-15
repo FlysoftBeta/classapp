@@ -5,11 +5,8 @@ import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
-import {
-  ADMIN_FEATURE_MASK,
-  DEFAULT_FEATURE_MASK,
-  featureBit,
-} from "@/shared/features";
+import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
+import { ADMIN_ROLES } from "@/shared/authority";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
 
@@ -25,7 +22,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 19;
+const CURRENT_SCHEMA_VERSION = 21;
 
 type SchemaMigration = (db: Database) => void;
 
@@ -117,8 +114,8 @@ const AI_SCHEMA = `
     model_placeholder TEXT,
     provider_model    TEXT,
     reasoning_effort  TEXT,
-    reserved_credits  INTEGER NOT NULL DEFAULT 0,
-    charged_credits   INTEGER NOT NULL DEFAULT 0,
+    reserved_credit_micros INTEGER NOT NULL DEFAULT 0,
+    charged_credit_micros  INTEGER NOT NULL DEFAULT 0,
     input_tokens      INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens     INTEGER NOT NULL DEFAULT 0,
@@ -172,18 +169,18 @@ const AI_SCHEMA = `
   );
 
   CREATE TABLE IF NOT EXISTS ai_credit_accounts (
-    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    balance    INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
-    reserved   INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    user_id                TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    top_up_credit_micros   INTEGER NOT NULL DEFAULT 0 CHECK (top_up_credit_micros >= 0),
+    reserved_credit_micros INTEGER NOT NULL DEFAULT 0 CHECK (reserved_credit_micros >= 0),
+    updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS ai_credit_ledger (
     id              TEXT PRIMARY KEY,
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     kind            TEXT NOT NULL CHECK (kind IN ('top_up', 'reserve', 'settle', 'release')),
-    delta           INTEGER NOT NULL,
-    balance_after   INTEGER NOT NULL CHECK (balance_after >= 0),
+    delta_credit_micros        INTEGER NOT NULL,
+    top_up_after_credit_micros INTEGER NOT NULL CHECK (top_up_after_credit_micros >= 0),
     run_id          TEXT REFERENCES ai_runs(id) ON DELETE SET NULL,
     admin_id        TEXT REFERENCES users(id) ON DELETE SET NULL,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -192,6 +189,57 @@ const AI_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_ai_credit_ledger_user_created
     ON ai_credit_ledger(user_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS ai_billing_policy (
+    id                         INTEGER PRIMARY KEY CHECK (id = 1),
+    daily_credit_micros        INTEGER NOT NULL CHECK (daily_credit_micros >= 0),
+    weekly_credit_micros       INTEGER NOT NULL CHECK (weekly_credit_micros >= 0),
+    default_plan_duration_days INTEGER NOT NULL CHECK (default_plan_duration_days > 0),
+    updated_by                 TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO ai_billing_policy
+    (id, daily_credit_micros, weekly_credit_micros, default_plan_duration_days)
+    VALUES (1, 100000000, 300000000, 30);
+
+  CREATE TABLE IF NOT EXISTS ai_plan_enrollments (
+    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    starts_at  TEXT NOT NULL,
+    ends_at    TEXT NOT NULL,
+    assigned_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (ends_at > starts_at)
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_credit_reservations (
+    operation_id TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id       TEXT REFERENCES ai_runs(id) ON DELETE SET NULL,
+    amount_credit_micros INTEGER NOT NULL CHECK (amount_credit_micros >= 0),
+    status       TEXT NOT NULL CHECK (status IN ('active', 'settled', 'released')),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_credit_reservations_user_status
+    ON ai_credit_reservations(user_id, status);
+
+  CREATE TABLE IF NOT EXISTS ai_credit_usage (
+    id                  TEXT PRIMARY KEY,
+    operation_id        TEXT NOT NULL UNIQUE,
+    user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id              TEXT REFERENCES ai_runs(id) ON DELETE SET NULL,
+    day_key             TEXT NOT NULL,
+    week_key            TEXT NOT NULL,
+    charged_credit_micros INTEGER NOT NULL CHECK (charged_credit_micros >= 0),
+    plan_credit_micros    INTEGER NOT NULL CHECK (plan_credit_micros >= 0),
+    top_up_credit_micros  INTEGER NOT NULL CHECK (top_up_credit_micros >= 0),
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (charged_credit_micros = plan_credit_micros + top_up_credit_micros)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_credit_usage_user_day
+    ON ai_credit_usage(user_id, day_key);
+  CREATE INDEX IF NOT EXISTS idx_ai_credit_usage_week
+    ON ai_credit_usage(week_key);
 
   CREATE TABLE IF NOT EXISTS ai_file_operations (
     id              TEXT PRIMARY KEY,
@@ -215,8 +263,77 @@ const MIGRATIONS = new Map<number, SchemaMigration>([
     18,
     (db) => {
       db.exec(AI_SCHEMA);
-      const aiBit = featureBit("ai");
-      db.prepare("UPDATE users SET feature_mask = feature_mask | ?").run(aiBit);
+      // Schema v18 still used the legacy bit layout where bit 0 was admin.
+      db.prepare("UPDATE users SET feature_mask = feature_mask | ?").run(
+        1 << 7,
+      );
+    },
+  ],
+  [
+    19,
+    (db) => {
+      db.exec(`
+        ALTER TABLE users RENAME COLUMN feature_mask TO feature_bitset;
+        CREATE TABLE user_admin_roles (
+          user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role       TEXT NOT NULL CHECK (role IN (${ADMIN_ROLES.map((role) => `'${role}'`).join(", ")})),
+          granted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, role)
+        );
+        CREATE INDEX idx_user_admin_roles_role
+          ON user_admin_roles(role, user_id);
+      `);
+      const oldAdmins = db
+        .prepare(
+          "SELECT id FROM users WHERE (feature_bitset & 1) != 0 ORDER BY created_at, id",
+        )
+        .all() as Array<{ id: string }>;
+      const insert = db.prepare(
+        `INSERT INTO user_admin_roles (user_id, role, granted_by)
+         VALUES (?, ?, NULL)`,
+      );
+      for (const admin of oldAdmins) {
+        for (const role of ADMIN_ROLES) {
+          if (role !== "root") insert.run(admin.id, role);
+        }
+      }
+      if (oldAdmins[0]) insert.run(oldAdmins[0].id, "root");
+      db.exec(`
+        UPDATE users SET feature_bitset = feature_bitset >> 1;
+        ALTER TABLE users DROP COLUMN role;
+      `);
+    },
+  ],
+  [
+    20,
+    (db) => {
+      const columns = db.prepare("PRAGMA table_info(ai_runs)").all() as Array<{
+        name: string;
+      }>;
+      const legacy = columns.some(
+        (column) => column.name === "reserved_credits",
+      );
+      if (legacy) {
+        db.exec(`
+          ALTER TABLE ai_runs RENAME COLUMN reserved_credits TO reserved_credit_micros;
+          ALTER TABLE ai_runs RENAME COLUMN charged_credits TO charged_credit_micros;
+          ALTER TABLE ai_credit_accounts RENAME COLUMN balance TO top_up_credit_micros;
+          ALTER TABLE ai_credit_accounts RENAME COLUMN reserved TO reserved_credit_micros;
+          ALTER TABLE ai_credit_ledger RENAME COLUMN delta TO delta_credit_micros;
+          ALTER TABLE ai_credit_ledger RENAME COLUMN balance_after TO top_up_after_credit_micros;
+          UPDATE ai_runs SET
+            reserved_credit_micros = reserved_credit_micros * 1000000,
+            charged_credit_micros = charged_credit_micros * 1000000;
+          UPDATE ai_credit_accounts SET
+            top_up_credit_micros = top_up_credit_micros * 1000000,
+            reserved_credit_micros = reserved_credit_micros * 1000000;
+          UPDATE ai_credit_ledger SET
+            delta_credit_micros = delta_credit_micros * 1000000,
+            top_up_after_credit_micros = top_up_after_credit_micros * 1000000;
+        `);
+      }
+      db.exec(AI_SCHEMA);
     },
   ],
 ]);
@@ -279,13 +396,34 @@ function installSchema(db: Database): void {
       id           TEXT PRIMARY KEY,
       handle       TEXT UNIQUE NOT NULL,
       username     TEXT NOT NULL,
-      role         TEXT NOT NULL DEFAULT 'user',
-      feature_mask INTEGER NOT NULL DEFAULT ${DEFAULT_FEATURE_MASK},
+      feature_bitset INTEGER NOT NULL DEFAULT ${DEFAULT_FEATURE_BITSET},
       is_muted     INTEGER NOT NULL DEFAULT 0,
       muted_until  TEXT,
       banned_until TEXT,
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS user_admin_roles (
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role       TEXT NOT NULL CHECK (role IN (${ADMIN_ROLES.map((role) => `'${role}'`).join(", ")})),
+      granted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, role)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_admin_roles_role
+      ON user_admin_roles(role, user_id);
+
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id           TEXT PRIMARY KEY,
+      actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+      action       TEXT NOT NULL,
+      target_kind  TEXT NOT NULL,
+      target_id    TEXT,
+      details_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(details_json)),
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created
+      ON admin_audit_log(created_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS deleted_users (
       id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -725,7 +863,9 @@ function ensureDefaultGroup(db: Database) {
 
 function ensureAdminUser(db: Database) {
   const existing = db
-    .prepare("SELECT id FROM users WHERE (feature_mask & 1) != 0 LIMIT 1")
+    .prepare(
+      "SELECT user_id AS id FROM user_admin_roles WHERE role = 'root' LIMIT 1",
+    )
     .get();
   if (existing) return;
 
@@ -742,8 +882,12 @@ function ensureAdminUser(db: Database) {
 
   db.transaction(() => {
     db.prepare(
-      "INSERT INTO users (id, handle, username, role, feature_mask) VALUES (?, 'admin', '管理员', 'admin', ?)",
-    ).run(id, ADMIN_FEATURE_MASK);
+      "INSERT INTO users (id, handle, username, feature_bitset) VALUES (?, 'admin', '管理员', ?)",
+    ).run(id, DEFAULT_FEATURE_BITSET);
+    const grant = db.prepare(
+      "INSERT INTO user_admin_roles (user_id, role, granted_by) VALUES (?, ?, NULL)",
+    );
+    for (const role of ADMIN_ROLES) grant.run(id, role);
     db.prepare(
       "INSERT INTO user_pins (id, user_id, pin_hash) VALUES (?, ?, ?)",
     ).run(crypto.randomUUID(), id, pinHash);

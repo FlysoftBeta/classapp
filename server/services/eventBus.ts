@@ -1,14 +1,13 @@
 /**
  * Process-local event bus for WebSocket fan-out.
  *
- * Subscribers live on globalThis so dynamically loaded service chunks share
- * one bus with the WebSocket protocol runtime.
+ * The process Runtime owns the subscriber registry. Module-level helpers are
+ * retained as the domain-event API used by request Services.
  */
 
 import type { EventData, ServerEventName } from "@/shared/protocol/events";
 import { eventContracts } from "@/shared/protocol/events";
-import { getDb } from "@/server/infra/db";
-import { BUILD_ID } from "@/server/infra/env";
+import type { Database } from "better-sqlite3";
 import {
   ContractViolationError,
   createIncidentService,
@@ -25,35 +24,83 @@ export type BusEvent = {
 
 type Subscriber = (e: BusEvent) => void;
 
-declare global {
-  var __classappEventBus: Map<string, Set<Subscriber>> | undefined;
+export class EventBusRuntime {
+  private readonly subscribers = new Map<string, Set<Subscriber>>();
+
+  constructor(
+    private readonly db: Database,
+    private readonly buildId: string,
+  ) {}
+
+  subscribe(channels: string[], fn: Subscriber): () => void {
+    for (const channel of channels) {
+      let set = this.subscribers.get(channel);
+      if (!set) {
+        set = new Set();
+        this.subscribers.set(channel, set);
+      }
+      set.add(fn);
+    }
+    return () => {
+      for (const channel of channels) {
+        const set = this.subscribers.get(channel);
+        if (!set) continue;
+        set.delete(fn);
+        if (set.size === 0) this.subscribers.delete(channel);
+      }
+    };
+  }
+
+  publish<K extends ServerEventName>(
+    channel: string,
+    kind: K,
+    data: EventData<K>,
+  ): void {
+    const parsed = eventContracts[kind].safeParse(data);
+    if (!parsed.success) {
+      throw new ContractViolationError(
+        `${kind} Event payload 不符合契约`,
+        parsed.error.issues,
+      );
+    }
+    const set = this.subscribers.get(channel);
+    if (!set) return;
+    const evt = { kind, channel, data: parsed.data } as BusEvent;
+    let uncaptured: unknown = null;
+    for (const fn of set) {
+      try {
+        fn(evt);
+      } catch (error) {
+        try {
+          createIncidentService(this.db, this.buildId).capture({
+            environment: "server",
+            error,
+            context: { component: "event-bus", event: kind, channel },
+          });
+        } catch (captureError) {
+          console.error("[EventBus] Incident capture failed", captureError);
+          console.error("[EventBus] original subscriber failure", error);
+          uncaptured ??= error;
+        }
+      }
+    }
+    if (uncaptured) throw uncaptured;
+  }
 }
 
-function subscribers(): Map<string, Set<Subscriber>> {
-  if (!globalThis.__classappEventBus) {
-    globalThis.__classappEventBus = new Map();
-  }
-  return globalThis.__classappEventBus;
+let activeRuntime: EventBusRuntime | null = null;
+
+export function bindEventBusRuntime(runtime: EventBusRuntime): void {
+  activeRuntime = runtime;
+}
+
+function runtime(): EventBusRuntime {
+  if (!activeRuntime) throw new Error("EventBus Runtime is unavailable");
+  return activeRuntime;
 }
 
 export function subscribe(channels: string[], fn: Subscriber): () => void {
-  const subs = subscribers();
-  for (const ch of channels) {
-    let set = subs.get(ch);
-    if (!set) {
-      set = new Set();
-      subs.set(ch, set);
-    }
-    set.add(fn);
-  }
-  return () => {
-    for (const ch of channels) {
-      const set = subs.get(ch);
-      if (!set) continue;
-      set.delete(fn);
-      if (set.size === 0) subs.delete(ch);
-    }
-  };
+  return runtime().subscribe(channels, fn);
 }
 
 export function publish<K extends ServerEventName>(
@@ -61,39 +108,7 @@ export function publish<K extends ServerEventName>(
   kind: K,
   data: EventData<K>,
 ): void {
-  const parsed = eventContracts[kind].safeParse(data);
-  if (!parsed.success) {
-    // The Action/background boundary records this panic. Keeping it unchecked
-    // prevents a malformed server event from being mistaken for client state.
-    throw new ContractViolationError(
-      `${kind} Event payload 不符合契约`,
-      parsed.error.issues,
-    );
-  }
-  const set = subscribers().get(channel);
-  if (!set) return;
-  const evt = { kind, channel, data: parsed.data } as BusEvent;
-  let uncaptured: unknown = null;
-  for (const fn of set) {
-    try {
-      fn(evt);
-    } catch (error) {
-      // Fan-out is a containment boundary: one subscriber must not suppress
-      // delivery to the others, but its panic still needs a durable Incident.
-      try {
-        createIncidentService(getDb(), BUILD_ID).capture({
-          environment: "server",
-          error,
-          context: { component: "event-bus", event: kind, channel },
-        });
-      } catch (captureError) {
-        console.error("[EventBus] Incident capture failed", captureError);
-        console.error("[EventBus] original subscriber failure", error);
-        uncaptured ??= error;
-      }
-    }
-  }
-  if (uncaptured) throw uncaptured;
+  runtime().publish(channel, kind, data);
 }
 
 // ── Channel helpers ──────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { getDb } from "./db";
+import type { Database } from "better-sqlite3";
 import { zipSingleFile } from "./archive";
 import { PublicError } from "@/server/services/incidentService";
 
@@ -49,7 +49,7 @@ export function backupFilePath(name: string): string {
 }
 
 /** Snapshot data.db via SQLite backup API; returns the backup filename. */
-export async function createDbBackup(): Promise<string | null> {
+export async function createDbBackup(db: Database): Promise<string | null> {
   if (!fs.existsSync(DB_PATH)) return null;
 
   ensureBackupDir();
@@ -58,7 +58,6 @@ export async function createDbBackup(): Promise<string | null> {
   const dest = backupFilePath(name);
 
   try {
-    const db = getDb();
     await db.backup(dest);
   } catch (e) {
     throw new PublicError("数据库备份失败", "SQLite backup failed", e);

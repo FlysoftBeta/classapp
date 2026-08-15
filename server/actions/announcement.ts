@@ -1,14 +1,12 @@
-import { withActionSession } from "./_base";
+import { withActionScope } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 export async function fetchAnnouncementAction() {
-  return withActionSession(async (session) =>
-    (await (await session.asActor()).announcement()).get(),
-  );
+  return withActionScope(async (scope) => scope.facades().announcement().get());
 }
 export async function acknowledgeAnnouncementAction(
   input: ActionInput<"acknowledgeAnnouncementAction">,
 ) {
-  return withActionSession(async (session) =>
-    (await (await session.asActor()).announcement()).acknowledge(input),
+  return withActionScope(async (scope) =>
+    scope.facades().announcement().acknowledge(input),
   );
 }

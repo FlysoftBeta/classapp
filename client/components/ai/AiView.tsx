@@ -268,7 +268,9 @@ export default function AiView({
             {detail?.conversation.title ?? "新 AI 对话"}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {credits.balance} credits 可用 · 自动选择模型与思考强度
+            今日剩余 {Math.max(0, 100 - credits.plan.daily.used_percent)}% ·
+            本周剩余 {Math.max(0, 100 - credits.plan.weekly.used_percent)}% ·
+            额外 {credits.top_up} credits
           </Typography>
         </Box>
         {detail?.active_run && (

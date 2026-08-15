@@ -1,12 +1,5 @@
-import { getDb } from "@/server/infra/db";
-import { createAdminSystemService } from "@/server/services/adminSystemService";
-import { createClientService } from "@/server/services/clientsService";
 import { PublicError } from "@/server/services/incidentService";
-import { createAppStateService } from "@/server/services/appStateService";
-import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
-import { createAnnouncementService } from "@/server/services/announcementService";
-import { createTeachDocumentsService } from "@/server/services/teachDocumentsService";
-import { expectBoolean, expectString, withActionSession } from "./_base";
+import { expectString, withActionScope } from "./_base";
 import type { ActionInput } from "@/shared/protocol/actions";
 
 function parseOffset(value: unknown): number {
@@ -33,8 +26,8 @@ function parsePositiveHours(value: unknown, field: string): number {
 export async function adminFetchUsersAction(
   input?: ActionInput<"adminFetchUsersAction">,
 ) {
-  return withActionSession(async (session) => {
-    const users = await (await session.asActor()).users();
+  return withActionScope(async (scope) => {
+    const users = scope.facades().users();
     return users.list({
       q: typeof input?.q === "string" ? input.q : "",
       offset: parseOffset(input?.offset),
@@ -45,11 +38,10 @@ export async function adminFetchUsersAction(
 export async function adminCreateUserAction(
   input: ActionInput<"adminCreateUserAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const users = await actor.users();
+  return withActionScope(async (scope) => {
+    const users = scope.facades().users();
     if (input.ghost) {
-      return (await actor.ghostUsers()).create();
+      return scope.facades().ghostUsers().create();
     }
     return { user: await users.create(input) };
   });
@@ -58,14 +50,15 @@ export async function adminCreateUserAction(
 export async function adminUpdateUserAction(
   input: ActionInput<"adminUpdateUserAction">,
 ) {
-  return withActionSession(async (session) => {
-    const users = await (await session.asActor()).users();
+  return withActionScope(async (scope) => {
+    const users = scope.facades().users();
     return {
       user: await users.update({
         userId: expectString(input.userId, "干员不存在"),
         handle: input.handle,
         username: input.username,
-        feature_mask: input.feature_mask,
+        features: input.features,
+        roles: input.roles,
         pin: input.pin,
         mute_hours:
           input.mute_hours !== undefined
@@ -82,19 +75,38 @@ export async function adminUpdateUserAction(
   });
 }
 
+export async function adminBatchUpdateUserFeaturesAction(
+  input: ActionInput<"adminBatchUpdateUserFeaturesAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().users().batchUpdateFeatures(input.updates),
+  );
+}
+
 export async function adminDeleteUserAction(
   input: ActionInput<"adminDeleteUserAction">,
 ) {
-  return withActionSession(async (session) => {
-    const users = await (await session.asActor()).users();
+  return withActionScope(async (scope) => {
+    const users = scope.facades().users();
     await users.remove(expectString(input.userId, "干员不存在"), input.mode);
     return { ok: true as const };
   });
 }
 
+export async function adminFetchAuditLogAction(
+  input?: ActionInput<"adminFetchAuditLogAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .audit()
+      .list(input?.offset ?? 0),
+  );
+}
+
 export async function adminFetchGhostUsersAction() {
-  return withActionSession(async (session) => {
-    const ghostUsers = await (await session.asActor()).ghostUsers();
+  return withActionScope(async (scope) => {
+    const ghostUsers = scope.facades().ghostUsers();
     return { ghosts: await ghostUsers.list() };
   });
 }
@@ -102,8 +114,8 @@ export async function adminFetchGhostUsersAction() {
 export async function adminDeleteGhostUserAction(
   id: ActionInput<"adminDeleteGhostUserAction">,
 ) {
-  return withActionSession(async (session) => {
-    const ghostUsers = await (await session.asActor()).ghostUsers();
+  return withActionScope(async (scope) => {
+    const ghostUsers = scope.facades().ghostUsers();
     await ghostUsers.delete(expectString(id, "缺少 id"));
     return { ok: true as const };
   });
@@ -112,19 +124,17 @@ export async function adminDeleteGhostUserAction(
 export async function adminFetchGroupsAction(
   input?: ActionInput<"adminFetchGroupsAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    return (await actor.groups()).adminList(parseOffset(input?.offset));
+  return withActionScope(async (scope) => {
+    return scope.facades().groups().adminList(parseOffset(input?.offset));
   });
 }
 
 export async function adminCreateGroupAction(
   input: ActionInput<"adminCreateGroupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
+  return withActionScope(async (scope) => {
     return {
-      group: await (await actor.groups()).adminCreate(input),
+      group: await scope.facades().groups().adminCreate(input),
     };
   });
 }
@@ -132,9 +142,8 @@ export async function adminCreateGroupAction(
 export async function adminUpdateGroupAction(
   input: ActionInput<"adminUpdateGroupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    const groups = await actor.groups();
+  return withActionScope(async (scope) => {
+    const groups = scope.facades().groups();
     const groupId = expectString(input.groupId, "群组不存在");
     if (input.action === "add_member") {
       await groups.adminAddMember(
@@ -170,34 +179,11 @@ export async function adminUpdateGroupAction(
 export async function adminDeleteGroupAction(
   groupId: ActionInput<"adminDeleteGroupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await (
-      await actor.groups()
-    ).adminDelete(expectString(groupId, "群组不存在"));
-    return { ok: true as const };
-  });
-}
-
-export async function adminFetchPostsAction(
-  input?: ActionInput<"adminFetchPostsAction">,
-) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    return (await actor.posts()).adminList({
-      q: typeof input?.q === "string" ? input.q : "",
-      userId: typeof input?.user === "string" ? input.user : "",
-      offset: parseOffset(input?.offset),
-    });
-  });
-}
-
-export async function adminDeletePostAction(
-  postId: ActionInput<"adminDeletePostAction">,
-) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await (await actor.posts()).adminDelete(expectString(postId, "帖子不存在"));
+  return withActionScope(async (scope) => {
+    await scope
+      .facades()
+      .groups()
+      .adminDelete(expectString(groupId, "群组不存在"));
     return { ok: true as const };
   });
 }
@@ -205,285 +191,149 @@ export async function adminDeletePostAction(
 export async function adminFetchClientsAction(
   input?: ActionInput<"adminFetchClientsAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return createClientService(getDb()).list(
-      parseOffset(input?.offset),
-      50,
-      typeof input?.q === "string" ? input.q : "",
-    );
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .administration()
+      .listClients(
+        parseOffset(input?.offset),
+        typeof input?.q === "string" ? input.q : "",
+      );
   });
 }
 
 export async function adminToggleClientLockAction(
   input: ActionInput<"adminToggleClientLockAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const clients = createClientService(getDb());
+  return withActionScope(async (scope) => {
     const id = expectString(input.id, "缺少 id");
-    if (input.action === "lock") {
-      clients.lock(id);
-    } else if (input.action === "unlock") {
-      try {
-        clients.unlock(id);
-      } catch (error) {
-        throw new PublicError(
-          "无法加入白名单",
-          "client promotion failed",
-          error,
-        );
-      }
-    } else {
-      throw new PublicError("无效 action");
-    }
-    return { ok: true as const };
+    return scope
+      .facades()
+      .administration()
+      .setClientLock(id, input.action === "lock");
   });
 }
 
 export async function adminDeleteClientAction(
   id: ActionInput<"adminDeleteClientAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const deleted = createClientService(getDb()).delete(
-      expectString(id, "缺少 id"),
-    );
-    if (!deleted) {
-      throw new PublicError("客户端不存在");
-    }
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .administration()
+      .deleteClient(expectString(id, "缺少 id"));
   });
 }
 
 export async function adminPromoteClientAction(
   id: ActionInput<"adminPromoteClientAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    try {
-      createClientService(getDb()).promote(expectString(id, "缺少 id"));
-    } catch (error) {
-      throw new PublicError("无法保留客户端", "client promotion failed", error);
-    }
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .administration()
+      .promoteClient(expectString(id, "缺少 id"));
   });
 }
 
 export async function adminUpdateClientAction(
   input: ActionInput<"adminUpdateClientAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    try {
-      createClientService(getDb()).updateProps(
-        expectString(input.id, "缺少 id"),
-        {
-          remark: input.remark,
-          whitelisted: input.whitelisted,
-          bound_user_id: input.bound_user_id,
-        },
-      );
-    } catch (error) {
-      throw new PublicError(
-        "客户端属性保存失败",
-        "client update failed",
-        error,
-      );
-    }
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .administration()
+      .updateClient(expectString(input.id, "缺少 id"), {
+        remark: input.remark,
+        whitelisted: input.whitelisted,
+        bound_user_id: input.bound_user_id,
+      });
   });
 }
 
 export async function adminWhitelistCurrentClientAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const clientId = await actor.clientId();
-    if (!clientId) {
-      throw new PublicError("无法识别当前设备，请刷新页面后重试");
-    }
-    try {
-      const clients = createClientService(getDb());
-      clients.promote(clientId);
-      clients.whitelist(clientId);
-    } catch (error) {
-      throw new PublicError("无法加入白名单", "client whitelist failed", error);
-    }
-    return { ok: true as const, client_id: clientId };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().whitelistCurrentClient();
   });
 }
 
 export async function adminFetchConfigAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const db = getDb();
-    const announcement = createAnnouncementService(db).get();
-    return {
-      ...createAppStateService(db).getConfig(),
-      https_redirect_enabled: createHttpsUpgradeService(db).isRedirectEnabled(),
-      ...createClientService(db).config(),
-      announcement_content: announcement.content,
-      announcement_revision: announcement.revision,
-    };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().getConfig();
   });
 }
 
 export async function adminUpdateConfigAction(
   input: ActionInput<"adminUpdateConfigAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const db = getDb();
-    const appConfig = createAppStateService(db).updateConfig({
-      idle_lock_enabled:
-        input.idle_lock_enabled !== undefined
-          ? expectBoolean(
-              input.idle_lock_enabled,
-              "idle_lock_enabled must be boolean",
-            )
-          : undefined,
-      system_locked:
-        input.system_locked !== undefined
-          ? expectBoolean(input.system_locked, "system_locked must be boolean")
-          : undefined,
-    });
-    const https = createHttpsUpgradeService(db);
-    if (input.https_redirect_enabled !== undefined) {
-      https.setRedirectEnabled(
-        expectBoolean(
-          input.https_redirect_enabled,
-          "https_redirect_enabled must be boolean",
-        ),
-      );
-    }
-    const clientConfig = createClientService(db).updateConfig({
-      whitelist_enabled: input.whitelist_enabled,
-      identity_methods: input.identity_methods,
-    });
-    const announcements = createAnnouncementService(db);
-    const announcement =
-      input.announcement_content !== undefined
-        ? announcements.update(input.announcement_content)
-        : announcements.get();
-    return {
-      ok: true as const,
-      ...appConfig,
-      https_redirect_enabled: https.isRedirectEnabled(),
-      ...clientConfig,
-      announcement_content: announcement.content,
-      announcement_revision: announcement.revision,
-    };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().updateConfig(input);
   });
 }
 
 export async function adminFetchBackupsAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return { backups: createAdminSystemService(getDb()).listBackups() };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().listBackups();
   });
 }
 
 export async function adminFetchHttpsStatusAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return createAdminSystemService(getDb()).getHttpsStatus();
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().httpsStatus();
   });
 }
 
 export async function adminCreateBackupAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return {
-      ok: true as const,
-      backups: await createAdminSystemService(getDb()).createBackup(),
-    };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().createBackup();
   });
 }
 
 export async function adminDeleteBackupAction(
   name: ActionInput<"adminDeleteBackupAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    createAdminSystemService(getDb()).deleteBackup(
-      expectString(name, "文件名无效"),
-    );
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope
+      .facades()
+      .administration()
+      .deleteBackup(expectString(name, "文件名无效"));
   });
 }
 
 export async function adminFetchUpdateStatusAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return createAdminSystemService(getDb()).getUpdateStatus();
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().updateStatus();
   });
 }
 
 export async function adminConfirmUpdateAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    createAdminSystemService(getDb()).confirmUpdate();
-    return { ok: true as const };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().confirmUpdate();
   });
 }
 
 export async function adminRollbackAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return createAdminSystemService(getDb()).rollback();
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().rollback();
   });
 }
 
 export async function adminRunToolAction(
   action: ActionInput<"adminRunToolAction">,
 ) {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return createAdminSystemService(getDb()).runTool(action);
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().runTool(action);
   });
 }
 
 export async function adminFetchTeachDocumentsAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    return {
-      documents: createTeachDocumentsService(getDb())
-        .list()
-        .map((document) => ({
-          id: document.id,
-          application: document.application,
-          document_type: document.document_type,
-          name: document.name,
-          file_size: document.file_size,
-          created_at: document.created_at,
-        })),
-      monitor_available: process.platform === "win32",
-    };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().listTeachDocuments();
   });
 }
 
 export async function adminCleanupTeachDocumentsAction() {
-  return withActionSession(async (session) => {
-    const actor = await session.asActor();
-    await actor.requireAdmin();
-    const deleted = await createTeachDocumentsService(getDb()).cleanupAll();
-    return { ok: true as const, deleted };
+  return withActionScope(async (scope) => {
+    return scope.facades().administration().cleanupTeachDocuments();
   });
 }

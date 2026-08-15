@@ -11,6 +11,7 @@ import { getDb } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
 import { setUpdateManager, UpdateManager } from "./infra/updateManager";
+import { Runtime } from "@/server/runtime/runtime";
 
 export async function bootstrap(
   config: RuntimeConfig,
@@ -27,8 +28,9 @@ export async function bootstrap(
     },
   });
   const db = getDb();
+  const runtime = new Runtime(db, config.buildId);
   if (config.update) setUpdateManager(new UpdateManager(db, config.update));
-  const protocol = new WebSocketProtocol(config.buildId);
+  const protocol = new WebSocketProtocol(config.buildId, runtime);
   const stopMaintenance = startMaintenance(db);
   const servers: Server[] = [];
   const listen = async (
@@ -49,7 +51,7 @@ export async function bootstrap(
   };
   for (const port of config.ports) {
     await listen(
-      createServer(createHttpHandler(config, { secure: false })),
+      createServer(createHttpHandler(config, runtime, { secure: false })),
       "http",
       port,
     );
@@ -64,7 +66,10 @@ export async function bootstrap(
     };
     for (const port of config.securePorts) {
       await listen(
-        createSecureServer(tls, createHttpHandler(config, { secure: true })),
+        createSecureServer(
+          tls,
+          createHttpHandler(config, runtime, { secure: true }),
+        ),
         "https",
         port,
       );

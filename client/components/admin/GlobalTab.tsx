@@ -9,7 +9,13 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
 
-export function GlobalTab() {
+export function GlobalTab({
+  canManageLocks,
+  canPublishAnnouncement,
+}: {
+  canManageLocks: boolean;
+  canPublishAnnouncement: boolean;
+}) {
   const [idleLock, setIdleLock] = useState(false);
   const [systemLocked, setSystemLocked] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
@@ -72,69 +78,75 @@ export function GlobalTab() {
       )}
 
       {/* ── Lock Settings ── */}
-      <Box>
-        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-          锁定设置
-        </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={idleLock}
-              onChange={(e) =>
-                handleConfigSave({ idle_lock_enabled: e.target.checked })
-              }
-              disabled={cfgSaving}
-            />
-          }
-          label="空闲防偷窥锁定（5 分钟无操作自动锁屏）"
-        />
-        <Box />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={systemLocked}
-              onChange={(e) =>
-                handleConfigSave({ system_locked: e.target.checked })
-              }
-              disabled={cfgSaving}
-            />
-          }
-          label="锁定系统（非管理员无法通过解锁序列进入 App）"
-        />
-      </Box>
+      {canManageLocks ? (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+            锁定设置
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={idleLock}
+                onChange={(e) =>
+                  handleConfigSave({ idle_lock_enabled: e.target.checked })
+                }
+                disabled={cfgSaving}
+              />
+            }
+            label="空闲防偷窥锁定（5 分钟无操作自动锁屏）"
+          />
+          <Box />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={systemLocked}
+                onChange={(e) =>
+                  handleConfigSave({ system_locked: e.target.checked })
+                }
+                disabled={cfgSaving}
+              />
+            }
+            label="锁定系统（非管理员无法通过解锁序列进入 App）"
+          />
+        </Box>
+      ) : null}
 
-      <Box sx={{ mt: 3 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          弹窗型公告
-        </Typography>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mb: 1 }}
-        >
-          每次保存后，用户都需重新确认。
-        </Typography>
-        <TextField
-          fullWidth
-          multiline
-          minRows={4}
-          label="公告内容"
-          value={announcementContent}
-          onChange={(event) => setAnnouncementContent(event.target.value)}
-          disabled={cfgLoading || cfgSaving}
-        />
-        <Button
-          sx={{ mt: 1 }}
-          size="small"
-          variant="contained"
-          disabled={cfgLoading || cfgSaving}
-          onClick={() =>
-            void handleConfigSave({ announcement_content: announcementContent })
-          }
-        >
-          保存并发布公告
-        </Button>
-      </Box>
+      {canPublishAnnouncement ? (
+        <Box sx={{ mt: canManageLocks ? 3 : 0 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            弹窗型公告
+          </Typography>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", mb: 1 }}
+          >
+            每次保存后，用户都需重新确认。
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            minRows={4}
+            label="公告内容"
+            value={announcementContent}
+            onChange={(event) => setAnnouncementContent(event.target.value)}
+            disabled={cfgLoading || cfgSaving}
+          />
+          <Button
+            sx={{ mt: 1 }}
+            size="small"
+            variant="contained"
+            disabled={cfgLoading || cfgSaving}
+            onClick={() =>
+              void handleConfigSave({
+                announcement_content: announcementContent,
+              })
+            }
+          >
+            保存并发布公告
+          </Button>
+        </Box>
+      ) : null}
     </Box>
   );
 }

@@ -159,7 +159,10 @@ export default function ChatPostCard({
   const [err, setErr] = useState("");
 
   const canEdit = post.type === "text" && post.user_id === currentUser.id;
-  const canDelete = post.type !== "deleted" && post.user_id === currentUser.id;
+  const canDelete =
+    post.type !== "deleted" &&
+    (post.user_id === currentUser.id ||
+      currentUser.administration.roles.includes("community_manager"));
 
   const handleOpenEdit = async () => {
     setAnchorEl(null);

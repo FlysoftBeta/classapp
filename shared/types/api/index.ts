@@ -1,4 +1,16 @@
-export { userSchema, type User } from "./user";
+export {
+  userSchema,
+  userMetadataSchema,
+  type User,
+  type UserMetadata,
+} from "./user";
+export {
+  adminRoleSchema,
+  adminAccessSchema,
+  type AdminRole,
+  type AdminAccess,
+} from "@/shared/authority";
+export { userFeaturesSchema, type UserFeatures } from "@/shared/features";
 export {
   groupSchema,
   adminGroupSchema,
@@ -12,6 +24,7 @@ export {
   textPostSchema,
   stickerPostSchema,
   type Post,
+  type PostEntity,
   type TextPost,
   type StickerPost,
 } from "./post";
@@ -33,6 +46,8 @@ export {
   aiConversationDetailSchema,
   aiCreditBalanceSchema,
   aiCreditLedgerEntrySchema,
+  aiBillingPolicySchema,
+  aiBillingSummarySchema,
   aiFileEntrySchema,
   type AiMessage,
   type AiAttachment,
@@ -41,6 +56,8 @@ export {
   type AiConversationDetail,
   type AiCreditBalance,
   type AiCreditLedgerEntry,
+  type AiBillingPolicy,
+  type AiBillingSummary,
   type AiFileEntry,
 } from "./ai";
 export {

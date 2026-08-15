@@ -17,13 +17,12 @@ client/                 Browser-only React application
 server/                 Node.js runtime and business backend
   actions/               OneShot handlers
   data/                  All SQL/database primitives
-  domain/facade/         Identity capability facade
-  domain/policy/         Authorization/business policy checks
+  domain/facade/         Public business APIs and Actor-dependent orchestration
   http/routes/           Raw HTTP uploads/downloads/rendering only
   infra/                 Database, files, runtime config and update plumbing
   protocol/              WebSocket protocol and Zod registry
-  services/              Business use cases and side effects
-  session/               Request context, Session and checked errors
+  runtime/               Process Runtime, request Scope, Actor, Facts and UnitOfWork
+  services/              Independent business mechanisms and side effects
   validation/            Server-side semantic validation
 shared/                 Types, wire protocol and pure cross-runtime logic
 shell/                  Stable production bootstrap document
@@ -51,21 +50,27 @@ IndexedDB while preserving React Fast Refresh.
 Dependencies flow in one direction:
 
 ```text
-WebSocket/HTTP Transport -> Action -> Actor/Policy -> Service -> Data
+WebSocket/HTTP Transport -> Action -> Facade/ActorFacade -> Service -> Data
 ```
 
 - `server/protocol/*` owns framing, connection state and Zod request validation.
-- `server/actions/*` maps a valid request to an actor/service capability.
-- `server/domain/facade/*` performs identity gates and exposes capabilities. It
-  must not contain SQL or orchestration.
-- `server/services/*` owns use cases, orchestration, events and side effects.
+- `server/actions/*` maps a valid request to one public Facade operation.
+- `server/domain/facade/*` is the public business API. It performs Actor gates,
+  selects legitimate business paths, and wires independent Services. It never
+  contains SQL.
+- `server/services/*` owns independent mechanisms, domain invariants, events
+  and side effects. Services do not scatter Actor authorization through their
+  objective APIs.
 - `server/data/*` is the only location allowed to contain SQL.
 - `server/http/routes/*` is reserved for operations that genuinely need raw HTTP
   semantics: multipart upload, blob/download, PDF rendering and endpoint discovery.
 
-Session is cheap, lazy identity context carried by `AsyncLocalStorage`. Checked
-errors describe recoverable state inconsistency; malformed requests and internal
-failures remain unchecked exceptions. Do not flatten these categories.
+`Runtime` owns process-bound resources. `Scope` is a cheap request context in
+`AsyncLocalStorage` and lazily reuses Actor, Facades and stateful Services with
+get-or-init semantics. Request-local caches are `Facts`; their owning Service
+must update or invalidate them after writes. Checked errors describe recoverable
+state inconsistency; malformed requests and internal failures remain unchecked
+exceptions. Do not flatten these categories.
 
 ## Client boundaries
 

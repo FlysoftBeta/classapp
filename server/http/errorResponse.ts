@@ -1,9 +1,9 @@
-import { getDb } from "@/server/infra/db";
 import { BUILD_ID } from "@/server/infra/env";
 import {
   createIncidentService,
   PublicError,
 } from "@/server/services/incidentService";
+import { currentScope } from "@/server/runtime/scope";
 
 export { PublicError };
 
@@ -11,7 +11,7 @@ export { PublicError };
 export function handleHttpError(error: unknown): Response {
   let captured: { publicMessage: string; incidentId: string };
   try {
-    captured = createIncidentService(getDb(), BUILD_ID).capture({
+    captured = createIncidentService(currentScope().db, BUILD_ID).capture({
       environment: "server",
       error,
       context: { transport: "http" },

@@ -17,7 +17,6 @@ import {
 import { isClientKonamiLocked } from "@/server/data/clients";
 import { getUserBanStatus } from "@/server/data/users";
 import { publishSystem } from "@/server/services/eventBus";
-import { hasFeature } from "@/shared/features";
 
 export { IDLE_LOCK_TIMEOUT_MINUTES } from "@/server/data/appState";
 export type { AppDisableReason };
@@ -108,7 +107,7 @@ export class AppStateService {
       };
     }
 
-    if (!hasFeature(user, "admin") && getSystemLocked(this.db)) {
+    if (!user.administration.available && getSystemLocked(this.db)) {
       return { disabled: true, reason: "system_locked" };
     }
 

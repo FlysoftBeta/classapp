@@ -1,18 +1,16 @@
-import { requireActiveAdmin } from "@/server/domain/policy/auth";
-import { buildBackupDownload } from "@/server/infra/dbBackup";
 import { handleHttpError } from "@/server/http/errorResponse";
+import { currentScope } from "@/server/runtime/scope";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ name: string }> },
 ) {
-  const auth = requireActiveAdmin(req, { allowQueryToken: true });
-  if ("error" in auth)
-    return Response.json({ error: auth.error }, { status: auth.status });
-
   try {
     const { name } = await params;
-    const { zipName, zipData } = buildBackupDownload(name);
+    const { zipName, zipData } = currentScope()
+      .facades()
+      .administration()
+      .downloadBackup(name);
 
     return new Response(zipData.slice(), {
       status: 200,
