@@ -4,6 +4,7 @@ import {
   getClientMe,
   loginPin,
   logout as apiLogout,
+  patchClientMe,
   probeAppState,
 } from "@/client/api/auth";
 import { sessionRepository } from "@/client/data/repository";
@@ -152,6 +153,8 @@ export async function lockSession(): Promise<void> {
 export async function unlockSession(
   setClientId: (clientId: string) => void,
 ): Promise<string | null> {
+  const store = useApplicationStore.getState();
+  const hasSession = !!store.user && !!session.getToken();
   const meId = session.getUserId();
   if (meId) {
     await sessionRepository
@@ -160,18 +163,40 @@ export async function unlockSession(
         captureDetachedClientIncident("session.unlock.persist", error),
       );
   }
-  const store = useApplicationStore.getState();
-  store.setAppState(store.appDisable.disabled ? "app_locked" : "app");
+  // An authenticated session may leave the gate optimistically and let the
+  // server confirm it. An anonymous Konami gate has no App to reveal: keep the
+  // lock screen until the unlock response and the authoritative state probe
+  // choose login, app_locked, or app.
+  if (hasSession) {
+    store.setAppState(store.appDisable.disabled ? "app_locked" : "app");
+  }
   try {
-    const result = await flushPendingClientLock();
-    if (result.accessRequired) {
-      if (meId) {
-        await sessionRepository.abandonKonamiLockProposal(meId, false);
+    if (hasSession) {
+      const result = await flushPendingClientLock();
+      if (result.accessRequired) {
+        if (meId) {
+          await sessionRepository.abandonKonamiLockProposal(meId, false);
+        }
+        useApplicationStore.getState().setAppState("konami");
+        setClientId(result.clientId);
+        return result.clientId;
       }
-      useApplicationStore.getState().setAppState("konami");
-      setClientId(result.clientId);
-      return result.clientId;
+    } else {
+      // There is no local session row to hold an offline proposal, so the
+      // anonymous gate must unlock through the live Action before probing.
+      const response = await patchClientMe(false);
+      if (!response.ok) return null;
+      if (!response.data.ok) {
+        if ("access_required" in response.data) {
+          setClientId(response.data.client_id);
+          return response.data.client_id;
+        }
+        return null;
+      }
     }
+    const payload = await probeAppState();
+    if (payload) await applyAppState(payload);
+    else if (!hasSession) useApplicationStore.getState().setAppState("login");
   } catch (error) {
     if (!(error instanceof TransportUnavailableError)) {
       captureDetachedClientIncident("session.unlock.remote", error);

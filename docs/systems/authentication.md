@@ -61,6 +61,15 @@ a system lock. A banned, deleted, or invalidated identity is cleared when the
 authoritative gate rejects it. Offline startup may show cached actor data but
 cannot perform server mutations.
 
+The Konami lock itself is a property of the server-side Client record, not of
+the user. The browser only persists its last confirmed value inside `domain_me`,
+which is keyed by `me_id`, so that offline carrier exists only while a session
+binds this user to this client. The anonymous Konami gate has no local session
+row: unlocking it must send the live `patchClientMe` Action and then apply the
+authoritative probe, while an authenticated unlock can use the user-keyed
+base + proposal path and leave the lock optimistically. See the
+[local data model](../offline/local-model.md).
+
 ## PIN and OOBE
 
 PINs are HMAC/hash material stored only on the server. OOBE uses a short-lived

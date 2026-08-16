@@ -110,15 +110,22 @@ values are reconstructible projections: they never authorize server work and
 an online application-state probe replaces them.
 
 A local lock is safety-monotonic: it takes effect and becomes durable without
-waiting for transport. The row stores it through the normal
-`base + proposal + operation_id` assignment model until reconnect sends it to
-the server. Only the response for the proposal it sent may acknowledge that
-operation; a newer proposal survives an older response. Reconnect flushes the
-proposal before probing application state, and a server-unlocked base cannot
-override the proposal. Unlock uses the same offline proposal path: it leaves
+waiting for transport. The Konami lock itself belongs to the server-side Client
+record, while this durable carrier is the user-keyed `domain_me` row; a local
+proposal therefore exists only while a session binds that user to this client.
+The row stores it through the normal `base + proposal + operation_id`
+assignment model until reconnect sends it to the server. Only the response for
+the proposal it sent may acknowledge that operation; a newer proposal survives
+an older response. Reconnect flushes the proposal before probing application
+state, and a server-unlocked base cannot override the proposal.
+
+An authenticated-session unlock uses the same offline proposal path: it leaves
 the client lock immediately, while any separately cached effective user/system
 disable state still gates the App. Reconnect later confirms the unlock with the
-server.
+server. The anonymous Konami gate has no `domain_me` row to carry a proposal,
+so it cannot use that path: `sessionController` sends `patchClientMe(false)`
+directly, keeps the lock screen until the response, and lets the following
+authoritative probe choose login or App.
 
 Application schema v3 adds these fields to `domain_me`. Application schema v4
 also removes the obsolete Group/User handle indexes and marks legacy cached
