@@ -63,6 +63,11 @@ Release assembly currently runs on Linux x64 and accepts `linux-redhat`,
 `linux-debian`, or `windows`. Final archives are written to `build/`; disposable
 intermediates live below `.cache/` or `CLASSAPP_BUILD_CACHE`.
 
+`build-wasm.mjs` keeps the wasm-pack binary cache and cargo home under
+`resolveBuildCache()` (`wasm-pack/` and `cargo-home/`). Wasm prerequisite
+builds therefore do not write to `~/.cache` or `~/.cargo` and remain usable in
+sandboxes that grant workspace writes but mount the user profile read-only.
+
 The Vite configurations have separate ownership:
 
 | Configuration              | Output responsibility                      |

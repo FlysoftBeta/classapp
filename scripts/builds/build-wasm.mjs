@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveBuildCache } from "./build-cache.mjs";
 
 const disabledWasmFeatures = [
   "bulk-memory",
@@ -32,6 +33,15 @@ export function buildChrome70Wasm({
   rmSync(outputDirectory, { recursive: true, force: true });
   mkdirSync(outputDirectory, { recursive: true });
 
+  // Keep every write below the build cache so prerequisite builds also work in
+  // sandboxes that allow workspace writes but mount the user profile read-only.
+  // wasm-pack otherwise writes its binary cache to ~/.cache and falls back to
+  // `cargo install wasm-bindgen` in ~/.cargo, both of which fail there.
+  const wasmPackCache = path.join(resolveBuildCache(), "wasm-pack");
+  const cargoHome = path.join(resolveBuildCache(), "cargo-home");
+  mkdirSync(wasmPackCache, { recursive: true });
+  mkdirSync(cargoHome, { recursive: true });
+
   const wasmPack = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
   const build = spawnSync(
     wasmPack,
@@ -59,11 +69,13 @@ export function buildChrome70Wasm({
       stdio: "inherit",
       env: {
         ...process.env,
+        CARGO_HOME: cargoHome,
         RUSTUP_TOOLCHAIN:
           process.env.CLASSAPP_RUST_TOOLCHAIN ?? "nightly-2026-05-10",
         RUSTFLAGS: [process.env.RUSTFLAGS, ...chrome70RustFlags]
           .filter(Boolean)
           .join(" "),
+        WASM_PACK_CACHE: wasmPackCache,
       },
     },
   );
