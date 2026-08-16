@@ -1,7 +1,6 @@
 import { Database, default as BetterSQLite3 } from "better-sqlite3";
 import path from "path";
 import crypto from "crypto";
-import { rmSync } from "node:fs";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
@@ -496,6 +495,15 @@ function consolidatePostV18Schema(db: Database): void {
       "ALTER TABLE teach_documents ADD COLUMN status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('capturing', 'ready'))",
     );
   }
+
+  // Blob-owned WIP rows are not migrated. Text articles are pure SQL and are
+  // preserved; their bookmarks/segments/progress cascade normally.
+  db.prepare("DELETE FROM article_uploads").run();
+  db.prepare(
+    `DELETE FROM articles
+      WHERE json_extract(provider_json, '$.type') = 'bundle'`,
+  ).run();
+  db.prepare("DELETE FROM teach_documents").run();
 }
 
 const MIGRATIONS = new Map<number, SchemaMigration>([
@@ -951,55 +959,9 @@ function installSchema(db: Database): void {
   `);
 }
 
-/**
- * One-time removal of the pre-v25 article/teach-document feature data. Both
- * features are work-in-progress, so their old rows and blob layouts are not
- * migrated; the marker prevents the reset from running again on later starts.
- */
-function resetWipArticleAndTeachData(db: Database): void {
-  const marker = "wip_storage_reset_v25";
-  const existing = db.prepare("SELECT 1 FROM config WHERE key = ?").get(marker);
-  if (existing) return;
-
-  for (const directory of [
-    path.join(DATA_ROOT, "blobs", "articles"),
-    path.join(DATA_ROOT, "blobs", "teach"),
-    path.join(DATA_ROOT, "storage", "objects", "article-bundles"),
-    path.join(DATA_ROOT, "storage", "objects", "teach-documents"),
-  ]) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch (error) {
-      console.error(
-        `[Database] failed to remove WIP feature directory ${directory}`,
-        error,
-      );
-    }
-  }
-
-  db.transaction(() => {
-    db.prepare("DELETE FROM article_bookmarks").run();
-    db.prepare("DELETE FROM article_read_progress").run();
-    db.prepare("DELETE FROM article_uploads").run();
-    db.prepare("DELETE FROM text_article_segments").run();
-    db.prepare("DELETE FROM articles").run();
-    db.prepare("DELETE FROM teach_documents").run();
-    db.prepare(
-      `DELETE FROM storage_quota_items
-        WHERE group_name IN ('article-bundles', 'teach-documents')`,
-    ).run();
-    db.prepare(
-      `DELETE FROM storage_eviction_groups
-        WHERE name IN ('article-bundles', 'teach-documents')`,
-    ).run();
-    db.prepare("INSERT INTO config (key, value) VALUES (?, '1')").run(marker);
-  })();
-}
-
 function initializeDatabase(db: Database): void {
   runMigrations(db);
   installSchema(db);
-  resetWipArticleAndTeachData(db);
   ensurePinSecret(db);
   ensureConfigDefaults(db);
   initWordSchema(db);

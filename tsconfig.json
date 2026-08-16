@@ -26,5 +26,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.mts"],
-  "exclude": ["node_modules", "lib/infini"]
+  "exclude": ["node_modules", "lib/infini", "worktree"]
 }

@@ -123,11 +123,13 @@ Schema v25 installs the quota tables, the `article_uploads` intent table, and
 the `teach_documents.status` capture state. Production databases are schema
 v18; `runMigrations` accepts v17 as the oldest baseline, applies the original
 v17 → v18 step, then one consolidated v18 → v25 migration containing every
-later change in order. Articles and teach documents were
-work-in-progress at this boundary, so `resetWipArticleAndTeachData` deletes
-their old rows and both the legacy `blobs/` and new namespace directories once
-(marked in `config` as `wip_storage_reset_v25`); there is deliberately no
-legacy layout migrator for those two features. Multipart bundle uploads keep a
-durable `article_uploads` row from authorization until the article row is
+later change in order. Text articles are pure SQL and are preserved. Bundle
+articles, their upload intents, and teach documents were
+work-in-progress at this boundary, so the consolidated migration deletes those
+rows as part of the same schema-version step; there is deliberately no
+legacy layout migrator for those blob-owned features. Legacy blob directories
+are workspace state removed by `npm run reset`, not by server initialization.
+Multipart bundle uploads
+keep a durable `article_uploads` row from authorization until the article row is
 published, and stale staging rows are compensated by
 `ArticleUploadRuntime.reconcile`.
