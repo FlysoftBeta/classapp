@@ -11,6 +11,7 @@
     "infini:build": "node scripts/builds/build-infini.mjs",
     "zstd:build": "node scripts/builds/build-zstd-web.mjs",
     "pdfrender:update": "node scripts/dev/update-pdfrender.mjs",
+    "media:update": "node scripts/dev/update-media.mjs",
     "build": "node scripts/builds/build.mjs",
     "test:e2e": "CLASSAPP_REQUIRE_HTTPS=1 npm run build -- linux-redhat && node --import tsx scripts/tests/test-e2e.mts",
     "test:manual": "npm run build -- linux-redhat && node --import tsx scripts/tests/test-manual.mts",

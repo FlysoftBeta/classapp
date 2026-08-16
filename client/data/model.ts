@@ -206,7 +206,7 @@ export type SyncRow = PostCoverage | SnapshotCoverage;
 
 export interface RetentionRow {
   claimant: string;
-  kind: "conversation" | "article";
+  kind: "conversation" | "article" | "media";
   object_id: string;
   mode: string;
   keep_after_ms: number | null;

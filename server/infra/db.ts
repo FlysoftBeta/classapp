@@ -22,7 +22,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 22;
+const CURRENT_SCHEMA_VERSION = 23;
 
 type SchemaMigration = (db: Database) => void;
 
@@ -257,6 +257,97 @@ const AI_SCHEMA = `
   );
 `;
 
+const MEDIA_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS media_tracks (
+    id                 TEXT PRIMARY KEY,
+    source             TEXT NOT NULL,
+    provider_id        TEXT NOT NULL,
+    canonical_url      TEXT NOT NULL,
+    title              TEXT NOT NULL,
+    artists_json       TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(artists_json)),
+    album              TEXT,
+    duration_ms        INTEGER NOT NULL CHECK (duration_ms >= 0),
+    thumbnail_url      TEXT,
+    metadata_revision  INTEGER NOT NULL DEFAULT 0,
+    ref_count          INTEGER NOT NULL DEFAULT 0 CHECK (ref_count >= 0),
+    last_used_at       TEXT,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (source, provider_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_tracks_last_used
+    ON media_tracks(ref_count, last_used_at);
+
+  CREATE TABLE IF NOT EXISTS media_assets (
+    track_id      TEXT NOT NULL REFERENCES media_tracks(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('audio', 'cover')),
+    state         TEXT NOT NULL CHECK (state IN ('queued', 'downloading', 'ready', 'failed')),
+    object_path   TEXT UNIQUE,
+    mime          TEXT,
+    bytes         INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+    sha256        TEXT,
+    failed_code   TEXT,
+    downloaded_at TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (track_id, kind)
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_assets_ready
+    ON media_assets(kind, state, downloaded_at);
+
+  CREATE TABLE IF NOT EXISTS media_lists (
+    id             TEXT PRIMARY KEY,
+    kind           TEXT NOT NULL CHECK (kind IN ('playlist', 'queue')),
+    owner_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title          TEXT NOT NULL,
+    revision       INTEGER NOT NULL DEFAULT 0,
+    retention_days INTEGER NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365),
+    expires_at     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_media_lists_user_queue
+    ON media_lists(owner_user_id) WHERE kind = 'queue';
+  CREATE INDEX IF NOT EXISTS idx_media_lists_user_playlists
+    ON media_lists(owner_user_id, kind, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS media_list_items (
+    list_id   TEXT NOT NULL REFERENCES media_lists(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL CHECK (position >= 0),
+    track_id  TEXT NOT NULL REFERENCES media_tracks(id) ON DELETE CASCADE,
+    added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (list_id, position)
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_list_items_track
+    ON media_list_items(track_id, list_id);
+
+  CREATE TABLE IF NOT EXISTS media_stream_grants (
+    token      TEXT PRIMARY KEY,
+    track_id   TEXT NOT NULL REFERENCES media_tracks(id) ON DELETE CASCADE,
+    user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_stream_grants_track
+    ON media_stream_grants(track_id, expires_at);
+
+  CREATE TRIGGER IF NOT EXISTS media_items_ref_count_insert
+  AFTER INSERT ON media_list_items BEGIN
+    UPDATE media_tracks
+       SET ref_count = ref_count + 1,
+           last_used_at = datetime('now')
+     WHERE id = NEW.track_id;
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS media_items_ref_count_delete
+  AFTER DELETE ON media_list_items BEGIN
+    UPDATE media_tracks
+       SET ref_count = ref_count - 1
+     WHERE id = OLD.track_id AND ref_count > 0;
+    SELECT CASE WHEN changes() = 0
+      THEN RAISE(ABORT, 'media_tracks.ref_count underflow') END;
+  END;
+`;
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, (db) => db.exec(INCIDENT_SCHEMA)],
   [
@@ -341,6 +432,17 @@ const MIGRATIONS = new Map<number, SchemaMigration>([
     (db) => {
       db.exec(
         "ALTER TABLE users ADD COLUMN profile_revision INTEGER NOT NULL DEFAULT 0",
+      );
+    },
+  ],
+  [
+    22,
+    (db) => {
+      db.exec(MEDIA_SCHEMA);
+      // Media is enabled by default for existing accounts; append the new
+      // feature bit without disturbing the historical bit layout.
+      db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
+        1 << 7,
       );
     },
   ],
@@ -666,6 +768,17 @@ function installSchema(db: Database): void {
 
   db.exec(INCIDENT_SCHEMA);
   db.exec(AI_SCHEMA);
+  db.exec(MEDIA_SCHEMA);
+  // Worktree/dev databases created while schema v23 was being developed may
+  // already have media_lists without retention_days. Production upgrades from
+  // v22 always create the complete table above, so this is a narrow repair.
+  const mediaListColumns = db.prepare("PRAGMA table_info(media_lists)").all() as
+    Array<{ name: string }>;
+  if (!mediaListColumns.some((column) => column.name === "retention_days")) {
+    db.exec(
+      "ALTER TABLE media_lists ADD COLUMN retention_days INTEGER NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365)",
+    );
+  }
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_groups_handle ON groups(handle);
@@ -796,6 +909,9 @@ function ensureConfigDefaults(db: Database) {
     INSERT OR IGNORE INTO config (key, value) VALUES ('client_identity_methods', 'mac,user_agent');
     INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_content', '');
     INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_revision', '0');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('media_max_volume', '1');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('media_eviction_days', '7');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('media_storage_limit_bytes', '4294967296');
   `);
 }
 

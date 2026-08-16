@@ -23,6 +23,11 @@ import WordLearningPage from "./learning/WordLearningPage";
 import WrongWordsPage from "./learning/WrongWordsPage";
 import MasteredWordsPage from "./learning/MasteredWordsPage";
 import ClearWrongWordsPage from "./learning/ClearWrongWordsPage";
+import { MediaView } from "./media/MediaView";
+import { MediaPlaylistPage } from "./media/MediaPlaylistPage";
+import { NowPlayingBar } from "./media/NowPlayingBar";
+import { QueueDrawer } from "./media/QueueDrawer";
+import { useMediaPlayer } from "@/client/hooks/useMediaPlayer";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -143,6 +148,10 @@ function AppShell({
   const learningEnabled = hasFeature(user, "learning");
   const articleDownloadEnabled = hasFeature(user, "article_download");
   const aiEnabled = hasFeature(user, "ai");
+  const mediaEnabled = hasFeature(user, "media");
+  const mediaRouteOpen =
+    route.view === "media" || route.view === "media-playlist";
+  const mediaPlayer = useMediaPlayer();
   const articleConversation = useMemo(() => {
     const key =
       route.view === "articles" || route.view === "reader"
@@ -206,6 +215,21 @@ function AppShell({
       if (isMobile) setMobileShowContent(true);
     },
     [aiEnabled, isMobile, navigate],
+  );
+
+  const handleOpenMedia = useCallback(() => {
+    if (!mediaEnabled) return;
+    navigate({ view: "media" });
+    if (isMobile) setMobileShowContent(true);
+  }, [mediaEnabled, isMobile, navigate]);
+
+  const handleOpenPlaylist = useCallback(
+    (playlistId: string) => {
+      if (!mediaEnabled) return;
+      navigate({ view: "media-playlist", playlistId });
+      if (isMobile) setMobileShowContent(true);
+    },
+    [mediaEnabled, isMobile, navigate],
   );
 
   const handleNewAi = useCallback(() => {
@@ -400,6 +424,8 @@ function AppShell({
               if (isMobile) setMobileShowContent(true);
             });
           }}
+          onOpenMedia={handleOpenMedia}
+          onOpenPlaylist={handleOpenPlaylist}
           onOpenArticle={handleOpenArticle}
           sidebarArticles={articleSidebar.articles}
           currentArticleId={
@@ -412,6 +438,7 @@ function AppShell({
           adminEnabled={adminEnabled}
           articlesEnabled={articlesEnabled}
           learningEnabled={learningEnabled}
+          mediaEnabled={mediaEnabled}
           aiConversations={aiConversations}
           aiCredits={aiCredits}
           aiAvailable={aiStatus.available}
@@ -424,7 +451,9 @@ function AppShell({
               ? "ai"
               : route.view === "articles" || route.view === "reader"
                 ? "reading"
-                : "conversations"
+                : mediaRouteOpen
+                  ? "media"
+                  : "conversations"
           }
           onOpenAi={handleOpenAi}
           onNewAi={handleNewAi}
@@ -438,6 +467,7 @@ function AppShell({
           minWidth: 0,
           flexDirection: "column",
           minHeight: vh(1),
+          position: "relative",
         }}
       >
         {!isMobile && (
@@ -560,6 +590,19 @@ function AppShell({
             conversation={articleConversation}
           />
         )}
+        {route.view === "media" && online && mediaEnabled && (
+          <MediaView
+            playerApi={mediaPlayer}
+            onBack={isMobile ? handleMobileBack : undefined}
+          />
+        )}
+        {route.view === "media-playlist" && online && mediaEnabled && (
+          <MediaPlaylistPage
+            playlistId={route.playlistId}
+            playerApi={mediaPlayer}
+            onBack={() => navigate({ view: "media" })}
+          />
+        )}
         {route.view === "reader" && articlesEnabled && (
           <ArticleReader
             articleId={route.articleId}
@@ -620,6 +663,8 @@ function AppShell({
             "clear-wrong",
             "mastered-words",
             "ai",
+            "media",
+            "media-playlist",
           ].includes(view) && (
             <Box
               sx={{
@@ -635,6 +680,9 @@ function AppShell({
               </Typography>
             </Box>
           )}
+        {mediaEnabled && mediaRouteOpen && (
+          <NowPlayingBar playerApi={mediaPlayer} floating />
+        )}
       </Box>
 
       <Dialog open={showExitConfirm} onClose={cancelExitLearning}>
@@ -678,6 +726,10 @@ function AppShell({
         onDismiss={dismissBanner}
         onOpen={handleOpenBanner}
       />
+      {mediaEnabled && !mediaRouteOpen && (
+        <NowPlayingBar playerApi={mediaPlayer} floating={false} />
+      )}
+      {mediaEnabled && <QueueDrawer playerApi={mediaPlayer} />}
       {!online && (
         <Box
           role="status"

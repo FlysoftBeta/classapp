@@ -24,6 +24,20 @@ import {
   configEvents,
   postEvents,
 } from "./events";
+import {
+  applyMediaMaterializationEvent,
+  refreshMediaPlaylists,
+  refreshMediaQueue,
+  resetMediaPresentation,
+} from "./media";
+import {
+  mediaConfigEvents,
+  mediaMaterializationEvents,
+  mediaPlaylistEvents,
+  mediaQueueEvents,
+  mediaTrackEvents,
+} from "./mediaEvents";
+import { useMediaStore } from "./mediaStore";
 import { resourceQueries } from "./resources";
 import { client } from "./remote/client";
 import { session } from "./remote/session";
@@ -291,12 +305,32 @@ export function bindRemoteLifecycle(callbacks: RemoteCallbacks): () => void {
     client.subscribe("ai.sidebar.updated", () =>
       resourceQueries.scheduleAiSidebar(),
     ),
+    client.subscribe("media.track.changed", (data) => {
+      mediaTrackEvents.emit(data);
+    }),
+    client.subscribe("media.playlist.changed", (data) => {
+      mediaPlaylistEvents.emit(data);
+      void refreshMediaPlaylists();
+    }),
+    client.subscribe("media.queue.changed", (data) => {
+      mediaQueueEvents.emit(data);
+      void refreshMediaQueue();
+    }),
+    client.subscribe("media.config.changed", (data) => {
+      useMediaStore.getState().setConfig(data);
+      mediaConfigEvents.emit(data);
+    }),
+    client.subscribe("media.materialization.changed", (data) => {
+      applyMediaMaterializationEvent(data);
+      mediaMaterializationEvents.emit(data);
+    }),
   ];
 
   useApplicationStore.getState().setOnline(client.isConnected());
   const offToken = session.onTokenChange(() => {
     recovery.stop();
     resourceQueries.invalidate();
+    resetMediaPresentation();
   });
   const offConnection = client.onConnectionChange((connected) => {
     useApplicationStore.getState().setOnline(connected);

@@ -186,6 +186,9 @@ export default function AdminPanel({
             canPublishAnnouncement={currentUser.administration.roles.includes(
               "advanced_community_manager",
             )}
+            canManageMedia={currentUser.administration.roles.includes(
+              "community_manager",
+            )}
           />
         );
       case "operations":

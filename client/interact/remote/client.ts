@@ -47,13 +47,7 @@ type PendingAction = {
   authEpoch: number;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
-  timeout: ReturnType<typeof setTimeout>;
   context: ClientIncidentContext;
-};
-
-type TimedOutAction = {
-  context: ClientIncidentContext;
-  expiresAt: number;
 };
 
 /** Typed Action/Event protocol. It never starts or reconnects the transport. */
@@ -70,7 +64,6 @@ export class Client {
 
   private sequence = 0;
   private pending = new Map<string, PendingAction>();
-  private timedOut = new Map<string, TimedOutAction>();
   private eventListeners = new Map<EventName | "*", Set<EventListener>>();
   private connectionListeners = new Set<ConnectionListener>();
   private connected = false;
@@ -115,31 +108,19 @@ export class Client {
     action: K,
     args: ActionArgs<K>,
   ): Promise<ActionResult<ActionData<K>>> {
-    this.pruneTimedOut();
     if (!transport.isConnected()) {
       throw new TransportUnavailableError();
     }
     const id = `${Date.now().toString(36)}-${++this.sequence}`;
+    // Actions have no per-request timeout. Pending requests are rejected when
+    // the WebSocket disconnects or the actor binding is invalidated; a server
+    // that silently never answers would otherwise wait as long as the socket.
     const result = new Promise<unknown>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => {
-          const item = this.pending.get(id);
-          if (!item) return;
-          this.pending.delete(id);
-          this.timedOut.set(id, {
-            context: item.context,
-            expiresAt: Date.now() + 60_000,
-          });
-          item.reject(new RemoteProtocolError("TIMEOUT", "请求超时"));
-        },
-        action === "searchAiConversationsAction" ? 300_000 : 5_000,
-      );
       this.pending.set(id, {
         action,
         authEpoch: session.getCredentialEpoch(context.actorId),
         resolve,
         reject,
-        timeout,
         context,
       });
     });
@@ -158,7 +139,6 @@ export class Client {
       const pending = this.pending.get(id);
       if (pending) {
         this.pending.delete(id);
-        clearTimeout(pending.timeout);
         pending.reject(error);
       }
     }
@@ -243,18 +223,9 @@ export class Client {
       }
       return;
     }
-    this.pruneTimedOut();
     const pending = this.pending.get(frame.id);
-    if (!pending) {
-      const timedOut = this.timedOut.get(frame.id);
-      if (timedOut) {
-        this.observeLateIncident(timedOut.context, frame.result);
-        this.timedOut.delete(frame.id);
-      }
-      return;
-    }
+    if (!pending) return;
     this.pending.delete(frame.id);
-    clearTimeout(pending.timeout);
     if (frame.user !== pending.context.actorId) {
       pending.reject(
         new RemoteProtocolError("ACTOR_MISMATCH", "服务响应的用户上下文不匹配"),
@@ -293,37 +264,6 @@ export class Client {
     pending.resolve(result.data);
   }
 
-  private observeLateIncident(
-    context: ClientIncidentContext,
-    rawResult: unknown,
-  ): void {
-    if (
-      !rawResult ||
-      typeof rawResult !== "object" ||
-      !("error" in rawResult)
-    ) {
-      return;
-    }
-    const error = (rawResult as { error?: unknown }).error;
-    if (!error || typeof error !== "object" || !("incidentId" in error)) return;
-    const incidentId = (error as { incidentId?: unknown }).incidentId;
-    if (
-      typeof incidentId !== "string" ||
-      !/^I_[A-Za-z0-9_-]{22}$/.test(incidentId)
-    ) {
-      return;
-    }
-    context.linkIncident(incidentId as IncidentId);
-    recordRemoteIncident(context.actorId, incidentId as IncidentId);
-  }
-
-  private pruneTimedOut(): void {
-    const now = Date.now();
-    for (const [id, entry] of this.timedOut) {
-      if (entry.expiresAt <= now) this.timedOut.delete(id);
-    }
-  }
-
   private dispatch<K extends EventName>(event: K, data: EventData<K>): void {
     for (const key of [event, "*"] as const) {
       for (const listener of this.eventListeners.get(key) ?? []) {
@@ -350,7 +290,6 @@ export class Client {
 
   private rejectPending(error: Error): void {
     for (const pending of this.pending.values()) {
-      clearTimeout(pending.timeout);
       pending.reject(error);
     }
     this.pending.clear();
@@ -368,7 +307,6 @@ export class Client {
       ) {
         continue;
       }
-      clearTimeout(pending.timeout);
       pending.reject(error);
       this.pending.delete(id);
     }

@@ -60,7 +60,8 @@ User intent and physical availability are separate:
 ```ts
 type Claim =
   | { kind: "conversation-window"; keep_after_ms: number }
-  | { kind: "article"; protected_until: number };
+  | { kind: "article"; protected_until: number }
+  | { kind: "media"; protected_until: number };
 
 type Materialization = {
   complete: boolean;
@@ -73,6 +74,11 @@ type Materialization = {
 An Article is materialized only after metadata plus all text segments or all
 required document resources have been validated. Early EOF, missing content,
 or a lying `has_more=false` must leave it incomplete.
+
+Media audio is materialized as extent file `media:<track_id>:audio`. Its
+complete generation is published only after the server-reported byte size and
+SHA-256 have been verified; a `media` claim records local retention intent
+independently of the server-side track ref count.
 
 Conversation retention is a moving window. Trimming may remove only a legal
 covered prefix or the whole window; never punch a hole in the middle.

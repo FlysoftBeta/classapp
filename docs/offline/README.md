@@ -43,6 +43,7 @@ partial data from complete data is not correct offline support.
 
 - [Local data model and ownership](./local-model.md)
 - [Consistency and recovery protocols](./consistency-and-recovery.md)
+- [RemoteManager connection reliability](./remote-connectivity.md)
 - [Binary storage, retention, and quota](./storage-and-quota.md)
 - [Shell, HTTPS, and offline boot](./shell-and-https.md)
 

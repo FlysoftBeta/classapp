@@ -12,6 +12,7 @@ import * as stickers from "@/server/actions/stickers";
 import * as userConfig from "@/server/actions/user-config";
 import * as words from "@/server/actions/words";
 import * as ai from "@/server/actions/ai";
+import * as media from "@/server/actions/media";
 import {
   actionContracts,
   type ActionArgs,
@@ -36,6 +37,7 @@ const handlers = {
   ...userConfig,
   ...words,
   ...ai,
+  ...media,
 } satisfies ActionHandlerFunctions;
 
 function invoke<K extends ActionName>(

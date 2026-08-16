@@ -1,7 +1,4 @@
-import type {
-  AppDisableReason,
-  AppDisableState,
-} from "@/shared/types/api";
+import type { AppDisableReason, AppDisableState } from "@/shared/types/api";
 import type { Conversation } from "@/client/interact/presentation";
 import type {
   AppStatePayload,
@@ -40,6 +37,8 @@ export type AppRoute =
       from: "chat" | "articles";
       conversation?: SelectedKey;
     }
+  | { view: "media" }
+  | { view: "media-playlist"; playlistId: string }
   | { view: "learning" }
   | { view: "word-learning" }
   | { view: "wrong-words" }

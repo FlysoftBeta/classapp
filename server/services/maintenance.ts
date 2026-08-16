@@ -17,6 +17,7 @@ import { createTeachDocumentsService } from "@/server/services/teachDocumentsSer
 import { startOfficeDocumentMonitor } from "./officeDocumentMonitor";
 import { recordContainedServerIncident } from "./incidentService";
 import { BUILD_ID } from "@/server/infra/env";
+import type { MediaRuntime } from "@/server/runtime/mediaRuntime";
 
 /** Temporary client records with no recent activity are removed after this many days. */
 const CLIENT_TTL_DAYS = 1;
@@ -56,17 +57,24 @@ function notifyIdleLockedClients(db: BetterSqlite3.Database): number {
 
 const MAINTENANCE_INTERVAL_MS = 60_000;
 
-async function runMaintenance(db: BetterSqlite3.Database): Promise<void> {
+async function runMaintenance(
+  db: BetterSqlite3.Database,
+  media: MediaRuntime | null,
+): Promise<void> {
   cleanupExpiredSessions(db);
   cleanupInactiveClients(db);
   notifyIdleLockedClients(db);
   await createTeachDocumentsService(db).cleanupExpired();
+  if (media) await media.reconcileStorage();
 }
 
-export function startMaintenance(db: BetterSqlite3.Database): () => void {
+export function startMaintenance(
+  db: BetterSqlite3.Database,
+  media: MediaRuntime | null = null,
+): () => void {
   const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
   const run = () =>
-    void runMaintenance(db).catch((error) => {
+    void runMaintenance(db, media).catch((error) => {
       recordContainedServerIncident(db, BUILD_ID, error, {
         component: "maintenance",
       });

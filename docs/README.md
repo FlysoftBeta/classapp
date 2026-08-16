@@ -58,6 +58,7 @@ For any product change, start with:
 - [Offline system overview](./offline/README.md)
 - [Local data model and ownership](./offline/local-model.md)
 - [Consistency and recovery protocols](./offline/consistency-and-recovery.md)
+- [RemoteManager connection reliability](./offline/remote-connectivity.md)
 - [Binary storage, retention, and quota](./offline/storage-and-quota.md)
 - [Shell, HTTPS, and offline boot](./offline/shell-and-https.md)
 
@@ -66,6 +67,7 @@ For any product change, start with:
 - [Authentication and client trust](./systems/authentication.md)
 - [Community, conversations, posts, and articles](./systems/community-and-content.md)
 - [Document rendering and bundle reading](./systems/document-rendering.md)
+- [Music and media runtime](./systems/music.md)
 - [AI harness and workspace](./systems/ai-harness.md)
 - [AI billing](./systems/ai-billing.md)
 - [Build, startup, deployment, and rollback](./systems/update-and-startup.md)

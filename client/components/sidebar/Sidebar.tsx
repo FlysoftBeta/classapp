@@ -1,10 +1,6 @@
 import React, { useState } from "react";
 import Box from "@mui/material/Box";
-import type {
-  User,
-  AiConversation,
-  AiCreditBalance,
-} from "@/shared/types/api";
+import type { User, AiConversation, AiCreditBalance } from "@/shared/types/api";
 import type { Article } from "@/client/interact/presentation";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { FindGroupDialog } from "./FindGroupDialog";
@@ -13,6 +9,7 @@ import { ConversationSection } from "./ConversationSection";
 import { ArticleSection } from "./ArticleSection";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarSection } from "./SidebarSection";
+import { MediaSection } from "./MediaSection";
 import type { ConvEntry } from "@/client/interact/types";
 import { TaskManagerPopover } from "@/client/components/tasks/TaskManagerPopover";
 import { hasFeature } from "@/shared/features";
@@ -59,6 +56,8 @@ interface ConversationListProps {
   onAdmin: () => void;
   onArticles: () => void;
   onLearning: () => void;
+  onOpenMedia: () => void;
+  onOpenPlaylist: (playlistId: string) => void;
   onOpenArticle: (id: string) => void;
   sidebarArticles: Article[];
   currentArticleId?: string | null;
@@ -67,6 +66,7 @@ interface ConversationListProps {
   adminEnabled: boolean;
   articlesEnabled: boolean;
   learningEnabled: boolean;
+  mediaEnabled: boolean;
   aiConversations: AiConversation[];
   aiCredits: AiCreditBalance;
   aiAvailable: boolean;
@@ -87,6 +87,8 @@ export default function ConversationList({
   onAdmin,
   onArticles,
   onLearning,
+  onOpenMedia,
+  onOpenPlaylist,
   onOpenArticle,
   sidebarArticles,
   currentArticleId = null,
@@ -94,6 +96,7 @@ export default function ConversationList({
   adminEnabled,
   articlesEnabled,
   learningEnabled,
+  mediaEnabled,
   aiConversations,
   aiCredits,
   aiAvailable,
@@ -107,6 +110,7 @@ export default function ConversationList({
   const [findOpen, setFindOpen] = useState(false);
   const [convExpanded, setConvExpanded] = useState(true);
   const [articlesExpanded, setArticlesExpanded] = useState(true);
+  const [mediaExpanded, setMediaExpanded] = useState(true);
   const [tasksAnchor, setTasksAnchor] = useState<HTMLElement | null>(null);
   const [mode, setMode] = useState<SidebarMode>(initialMode);
 
@@ -204,6 +208,15 @@ export default function ConversationList({
               onExpandedChange={setArticlesExpanded}
             />
           )}
+          {mode === "media" && mediaEnabled && (
+            <MediaSection
+              online={online}
+              onOpenMedia={onOpenMedia}
+              onOpenPlaylist={onOpenPlaylist}
+              expanded={mediaExpanded}
+              onExpandedChange={setMediaExpanded}
+            />
+          )}
         </Box>
       </Box>
 
@@ -212,6 +225,7 @@ export default function ConversationList({
         onChange={setMode}
         aiEnabled={hasFeature(currentUser, "ai")}
         readingEnabled={articlesEnabled}
+        mediaEnabled={mediaEnabled}
       />
 
       <SidebarBottom

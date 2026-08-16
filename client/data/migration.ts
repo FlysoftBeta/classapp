@@ -37,12 +37,16 @@ const HISTORICAL_APPLICATION_STORES = [
   "domain_me_state",
   "domain_save",
   "domain_sync",
+  "domain_media_tracks",
+  "domain_media_lists",
+  "domain_media_list_items",
 ] as const;
 
 type MigrationPlan =
   | { kind: "nuke-yanked" }
   | { kind: "add-me-gate-state" }
-  | { kind: "drop-handle-indexes" };
+  | { kind: "drop-handle-indexes" }
+  | { kind: "add-media-stores" };
 
 interface OpenedDatabase {
   database: IDBDatabase;
@@ -136,6 +140,34 @@ function openDatabase(
         });
         return;
       }
+      if (plan.kind === "add-media-stores") {
+        // Media projections are reconstructible; add them without touching
+        // existing conversation/article stores or pending local decisions.
+        if (!db.objectStoreNames.contains(STORES.MEDIA_TRACKS)) {
+          const tracks = db.createObjectStore(STORES.MEDIA_TRACKS, {
+            keyPath: "id",
+          });
+          tracks.createIndex("by-provider", ["source", "provider_id"], {
+            unique: true,
+          });
+        }
+        if (!db.objectStoreNames.contains(STORES.MEDIA_LISTS)) {
+          const lists = db.createObjectStore(STORES.MEDIA_LISTS, {
+            keyPath: "id",
+          });
+          lists.createIndex("by-owner-kind", ["owner_user_id", "kind"]);
+        }
+        if (!db.objectStoreNames.contains(STORES.MEDIA_LIST_ITEMS)) {
+          db.createObjectStore(STORES.MEDIA_LIST_ITEMS, {
+            keyPath: ["list_id", "position"],
+          });
+        }
+        transaction.objectStore(STORES.GLOBALS).put({
+          key: GLOBAL_KEYS.APP_SCHEMA_VERSION,
+          value: APP_SCHEMA_VERSION,
+        });
+        return;
+      }
       // Keep the list explicit: a yanked schema must never leave an unknown
       // historical cache table carrying incompatible rows.
       for (const name of HISTORICAL_APPLICATION_STORES) {
@@ -211,7 +243,9 @@ export async function openApplicationDatabase(): Promise<IDBDatabase> {
           ? { kind: "add-me-gate-state" }
           : schemaVersion === 3
             ? { kind: "drop-handle-indexes" }
-            : { kind: "nuke-yanked" },
+            : schemaVersion === 4
+              ? { kind: "add-media-stores" }
+              : { kind: "nuke-yanked" },
       );
       // Shell and app are independent schema owners. If the other owner won
       // this physical version race, our request opens successfully without a

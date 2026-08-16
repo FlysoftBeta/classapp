@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { resolveBuildCache } from "./build-cache.mjs";
 import { BUILD_TARGET_NAMES, resolveBuildTarget } from "./build-targets.mjs";
 import { prepareRuntimeDependencies } from "./runtime-deps.mjs";
+import { assembleMediaArtifacts } from "./build-media.mjs";
 import { projectRoot, worktreePath } from "../paths.mjs";
 
 const root = projectRoot;
@@ -230,6 +231,8 @@ function build(targetName) {
   if (fs.existsSync(path.join(dist, "models.json"))) {
     copy(path.join(dist, "models.json"), path.join(current, "models.json"));
   }
+
+  assembleMediaArtifacts({ targetName, dist: current });
 
   prepareRuntimeDependencies({
     targetName,

@@ -1,6 +1,6 @@
 export const RUNTIME_DATABASE = "classapp-runtime";
 
-export const APP_SCHEMA_VERSION = 4;
+export const APP_SCHEMA_VERSION = 5;
 
 export const GLOBAL_KEYS = {
   ACTIVE_ME: "active-me",
@@ -24,6 +24,9 @@ export const STORES = {
   ME_STATE: "domain_me_state",
   SAVE: "domain_save",
   SYNC: "domain_sync",
+  MEDIA_TRACKS: "domain_media_tracks",
+  MEDIA_LISTS: "domain_media_lists",
+  MEDIA_LIST_ITEMS: "domain_media_list_items",
 } as const;
 
 export type StoreName = (typeof STORES)[keyof typeof STORES];
@@ -57,6 +60,22 @@ function createObjectiveStores(db: IDBDatabase): void {
   segments.createIndex("by-eviction", ["eviction_tier", "touched_at"]);
 
   db.createObjectStore(STORES.USERS, { keyPath: "id" });
+
+  const mediaTracks = db.createObjectStore(STORES.MEDIA_TRACKS, {
+    keyPath: "id",
+  });
+  mediaTracks.createIndex("by-provider", ["source", "provider_id"], {
+    unique: true,
+  });
+
+  const mediaLists = db.createObjectStore(STORES.MEDIA_LISTS, {
+    keyPath: "id",
+  });
+  mediaLists.createIndex("by-owner-kind", ["owner_user_id", "kind"]);
+
+  db.createObjectStore(STORES.MEDIA_LIST_ITEMS, {
+    keyPath: ["list_id", "position"],
+  });
 }
 
 function createActorStores(db: IDBDatabase): void {

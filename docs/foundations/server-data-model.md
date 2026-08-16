@@ -16,6 +16,7 @@ the reconstructible browser projection, server rows are not casually nuked.
 | AI conversation     | `ai_conversations`, `ai_messages`, `ai_runs`, `ai_run_attempts`, tags and context snapshots |
 | AI accounting/tools | policy, enrollments, accounts, reservations, usage, ledger, file operations                 |
 | learning            | `words`, `user_word_progress`                                                               |
+| media               | `media_tracks`, `media_assets`, `media_lists`, `media_list_items`, `media_stream_grants`   |
 | operations          | `incident_groups`, `incidents`, `teach_documents`, `config`, user configuration             |
 
 This is not a table-oriented architecture. Each Data module owns the SQL for a

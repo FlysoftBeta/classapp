@@ -30,6 +30,13 @@ import {
 } from "@/shared/bundles/protocol";
 import { appStatePayloadSchema } from "@/shared/types/events";
 import {
+  mediaConfigSchema,
+  mediaPlaylistSnapshotSchema,
+  mediaPlaylistSummarySchema,
+  mediaQueueSnapshotSchema,
+  mediaTrackSchema,
+} from "@/shared/media/types";
+import {
   createPostPayloadSchema,
   createStickerPostPayloadSchema,
 } from "@/shared/validation/posts";
@@ -1042,6 +1049,101 @@ export const actionContracts = {
       }),
     ),
     okSchema,
+  ),
+
+  // ── Media ──────────────────────────────────────────────────────────────────
+  mediaSearchAction: contract(
+    one(
+      object({
+        query: nonEmptyString,
+        limit: z.number().int().positive().max(50).optional(),
+      }),
+    ),
+    object({ tracks: z.array(mediaTrackSchema) }),
+  ),
+  mediaEnsureTrackAction: contract(
+    one(
+      object({
+        source: nonEmptyString,
+        providerId: nonEmptyString,
+        canonicalUrl: z.string().optional(),
+      }),
+    ),
+    object({ track: mediaTrackSchema }),
+  ),
+  mediaFetchQueueAction: contract(noArgs, mediaQueueSnapshotSchema),
+  mediaAddToQueueAction: contract(
+    one(object({ trackId: nonEmptyString })),
+    mediaQueueSnapshotSchema,
+  ),
+  mediaRemoveFromQueueAction: contract(
+    one(object({ trackId: nonEmptyString })),
+    mediaQueueSnapshotSchema,
+  ),
+  mediaClearQueueAction: contract(noArgs, mediaQueueSnapshotSchema),
+  mediaPlayAction: contract(
+    one(object({ trackId: nonEmptyString })),
+    object({
+      grant_token: z.string(),
+      url: z.string(),
+      expires_at: z.number().int().nonnegative(),
+    }),
+  ),
+  mediaListPlaylistsAction: contract(
+    noArgs,
+    object({ playlists: z.array(mediaPlaylistSummarySchema) }),
+  ),
+  mediaFetchPlaylistAction: contract(
+    one(nonEmptyString),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaCreatePlaylistAction: contract(
+    one(object({ title: z.string().min(1).max(80) })),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaDeletePlaylistAction: contract(one(nonEmptyString), okSchema),
+  mediaAddToPlaylistAction: contract(
+    one(
+      object({
+        playlistId: nonEmptyString,
+        trackId: nonEmptyString,
+      }),
+    ),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaRemoveFromPlaylistAction: contract(
+    one(
+      object({
+        playlistId: nonEmptyString,
+        trackId: nonEmptyString,
+      }),
+    ),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaUpdatePlaylistRetentionAction: contract(
+    one(
+      object({
+        playlistId: nonEmptyString,
+        days: z.number().int().positive().max(365),
+      }),
+    ),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaFetchConfigAction: contract(noArgs, mediaConfigSchema),
+  mediaAdminUpdateConfigAction: contract(
+    one(
+      object({
+        max_volume: z.number().min(0).max(1).optional(),
+        eviction_days: z.number().int().positive().max(3650).optional(),
+        storage_limit_bytes: z
+          .number()
+          .int()
+          .positive()
+          .max(2 ** 48)
+          .optional(),
+      }),
+    ),
+    mediaConfigSchema,
   ),
 } as const;
 

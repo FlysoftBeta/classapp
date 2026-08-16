@@ -65,6 +65,9 @@ import {
   type NotificationConfigService,
 } from "@/server/services/notificationConfigService";
 import { VersionedUserConfigService } from "@/server/services/versionedUserConfigService";
+import { MediaActorFacade } from "@/server/domain/facade/media";
+import { MediaService } from "@/server/services/mediaService";
+import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
 import {
   createRoleService,
   type RoleService,
@@ -154,6 +157,10 @@ const authService = scopeEntry<AuthService>("AuthService");
 const incidentLogArchiveService = scopeEntry<IncidentLogArchiveService>(
   "IncidentLogArchiveService",
 );
+const mediaService = scopeEntry<MediaService>("MediaService");
+const mediaPlaylistService = scopeEntry<MediaPlaylistService>(
+  "MediaPlaylistService",
+);
 
 const postFacade = scopeEntry<PostActorFacade>("PostActorFacade");
 const groupFacade = scopeEntry<GroupActorFacade>("GroupActorFacade");
@@ -186,6 +193,7 @@ const authenticationFacade = scopeEntry<AuthenticationFacade>(
   "AuthenticationFacade",
 );
 const incidentFacade = scopeEntry<IncidentFacade>("IncidentFacade");
+const mediaFacade = scopeEntry<MediaActorFacade>("MediaActorFacade");
 
 /** Typed request composition. Every getter has Scope get-or-init semantics. */
 export class Composition {
@@ -511,6 +519,26 @@ export class Composition {
           this.scope.getOrInit(
             incidentLogArchiveService,
             () => new IncidentLogArchiveService(this.scope.db, BUILD_ID),
+          ),
+        ),
+    );
+  }
+
+  media(): MediaActorFacade {
+    return this.scope.getOrInit(
+      mediaFacade,
+      () =>
+        new MediaActorFacade(
+          this.scope.actor(),
+          this.scope.getOrInit(mediaService, () =>
+            new MediaService(this.scope.db, this.scope.runtime.media),
+          ),
+          this.scope.getOrInit(
+            mediaPlaylistService,
+            () => new MediaPlaylistService(this.scope.db),
+          ),
+          this.scope.getOrInit(auditService, () =>
+            createAuditService(this.scope.db),
           ),
         ),
     );

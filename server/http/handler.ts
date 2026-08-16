@@ -11,6 +11,8 @@ import { POST as deploy } from "@/server/http/routes/deploy";
 import { GET as downloadBackup } from "@/server/http/routes/backupDownload";
 import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocumentDownload";
 import { GET as downloadIncidentLogs } from "@/server/http/routes/incidentLogsDownload";
+import { GET as mediaAudio } from "@/server/http/routes/mediaAudio";
+import { GET as mediaCover } from "@/server/http/routes/mediaCover";
 import { renderServiceWorker } from "@/server/http/serviceWorker";
 import { handleHttpError } from "@/server/http/errorResponse";
 import {
@@ -279,6 +281,34 @@ export function createHttpHandler(
               await downloadBackup(request(), {
                 params: Promise.resolve({
                   name: decodeURIComponent(backupMatch[1]),
+                }),
+              }),
+              res,
+            );
+            return;
+          }
+          const mediaAudioMatch = url.pathname.match(
+            /^\/api\/media\/tracks\/([^/]+)\/audio$/,
+          );
+          if (req.method === "GET" && mediaAudioMatch) {
+            await sendResponse(
+              await mediaAudio(request(), {
+                params: Promise.resolve({
+                  id: decodeURIComponent(mediaAudioMatch[1]),
+                }),
+              }),
+              res,
+            );
+            return;
+          }
+          const mediaCoverMatch = url.pathname.match(
+            /^\/api\/media\/tracks\/([^/]+)\/cover$/,
+          );
+          if (req.method === "GET" && mediaCoverMatch) {
+            await sendResponse(
+              await mediaCover(request(), {
+                params: Promise.resolve({
+                  id: decodeURIComponent(mediaCoverMatch[1]),
                 }),
               }),
               res,

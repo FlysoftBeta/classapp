@@ -12,6 +12,13 @@ import {
   aiRunUpdatedPayloadSchema,
   aiSidebarUpdatedPayloadSchema,
 } from "@/shared/types/events/ai";
+import {
+  mediaConfigChangedEventSchema,
+  mediaMaterializationChangedEventSchema,
+  mediaPlaylistChangedEventSchema,
+  mediaQueueChangedEventSchema,
+  mediaTrackChangedEventSchema,
+} from "@/shared/media/types";
 
 const emptyPayloadSchema = z.object({}).strict();
 
@@ -71,6 +78,11 @@ export const eventContracts = {
   "user.config_changed": userConfigChangedEventSchema,
   "ai.run.updated": aiRunUpdatedPayloadSchema,
   "ai.sidebar.updated": aiSidebarUpdatedPayloadSchema,
+  "media.track.changed": mediaTrackChangedEventSchema,
+  "media.playlist.changed": mediaPlaylistChangedEventSchema,
+  "media.queue.changed": mediaQueueChangedEventSchema,
+  "media.config.changed": mediaConfigChangedEventSchema,
+  "media.materialization.changed": mediaMaterializationChangedEventSchema,
   "remote.resubscribe": z.object({ reason: z.string() }).strict(),
   "remote.hello": z.object({ buildId: z.string() }).strict(),
 } as const satisfies Record<string, z.ZodType>;

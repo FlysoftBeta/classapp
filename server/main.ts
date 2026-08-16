@@ -29,9 +29,10 @@ export async function bootstrap(
   });
   const db = getDb();
   const runtime = new Runtime(db, config.buildId);
+  await runtime.media.start();
   if (config.update) setUpdateManager(new UpdateManager(db, config.update));
   const protocol = new WebSocketProtocol(config.buildId, runtime);
-  const stopMaintenance = startMaintenance(db);
+  const stopMaintenance = startMaintenance(db, runtime.media);
   const servers: Server[] = [];
   const listen = async (
     server: Server,
@@ -85,5 +86,6 @@ export async function bootstrap(
           new Promise<void>((resolve) => server.close(() => resolve())),
       ),
     );
+    await runtime.media.stop();
   };
 }

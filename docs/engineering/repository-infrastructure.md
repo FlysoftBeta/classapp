@@ -43,7 +43,10 @@ Development scripts live in `scripts/dev/`:
 - `dev.mjs` starts and terminates the paired client/server processes;
 - `reset-dev.mjs` resets bounded development state and is destructive;
 - `update-pdfrender.mjs` refreshes and verifies the supported native renderer
-  artifacts.
+  artifacts;
+- `update-media.mjs` refreshes pinned yt-dlp/plugin URLs and hashes in
+  `lib/media/artifacts-manifest.json` and prepares the current platform's POT
+  server cache under `.cache/media`.
 
 All repository paths should go through `scripts/paths.mjs` or an existing path
 owner rather than depend on the caller's current directory.
@@ -54,6 +57,9 @@ owner rather than depend on the caller's current directory.
 
 - `build.mjs` assembles one target release and final bootstrap/deploy archives;
 - `build-targets.mjs` is the closed set of supported platform targets;
+- `build-media.mjs` verifies and copies pinned media artifacts (yt-dlp, POT
+  plugin, the ClassApp music-search extractor plugin, POT server cache) for
+  the selected target;
 - `runtime-deps.mjs` prepares the pinned native Node runtime/dependencies;
 - `build-infini.mjs`, `build-wasm.mjs`, and `build-zstd-web.mjs` build browser
   Wasm compatible with the fixed target;
@@ -130,6 +136,7 @@ rules, and CI meaning as one deliberate infrastructure change.
 | `npm run test:manual-legacy` | a human can inspect the legacy-browser harness           |
 | `npm run https:check`        | configured certificate material passes script checks     |
 | `npm run pdfrender:update`   | remote renderer artifacts can be fetched and verified    |
+| `npm run media:update`       | media manifest is refreshed and POT server cache rebuilt |
 
 These commands are not interchangeable. `npm run build` is not needed merely
 to typecheck; `npm run lint` does not execute co-located tests; Vite does not
