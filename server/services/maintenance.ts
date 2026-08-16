@@ -1,5 +1,6 @@
 /**
- * Periodic maintenance: session cleanup, client TTL, idle-lock notifications.
+ * Periodic maintenance: session cleanup, client TTL, idle-lock notifications,
+ * and storage quota reconciliation.
  */
 import type BetterSqlite3 from "better-sqlite3";
 import { publishClient } from "./eventBus";
@@ -13,11 +14,9 @@ import {
   listInactiveClientIds,
 } from "@/server/data/maintenance";
 import { createClientService } from "@/server/services/clientsService";
-import { createTeachDocumentsService } from "@/server/services/teachDocumentsService";
-import { startOfficeDocumentMonitor } from "./officeDocumentMonitor";
 import { recordContainedServerIncident } from "./incidentService";
 import { BUILD_ID } from "@/server/infra/env";
-import type { MediaRuntime } from "@/server/runtime/mediaRuntime";
+import type { Runtime } from "@/server/runtime/runtime";
 
 /** Temporary client records with no recent activity are removed after this many days. */
 const CLIENT_TTL_DAYS = 1;
@@ -59,22 +58,21 @@ const MAINTENANCE_INTERVAL_MS = 60_000;
 
 async function runMaintenance(
   db: BetterSqlite3.Database,
-  media: MediaRuntime | null,
+  runtime: Runtime,
 ): Promise<void> {
   cleanupExpiredSessions(db);
   cleanupInactiveClients(db);
   notifyIdleLockedClients(db);
-  await createTeachDocumentsService(db).cleanupExpired();
-  if (media) await media.reconcileStorage();
+  runtime.media.reconcileTransient();
+  await runtime.storage.reconcileStorage();
 }
 
 export function startMaintenance(
   db: BetterSqlite3.Database,
-  media: MediaRuntime | null = null,
+  runtime: Runtime,
 ): () => void {
-  const stopOfficeDocumentMonitor = startOfficeDocumentMonitor(db);
   const run = () =>
-    void runMaintenance(db, media).catch((error) => {
+    void runMaintenance(db, runtime).catch((error) => {
       recordContainedServerIncident(db, BUILD_ID, error, {
         component: "maintenance",
       });
@@ -84,6 +82,5 @@ export function startMaintenance(
   timer.unref();
   return () => {
     clearInterval(timer);
-    stopOfficeDocumentMonitor();
   };
 }

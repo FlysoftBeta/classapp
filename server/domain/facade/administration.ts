@@ -267,7 +267,7 @@ export class AdministrationActorFacade {
         file_size: document.file_size,
         created_at: document.created_at,
       })),
-      monitor_available: process.platform === "win32",
+      monitor_available: this.teachDocuments.monitorAvailable(),
     };
   }
 

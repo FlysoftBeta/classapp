@@ -1,15 +1,25 @@
 import crypto from "node:crypto";
-import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { Database } from "better-sqlite3";
 import {
   MediaError,
-  PotServerSupervisor,
   YtDlpProvider,
-  type LiveStreamHandle,
-  type MediaProgressFn,
+  createProviderTrack,
+  type ProviderStream,
   type ProviderTrack,
 } from "@/lib/media";
+import { coverUrlOf } from "@/lib/media/track";
+import { PotServerSupervisor } from "@/server/runtime/potServer";
+import {
+  ConcurrencyLimiter,
+  LayerThrottle,
+} from "@/server/runtime/mediaThrottle";
+import {
+  AudioStreamSession,
+  type StreamSubscription,
+} from "@/server/runtime/mediaStreamSession";
 import type { MediaRuntimeConfig } from "@/server/infra/runtimeConfig";
 import type { MediaTrack } from "@/shared/media/types";
 import {
@@ -17,27 +27,36 @@ import {
   deleteExpiredQueues,
   deleteExpiredStreamGrants,
   findReadyAsset,
-  listExpiredEvictionCandidates,
-  listLruEvictionCandidates,
+  listAssets,
   markAssetDownloading,
   markAssetFailed,
-  publishAsset,
-  readyAssetBytes,
   mediaConfig,
-  listAssets,
+  publishAsset,
+  readyAssetBytesForTrack,
+  reconcileReadyAssetQuotaItems,
 } from "@/server/data/media";
 import {
-  createMediaObjectStore,
-  type MediaObjectStore,
-} from "@/server/infra/mediaStore";
+  ObjectStore,
+  type StagedWrite,
+} from "@/server/storage/objectStore";
+import { QuotaService } from "@/server/storage/quotaService";
 import { publishSystem } from "@/server/services/eventBus";
 import { recordContainedServerIncident } from "@/server/services/incidentService";
 import { BUILD_ID } from "@/server/infra/env";
+
+const MAX_CONCURRENT_AUDIO_STREAMS = 4;
+const STREAM_SLOT_WAIT_MS = 30_000;
 
 interface MaterializationJob {
   trackId: string;
   kind: "audio" | "cover";
   promise: Promise<void>;
+}
+
+export interface MediaSearchHit {
+  track: ProviderTrack;
+  /** Hidden cover locator for server catalog persistence, not for playback. */
+  coverUrl: string | null;
 }
 
 interface ReadyWaiter {
@@ -47,16 +66,18 @@ interface ReadyWaiter {
 }
 
 export function trackToProvider(track: MediaTrack): ProviderTrack {
-  return {
-    source: track.source,
-    providerId: track.provider_id,
-    canonicalUrl: track.canonical_url,
-    title: track.title,
-    artists: track.artists,
-    album: track.album,
-    durationMs: track.duration_ms,
-    thumbnailUrl: track.thumbnail_url,
-  };
+  return createProviderTrack(
+    {
+      source: track.source,
+      providerId: track.provider_id,
+      canonicalUrl: track.canonical_url,
+      title: track.title,
+      artists: track.artists,
+      album: track.album,
+      durationMs: track.duration_ms,
+    },
+    track.thumbnail_url,
+  );
 }
 
 /**
@@ -66,8 +87,16 @@ export function trackToProvider(track: MediaTrack): ProviderTrack {
 export class MediaRuntime {
   private provider: YtDlpProvider;
   private readonly pot: PotServerSupervisor;
-  readonly objects: MediaObjectStore;
-  private readonly jobs = new Map<string, MaterializationJob>();
+  private readonly searchThrottle = new LayerThrottle(5_000);
+  private readonly materializeThrottle = new LayerThrottle(1_000);
+  private readonly streamStartThrottle = new LayerThrottle(1_000);
+  private readonly streamSlots = new ConcurrencyLimiter(
+    MAX_CONCURRENT_AUDIO_STREAMS,
+    STREAM_SLOT_WAIT_MS,
+  );
+  readonly objects: ObjectStore;
+  private readonly coverJobs = new Map<string, MaterializationJob>();
+  private readonly audioSessions = new Map<string, AudioStreamSession>();
   private readonly leases = new Map<string, number>();
   private readonly waiters = new Map<string, ReadyWaiter[]>();
   private started = false;
@@ -75,9 +104,9 @@ export class MediaRuntime {
   constructor(
     private readonly db: Database,
     private readonly config: MediaRuntimeConfig,
-    objectRoot: string,
+    objects: ObjectStore,
   ) {
-    this.objects = createMediaObjectStore(objectRoot);
+    this.objects = objects;
     const configured =
       config.ytDlpPath !== null &&
       config.ytDlpPath !== "" &&
@@ -103,6 +132,8 @@ export class MediaRuntime {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.ensureQuotaGroup();
+    this.reconcileQuotaItems();
     if (!this.available) {
       console.warn("[Media] yt-dlp path is not configured; media is disabled");
       return;
@@ -127,12 +158,14 @@ export class MediaRuntime {
       });
       console.warn("[Media] POT provider unavailable", error);
     }
-    await this.objects.reconcile();
   }
 
   async stop(): Promise<void> {
     this.started = false;
-    for (const job of this.jobs.values()) void job.promise.catch(() => undefined);
+    for (const session of [...this.audioSessions.values()]) session.dispose();
+    this.audioSessions.clear();
+    for (const job of this.coverJobs.values())
+      void job.promise.catch(() => undefined);
     for (const waiters of this.waiters.values()) {
       for (const waiter of waiters) {
         clearTimeout(waiter.timeout);
@@ -144,69 +177,196 @@ export class MediaRuntime {
     await this.pot.stop();
   }
 
-  search(query: string, limit: number, signal: AbortSignal) {
-    return this.provider.search(query, limit, signal);
+  async search(
+    query: string,
+    limit: number,
+    signal: AbortSignal,
+  ): Promise<MediaSearchHit[]> {
+    const tracks = await this.searchThrottle.run(() =>
+      this.provider.search(query, limit, signal),
+    );
+    return tracks.map((track) => ({
+      track,
+      coverUrl: coverUrlOf(track),
+    }));
   }
 
-  /** Start a background materialization; returns the current job promise. */
-  ensureMaterialized(track: MediaTrack, kind: "audio" | "cover"): Promise<void> {
-    const key = `${track.id}:${kind}`;
-    const existing = this.jobs.get(key);
+  /**
+   * Start a background materialization; returns the current job promise.
+   * Audio materialization runs through a shared AudioStreamSession so the
+   * same provider stream can also feed live relays.
+   */
+  ensureMaterialized(
+    track: MediaTrack,
+    kind: "audio" | "cover",
+  ): Promise<void> {
+    if (kind === "audio") return this.ensureAudioMaterialized(track);
+    return this.ensureCoverMaterialized(track);
+  }
+
+  private ensureAudioMaterialized(track: MediaTrack): Promise<void> {
+    if (findReadyAsset(this.db, track.id, "audio")) return Promise.resolve();
+    return (
+      this.getOrCreateAudioSession(track).materialization ?? Promise.resolve()
+    );
+  }
+
+  private ensureCoverMaterialized(track: MediaTrack): Promise<void> {
+    const key = `${track.id}:cover`;
+    const existing = this.coverJobs.get(key);
     if (existing) return existing.promise;
-    const promise = this.runMaterialization(track, kind);
-    this.jobs.set(key, { trackId: track.id, kind, promise });
+    const promise = this.runCoverMaterialization(track);
+    this.coverJobs.set(key, { trackId: track.id, kind: "cover", promise });
     void promise.finally(() => {
-      if (this.jobs.get(key)?.promise === promise) this.jobs.delete(key);
+      if (this.coverJobs.get(key)?.promise === promise) this.coverJobs.delete(key);
     });
     return promise;
   }
 
-  private async runMaterialization(
+  private getOrCreateAudioSession(track: MediaTrack): AudioStreamSession {
+    const existing = this.audioSessions.get(track.id);
+    if (existing) return existing;
+    const session = new AudioStreamSession({
+      findReady: () => findReadyAsset(this.db, track.id, "audio") !== null,
+      startProvider: (signal) => this.startAudioProvider(track, signal),
+      materializeFrom: (subscription) =>
+        this.materializeAudioFrom(track, subscription),
+      onDispose: (candidate) => {
+        if (this.audioSessions.get(track.id) === candidate) {
+          this.audioSessions.delete(track.id);
+        }
+      },
+    });
+    this.audioSessions.set(track.id, session);
+    return session;
+  }
+
+  private async startAudioProvider(
     track: MediaTrack,
-    kind: "audio" | "cover",
+    signal: AbortSignal,
+  ): Promise<{ stream: ProviderStream; release(): void }> {
+    const releaseSlot = await this.streamSlots.acquire(signal);
+    try {
+      const stream = await this.streamStartThrottle.run(() =>
+        this.provider.streamTrack(trackToProvider(track), {
+          signal,
+          onProgress: (percent) => this.publishAudioProgress(track, percent),
+        }),
+      );
+      return { stream, release: releaseSlot };
+    } catch (error) {
+      releaseSlot();
+      throw error;
+    }
+  }
+
+  private publishAudioProgress(
+    track: MediaTrack,
+    percent: number | null,
+  ): void {
+    if (!this.started) return;
+    publishSystem({
+      kind: "media.materialization.changed",
+      data: {
+        track_id: track.id,
+        audio_state: "downloading",
+        audio_progress: percent === null ? null : Math.floor(percent),
+        cover_state: coverState(this.db, track.id),
+      },
+    });
+  }
+
+  private async materializeAudioFrom(
+    track: MediaTrack,
+    subscription: StreamSubscription,
   ): Promise<void> {
+    const ref = this.objects.ref("media", `${track.id}/audio`);
+    let staged: StagedWrite | null = null;
+    try {
+      if (findReadyAsset(this.db, track.id, "audio")) return;
+      markAssetDownloading(this.db, track.id, "audio");
+      staged = await this.objects.stage(ref);
+      const materialized = await writeChunks(
+        subscription.read(),
+        staged.path,
+      );
+      const object = await staged.commit({
+        bytes: materialized.bytes,
+        sha256: materialized.sha256,
+      });
+      staged = null;
+      publishAsset(this.db, track.id, "audio", {
+        objectPath: object.ref.key,
+        mime: "audio/webm",
+        bytes: materialized.bytes,
+        sha256: materialized.sha256,
+      });
+      this.accountReadyTrack(track.id);
+      this.resolveWaiters(`${track.id}:audio`);
+      publishSystem({
+        kind: "media.materialization.changed",
+        data: {
+          track_id: track.id,
+          audio_state: audioState(this.db, track.id),
+          audio_progress: null,
+          cover_state: coverState(this.db, track.id),
+        },
+      });
+    } catch (error) {
+      await staged?.discard();
+      if (error instanceof MediaError && error.kind === "cancelled") return;
+      const code =
+        error instanceof MediaError ? error.kind : "materialization-failed";
+      markAssetFailed(this.db, track.id, "audio", code);
+      publishSystem({
+        kind: "media.materialization.changed",
+        data: {
+          track_id: track.id,
+          audio_state: audioState(this.db, track.id),
+          audio_progress: null,
+          cover_state: coverState(this.db, track.id),
+        },
+      });
+      recordContainedServerIncident(this.db, BUILD_ID, error, {
+        component: "media-runtime",
+        phase: "materialize-audio",
+        track_id: track.id,
+      });
+    }
+  }
+
+  private async runCoverMaterialization(track: MediaTrack): Promise<void> {
+    const kind = "cover";
+    const ref = this.objects.ref("media", `${track.id}/${kind}`);
+    let staged: StagedWrite | null = null;
     try {
       const ready = findReadyAsset(this.db, track.id, kind);
       if (ready) return;
       markAssetDownloading(this.db, track.id, kind);
-      const stagePath = this.objects.stagePath(kind, track.id);
-      let lastProgressAt = 0;
-      const onProgress: MediaProgressFn = (percent) => {
-        if (!this.started) return;
-        const now = Date.now();
-        if (percent !== null && now - lastProgressAt < 1_000) return;
-        lastProgressAt = now;
-        publishSystem({
-          kind: "media.materialization.changed",
-          data: {
-            track_id: track.id,
-            audio_state: kind === "audio" ? "downloading" : audioState(this.db, track.id),
-            audio_progress:
-              kind === "audio" && percent !== null ? Math.floor(percent) : null,
-            cover_state: kind === "cover" ? "downloading" : coverState(this.db, track.id),
-          },
-        });
-      };
-      const result =
-        kind === "audio"
-          ? await this.provider.download(
-              trackToProvider(track),
-              stagePath,
-              onProgress,
-              new AbortController().signal,
-            )
-          : await this.provider.downloadCover(
-              trackToProvider(track),
-              stagePath,
-              new AbortController().signal,
-            );
-      const objectPath = await this.objects.publish(kind, track.id);
-      publishAsset(this.db, track.id, kind, {
-        objectPath,
-        mime: result.mime,
-        bytes: result.bytes,
-        sha256: result.sha256,
+      staged = await this.objects.stage(ref);
+      const outputPath = staged.path;
+      const materialized = await this.materializeThrottle.run(async () => {
+        const stream = await this.provider.streamCover(
+          trackToProvider(track),
+          { signal: new AbortController().signal },
+        );
+        return {
+          stream,
+          ...(await writeProviderStream(stream, outputPath)),
+        };
       });
+      const object = await staged.commit({
+        bytes: materialized.bytes,
+        sha256: materialized.sha256,
+      });
+      staged = null;
+      publishAsset(this.db, track.id, kind, {
+        objectPath: object.ref.key,
+        mime: materialized.stream.contentType,
+        bytes: materialized.bytes,
+        sha256: materialized.sha256,
+      });
+      this.accountReadyTrack(track.id);
       this.resolveWaiters(`${track.id}:${kind}`);
       publishSystem({
         kind: "media.materialization.changed",
@@ -218,13 +378,10 @@ export class MediaRuntime {
         },
       });
     } catch (error) {
-      await rm(this.objects.stagePath(kind, track.id), {
-        force: true,
-      }).catch(() => undefined);
+      await staged?.discard();
+      if (error instanceof MediaError && error.kind === "cancelled") return;
       const code =
-        error instanceof MediaError
-          ? error.kind
-          : "materialization-failed";
+        error instanceof MediaError ? error.kind : "materialization-failed";
       markAssetFailed(this.db, track.id, kind, code);
       publishSystem({
         kind: "media.materialization.changed",
@@ -235,7 +392,6 @@ export class MediaRuntime {
           cover_state: coverState(this.db, track.id),
         },
       });
-      if (error instanceof MediaError && error.kind === "cancelled") return;
       recordContainedServerIncident(this.db, BUILD_ID, error, {
         component: "media-runtime",
         phase: `materialize-${kind}`,
@@ -244,36 +400,61 @@ export class MediaRuntime {
     }
   }
 
-  /** Live relay for a metadata-only track. Backfill materialization runs too. */
-  async openLiveStream(
+  /**
+   * Live relay for a metadata-only track. The relay joins the track's shared
+   * AudioStreamSession, so concurrent listeners of the same track (and the
+   * background materialization job) share one yt-dlp invocation.
+   */
+  async streamTrack(
     track: MediaTrack,
     signal: AbortSignal,
-  ): Promise<LiveStreamHandle> {
-    void this.ensureMaterialized(track, "audio").catch(() => undefined);
-    const handle = await this.provider.openLiveStream(
-      trackToProvider(track),
-      (percent) => {
-        if (!this.started) return;
-        publishSystem({
-          kind: "media.materialization.changed",
-          data: {
-            track_id: track.id,
-            audio_state: "downloading",
-            audio_progress: percent === null ? null : Math.floor(percent),
-            cover_state: coverState(this.db, track.id),
-          },
-        });
-      },
-      signal,
-    );
+  ): Promise<ProviderStream> {
+    const ready = findReadyAsset(this.db, track.id, "audio");
+    if (ready) {
+      // Rare race: the HTTP route checked before calling us and the asset
+      // became ready in between. Keep the old direct-relay behavior.
+      const stream = await this.provider.streamTrack(trackToProvider(track), {
+        signal,
+        onProgress: (percent) => this.publishAudioProgress(track, percent),
+      });
+      this.touchOnStreamStart(track.id);
+      return stream;
+    }
     this.touchOnStreamStart(track.id);
-    return handle;
+    return this.getOrCreateAudioSession(track).subscribe();
   }
 
   private touchOnStreamStart(trackId: string): void {
     this.db
-      .prepare("UPDATE media_tracks SET last_used_at = datetime('now') WHERE id = ?")
+      .prepare(
+        "UPDATE media_tracks SET last_used_at = datetime('now') WHERE id = ?",
+      )
       .run(trackId);
+    new QuotaService(this.db).touch("media", trackId);
+  }
+
+  quotaPolicy() {
+    const config = mediaConfig(this.db);
+    return {
+      name: "media",
+      maxBytes: config.storage_limit_bytes,
+      targetRatio: 0.8,
+      minAgeMs: config.eviction_days * 24 * 60 * 60_000,
+    };
+  }
+
+  private reconcileQuotaItems(): void {
+    // One SQL upsert-seed; ready catalog size must not be materialized here.
+    reconcileReadyAssetQuotaItems(this.db);
+  }
+
+  private ensureQuotaGroup(): void {
+    new QuotaService(this.db).configure(this.quotaPolicy());
+  }
+
+  private accountReadyTrack(trackId: string): void {
+    const bytes = readyAssetBytesForTrack(this.db, trackId);
+    if (bytes > 0) new QuotaService(this.db).upsert("media", trackId, bytes);
   }
 
   acquireLease(trackId: string): () => void {
@@ -325,40 +506,22 @@ export class MediaRuntime {
     }
   }
 
-  /** Hybrid eviction: 7-day age sweep first, then the 4 GiB high watermark. */
-  async reconcileStorage(): Promise<void> {
+  /** Non-storage transient cleanup that still belongs to the media mechanism. */
+  reconcileTransient(): void {
     deleteExpiredStreamGrants(this.db);
     deleteExpiredQueues(this.db);
-    await this.objects.reconcile();
-    const config = mediaConfig(this.db);
-    const expired = listExpiredEvictionCandidates(
-      this.db,
-      config.eviction_days,
-      100,
-    );
-    for (const candidate of expired) await this.evict(candidate.trackId);
-    const limit = config.storage_limit_bytes;
-    const target = Math.floor(limit * 0.8);
-    while (readyAssetBytes(this.db) > limit) {
-      const candidates = listLruEvictionCandidates(this.db, 50);
-      if (candidates.length === 0) break;
-      let reclaimed = false;
-      for (const candidate of candidates) {
-        if (!(await this.evict(candidate.trackId))) continue;
-        reclaimed = true;
-        if (readyAssetBytes(this.db) <= target) break;
-      }
-      if (!reclaimed) break;
-    }
   }
 
-  private async evict(trackId: string): Promise<boolean> {
+  /** Owner evictor registered with the shared quota service. */
+  async evictTrack(trackId: string): Promise<boolean> {
     if (this.hasLease(trackId)) return false;
-    const paths = this.db.transaction(() =>
+    const objectKeys = this.db.transaction(() =>
       deleteAssetsIfUnreferenced(this.db, trackId),
     )();
-    if (paths === null || paths.length === 0) return false;
-    for (const objectPath of paths) await this.objects.trash(objectPath);
+    if (objectKeys === null || objectKeys.length === 0) return false;
+    for (const objectKey of objectKeys) {
+      await this.objects.trash(this.objects.ref("media", objectKey));
+    }
     publishSystem({
       kind: "media.materialization.changed",
       data: {
@@ -370,6 +533,38 @@ export class MediaRuntime {
     });
     return true;
   }
+}
+
+async function writeProviderStream(
+  stream: ProviderStream,
+  outputPath: string,
+): Promise<{ bytes: number; sha256: string }> {
+  try {
+    return await writeChunks(stream.read(), outputPath);
+  } catch (error) {
+    await stream.stop().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function writeChunks(
+  chunks: AsyncIterable<Uint8Array>,
+  outputPath: string,
+): Promise<{ bytes: number; sha256: string }> {
+  const hash = crypto.createHash("sha256");
+  let bytes = 0;
+  const meter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
+  await pipeline(Readable.from(chunks), meter, createWriteStream(outputPath));
+  if (bytes === 0) {
+    throw new MediaError("invalid-payload", "媒体流没有产生内容", true);
+  }
+  return { bytes, sha256: hash.digest("hex") };
 }
 
 function audioState(

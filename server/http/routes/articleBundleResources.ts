@@ -1,8 +1,5 @@
 import { Readable } from "node:stream";
-import {
-  loadRenderArchive,
-  streamArchiveResource,
-} from "@/server/infra/renderArchive";
+import { streamArchiveResource } from "@/server/storage/renderArchive";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 import { currentScope } from "@/server/runtime/scope";
 import {
@@ -41,18 +38,10 @@ export async function POST(
     ) {
       throw new PublicError("资源请求包含重复项");
     }
-    const article = await currentScope()
+    const archive = await currentScope()
       .facades()
       .articles()
-      .bundleResource(id);
-    if (
-      !article ||
-      article.content_kind !== "bundle" ||
-      !article.archive_path
-    ) {
-      throw new PublicError("文档资源不存在");
-    }
-    const archive = await loadRenderArchive(article.archive_path);
+      .storedBundle(id);
     const resources = parsed.data.content_ids.map((contentId) => {
       const resource = archive.resources.get(contentId);
       if (!resource) throw new PublicError("文档资源不存在");
@@ -73,9 +62,8 @@ export async function POST(
         if (!resource.stored_size) continue;
         // Open range streams lazily so large batches do not accumulate file
         // descriptors while earlier resources are still being transferred.
-        const source = Readable.fromWeb(
-          streamArchiveResource(archive, resource) as never,
-        );
+        const webStream = await streamArchiveResource(archive, resource);
+        const source = Readable.fromWeb(webStream as never);
         for await (const chunk of source) yield chunk as Buffer;
       }
     }

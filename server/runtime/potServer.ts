@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { delay } from "./throttle";
-import { MediaError } from "./errors";
+import { MediaError } from "@/lib/media";
 
 export interface PotServerOptions {
   entry: string | null;
@@ -47,7 +46,13 @@ export class PotServerSupervisor {
     const startup = new Promise<string>((resolve, reject) => {
       let stderr = "";
       const timeout = setTimeout(() => {
-        reject(new MediaError("pot-unavailable", "POT server startup timed out", true));
+        reject(
+          new MediaError(
+            "pot-unavailable",
+            "POT server startup timed out",
+            true,
+          ),
+        );
       }, this.options.timeoutMs ?? 20_000);
       this.child?.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString("utf8");
@@ -61,7 +66,13 @@ export class PotServerSupervisor {
       });
       this.child?.once("error", (error) => {
         clearTimeout(timeout);
-        reject(new MediaError("pot-unavailable", `POT server failed to start: ${error.message}`, true));
+        reject(
+          new MediaError(
+            "pot-unavailable",
+            `POT server failed to start: ${error.message}`,
+            true,
+          ),
+        );
       });
       this.child?.once("exit", (code) => {
         clearTimeout(timeout);
@@ -127,6 +138,10 @@ export class PotServerSupervisor {
       setTimeout(resolve, 5_000).unref();
     });
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function freePort(): Promise<number> {

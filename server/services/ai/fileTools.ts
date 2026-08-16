@@ -9,11 +9,7 @@ import {
   planAiFileOperation,
   finishAiFileOperation,
 } from "@/server/data/ai";
-import {
-  inspectAiFileStore,
-  mutateAiFileStore,
-  readAiFile,
-} from "@/server/infra/aiFileStore";
+import type { AiWorkspace } from "@/server/services/ai/aiWorkspace";
 
 const pathProperty = {
   type: "string",
@@ -118,6 +114,7 @@ async function mutationResult(input: {
   userId: string;
   runId: string;
   call: ResponseFunctionToolCall;
+  workspace: AiWorkspace;
   mutation:
     | { kind: "create"; path: string; content: string }
     | {
@@ -137,11 +134,11 @@ async function mutationResult(input: {
   if (existing?.status === "committed" && existing.result_json) {
     return JSON.parse(existing.result_json) as unknown;
   }
-  const before = await inspectAiFileStore(input.userId);
+  const before = await input.workspace.inspect();
   if (existing?.status === "planned") {
     let current: string | null = null;
     try {
-      current = (await readAiFile(input.userId, input.mutation.path)).content;
+      current = (await input.workspace.read(input.mutation.path)).content;
     } catch {
       // A missing file is the expected committed state only for delete.
     }
@@ -186,7 +183,7 @@ async function mutationResult(input: {
   try {
     const result = {
       ok: true,
-      ...(await mutateAiFileStore(input.userId, input.mutation)),
+      ...(await input.workspace.mutate(input.mutation)),
     };
     finishAiFileOperation(input.db, input.userId, input.call.call_id, result);
     return result;
@@ -208,16 +205,17 @@ export async function executeAiFileTool(input: {
   userId: string;
   runId: string;
   call: ResponseFunctionToolCall;
+  workspace: AiWorkspace;
 }): Promise<string> {
   try {
     const args = parseArguments(input.call);
     let result: unknown;
     switch (input.call.name) {
       case "list_files":
-        result = { ok: true, ...(await inspectAiFileStore(input.userId)) };
+        result = { ok: true, ...(await input.workspace.inspect()) };
         break;
       case "read_file": {
-        const file = await readAiFile(input.userId, stringArg(args, "path"));
+        const file = await input.workspace.read(stringArg(args, "path"));
         result = {
           ok: true,
           ...file,

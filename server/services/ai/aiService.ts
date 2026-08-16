@@ -32,13 +32,8 @@ import {
   type AiModelPlaceholder,
   type AiModelsConfig,
 } from "@/server/infra/aiModels";
-import {
-  inspectAiFileStore,
-  deleteAiAttachments,
-  readAiAttachmentDataUrl,
-  removeAiFileStore,
-  storeAiAttachments,
-} from "@/server/infra/aiFileStore";
+import type { ObjectStore } from "@/server/storage/objectStore";
+import { AiWorkspace } from "@/server/services/ai/aiWorkspace";
 import { BUILD_ID } from "@/server/infra/env";
 import { publishUser } from "@/server/services/eventBus";
 import {
@@ -253,6 +248,7 @@ function routeIsCompatible(
 async function messageItems(
   userId: string,
   messages: ReturnType<typeof listAiBranchMessages>,
+  workspace: AiWorkspace,
 ) {
   return await Promise.all(
     messages.map(async (message) => {
@@ -265,7 +261,7 @@ async function messageItems(
       const images = await Promise.all(
         message.attachments.map(async (attachment) => ({
           type: "input_image" as const,
-          image_url: await readAiAttachmentDataUrl(userId, attachment),
+          image_url: await workspace.readAttachmentDataUrl(attachment),
           detail: "auto" as const,
         })),
       );
@@ -282,6 +278,7 @@ export class AiService {
     private readonly db: Database,
     private readonly executions: AiExecutionRuntime,
     private readonly billing: AiBillingService,
+    private readonly objects: ObjectStore,
   ) {}
 
   status() {
@@ -308,7 +305,7 @@ export class AiService {
   async purgeUser(userId: string): Promise<void> {
     this.executions.abortUser(userId);
     purgeAiConversationData(this.db, userId);
-    await removeAiFileStore(userId);
+    await new AiWorkspace(this.db, userId, this.objects).remove();
   }
 
   async search(user: User, query: string) {
@@ -465,8 +462,9 @@ export class AiService {
       }
       return { name: image.name, mime: image.mime, bytes };
     });
+    const workspace = new AiWorkspace(this.db, user.id, this.objects);
     const attachments = decodedImages.length
-      ? await storeAiAttachments(user.id, decodedImages)
+      ? await workspace.storeAttachments(decodedImages)
       : [];
     try {
       this.db.transaction(() => {
@@ -493,8 +491,7 @@ export class AiService {
         }
       })();
     } catch (error) {
-      await deleteAiAttachments(
-        user.id,
+      await workspace.deleteAttachments(
         attachments.map((attachment) => attachment.path),
       );
       if (
@@ -762,15 +759,16 @@ export class AiService {
         compacted = { summary: null, recent, charged: 0 };
       }
       charged += compacted.charged;
-      const workspace = await inspectAiFileStore(input.user.id);
+      const workspace = new AiWorkspace(this.db, input.user.id, this.objects);
+      const workspaceCatalog = await workspace.inspect();
       let instructions = AGENT_SYSTEM_PROMPT;
       if (compacted.summary) {
         instructions += `\n\n<prior_context_summary>\n${compacted.summary}\n</prior_context_summary>`;
       }
-      instructions += `\n\n<workspace_catalog revision="${workspace.revision}">\n${workspace.files
+      instructions += `\n\n<workspace_catalog revision="${workspaceCatalog.revision}">\n${workspaceCatalog.files
         .map((file) => `${file.path} (${file.size} bytes)`)
         .join("\n")}\n</workspace_catalog>`;
-      let items = await messageItems(input.user.id, compacted.recent);
+      let items = await messageItems(input.user.id, compacted.recent, workspace);
       let lastPersist = 0;
       for (let round = 0; round <= route.maxToolRounds; round += 1) {
         if (
@@ -822,6 +820,7 @@ export class AiService {
             userId: input.user.id,
             runId: input.runId,
             call,
+            workspace,
           });
           toolOutputs.push({
             type: "function_call_output",
@@ -935,6 +934,7 @@ export function createAiService(
   db: Database,
   executions: AiExecutionRuntime,
   billing: AiBillingService,
+  objects: ObjectStore,
 ): AiService {
-  return new AiService(db, executions, billing);
+  return new AiService(db, executions, billing, objects);
 }

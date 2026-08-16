@@ -22,7 +22,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 23;
+const CURRENT_SCHEMA_VERSION = 24;
 
 type SchemaMigration = (db: Database) => void;
 
@@ -348,6 +348,32 @@ const MEDIA_SCHEMA = `
   END;
 `;
 
+const STORAGE_QUOTA_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS storage_eviction_groups (
+    name         TEXT PRIMARY KEY,
+    max_bytes    INTEGER NOT NULL DEFAULT 0 CHECK (max_bytes >= 0),
+    target_ratio REAL NOT NULL DEFAULT 0.8 CHECK (target_ratio > 0 AND target_ratio <= 1),
+    min_age_ms   INTEGER NOT NULL DEFAULT 0 CHECK (min_age_ms >= 0),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS storage_quota_items (
+    group_name     TEXT NOT NULL REFERENCES storage_eviction_groups(name) ON DELETE CASCADE,
+    item_key       TEXT NOT NULL,
+    bytes          INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+    touch_time_ms  INTEGER NOT NULL,
+    touch_freq     REAL NOT NULL DEFAULT 0 CHECK (touch_freq >= 0),
+    created_at_ms  INTEGER NOT NULL,
+    PRIMARY KEY (group_name, item_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_touch
+    ON storage_quota_items(group_name, touch_time_ms);
+  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_bytes
+    ON storage_quota_items(group_name, bytes);
+  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_freq
+    ON storage_quota_items(group_name, touch_freq);
+`;
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, (db) => db.exec(INCIDENT_SCHEMA)],
   [
@@ -444,6 +470,16 @@ const MIGRATIONS = new Map<number, SchemaMigration>([
       db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
         1 << 7,
       );
+    },
+  ],
+  // Storage ownership moved to server/storage. Quota tables and the new
+  // teach-document reference name are installed here; existing feature-owned
+  // files are intentionally not rewritten by a compatibility layer.
+  [
+    23,
+    (db) => {
+      db.exec(STORAGE_QUOTA_SCHEMA);
+      db.exec("ALTER TABLE teach_documents RENAME COLUMN blob_path TO object_key");
     },
   ],
 ]);
@@ -715,7 +751,7 @@ function installSchema(db: Database): void {
       application   TEXT NOT NULL,
       document_type TEXT NOT NULL CHECK (document_type IN ('word', 'powerpoint', 'excel')),
       name          TEXT NOT NULL,
-      blob_path     TEXT NOT NULL UNIQUE,
+      object_key    TEXT NOT NULL UNIQUE,
       file_size     INTEGER NOT NULL DEFAULT 0,
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -769,6 +805,7 @@ function installSchema(db: Database): void {
   db.exec(INCIDENT_SCHEMA);
   db.exec(AI_SCHEMA);
   db.exec(MEDIA_SCHEMA);
+  db.exec(STORAGE_QUOTA_SCHEMA);
   // Worktree/dev databases created while schema v23 was being developed may
   // already have media_lists without retention_days. Production upgrades from
   // v22 always create the complete table above, so this is a narrow repair.
@@ -910,8 +947,6 @@ function ensureConfigDefaults(db: Database) {
     INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_content', '');
     INSERT OR IGNORE INTO config (key, value) VALUES ('announcement_revision', '0');
     INSERT OR IGNORE INTO config (key, value) VALUES ('media_max_volume', '1');
-    INSERT OR IGNORE INTO config (key, value) VALUES ('media_eviction_days', '7');
-    INSERT OR IGNORE INTO config (key, value) VALUES ('media_storage_limit_bytes', '4294967296');
   `);
 }
 

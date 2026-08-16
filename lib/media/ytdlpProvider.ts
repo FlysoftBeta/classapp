@@ -1,29 +1,26 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
-import { createReadStream } from "node:fs";
 import { MediaError } from "./errors";
+import { coverUrlOf, createProviderTrack } from "./track";
 import type {
-  LiveStreamHandle,
-  MaterializedAsset,
-  MediaProgressFn,
   MediaProvider,
+  ProviderStream,
   ProviderTrack,
+  StreamOptions,
 } from "./types";
-import { LayerThrottle } from "./throttle";
 
 export interface YtDlpProviderOptions {
   binaryPath: string | null;
   nodePath?: string;
   pluginDirs?: readonly string[];
   potBaseUrl?: string | null;
-  searchCooldownMs?: number;
-  downloadCooldownMs?: number;
   searchTimeoutMs?: number;
-  downloadTimeoutMs?: number;
+  infoTimeoutMs?: number;
   maxSearchOutputBytes?: number;
+  maxInfoOutputBytes?: number;
 }
 
+const SOURCE = "youtube-music";
+const AUDIO_FORMAT = "bestaudio[acodec=opus]/bestaudio";
 const MUSIC_SEARCH_URL =
   "https://music.youtube.com/search?sp=EgWKAQIIAWoKEAoQAxAEEAkQBQ%3D%3D";
 
@@ -41,6 +38,7 @@ interface RawEntry {
   artist?: unknown;
   channel?: unknown;
   thumbnail?: unknown;
+  thumbnails?: unknown;
   webpage_url?: unknown;
   original_url?: unknown;
   url?: unknown;
@@ -61,6 +59,27 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+function bestThumbnailUrl(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  let best: { url: string; preference: number } | null = null;
+  for (const item of value) {
+    if (item === null || typeof item !== "object") continue;
+    const url = asString((item as { url?: unknown }).url);
+    if (!url) continue;
+    const rawPreference = (item as { preference?: unknown }).preference;
+    const preference =
+      typeof rawPreference === "number" && Number.isFinite(rawPreference)
+        ? rawPreference
+        : 0;
+    if (!best || preference > best.preference) best = { url, preference };
+  }
+  return best?.url ?? null;
+}
+
+function coverUrlFrom(raw: RawEntry): string | null {
+  return asString(raw.thumbnail) ?? bestThumbnailUrl(raw.thumbnails);
+}
+
 function normalizeEntry(raw: RawEntry): ProviderTrack | null {
   const providerId = asString(raw.id);
   const title = asString(raw.title);
@@ -75,34 +94,33 @@ function normalizeEntry(raw: RawEntry): ProviderTrack | null {
     asString(raw.original_url) ??
     asString(raw.url) ??
     `https://music.youtube.com/watch?v=${encodeURIComponent(providerId)}`;
-  return {
-    source: "youtube-music",
-    providerId,
-    canonicalUrl,
-    title,
-    artists: artists.length
-      ? artists
-      : artist || channel
-        ? [artist ?? channel!]
-        : [],
-    album: asString(raw.album),
-    durationMs: Math.round(duration * 1000),
-    thumbnailUrl: asString(raw.thumbnail),
-  };
+  return createProviderTrack(
+    {
+      source: SOURCE,
+      providerId,
+      canonicalUrl,
+      title,
+      artists: artists.length
+        ? artists
+        : artist || channel
+          ? [artist ?? channel!]
+          : [],
+      album: asString(raw.album),
+      durationMs: Math.round(duration * 1000),
+    },
+    coverUrlFrom(raw),
+  );
 }
 
+/**
+ * yt-dlp backend. The provider only parses upstream answers and resolves
+ * tracks/covers into byte streams; throttling, storage, and server-owned
+ * lifecycle stay with the caller.
+ */
 export class YtDlpProvider implements MediaProvider {
-  readonly source = "youtube-music";
-  private readonly searchThrottle: LayerThrottle;
-  private readonly downloadThrottle: LayerThrottle;
-  private cooldownUntil = 0;
+  readonly source = SOURCE;
 
-  constructor(private readonly options: YtDlpProviderOptions) {
-    this.searchThrottle = new LayerThrottle(options.searchCooldownMs ?? 5_000);
-    this.downloadThrottle = new LayerThrottle(
-      options.downloadCooldownMs ?? 1_000,
-    );
-  }
+  constructor(private readonly options: YtDlpProviderOptions) {}
 
   private binary(): string {
     if (!this.options.binaryPath) {
@@ -133,109 +151,84 @@ export class YtDlpProvider implements MediaProvider {
     return args;
   }
 
-  private async run(
+  /** Bounded parse invocation: stdout must stay small enough for JSON.parse. */
+  private runBounded(
     args: string[],
     timeoutMs: number,
     maxOutputBytes: number,
     signal: AbortSignal,
-    cooldownLayer: "search" | "download",
-    onProgress?: MediaProgressFn,
   ): Promise<YtDlpRunResult> {
-    const binary = this.binary();
-    const throttle =
-      cooldownLayer === "search" ? this.searchThrottle : this.downloadThrottle;
-    return throttle.run(async () => {
-      if (Date.now() < this.cooldownUntil) {
-        throw new MediaError(
-          "rate-limited",
-          "媒体后端正在冷却，请稍后重试",
-          true,
-        );
-      }
-      return new Promise<YtDlpRunResult>((resolve, reject) => {
-        const child = spawn(binary, args, {
-          windowsHide: true,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const stdout: Buffer[] = [];
-        const stderr: string[] = [];
-        let stdoutBytes = 0;
-        let settled = false;
+    if (signal.aborted) {
+      return Promise.reject(new MediaError("cancelled", "媒体后端请求已取消"));
+    }
+    return new Promise<YtDlpRunResult>((resolve, reject) => {
+      const child = spawn(this.binary(), args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const stdout: Buffer[] = [];
+      const stderr: string[] = [];
+      let stdoutBytes = 0;
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined = undefined;
 
-        const onAbort = () => {
-          killChild(child);
-          if (!settled) {
-            settled = true;
-            reject(new MediaError("cancelled", "媒体后端请求已取消"));
-          }
-        };
-        if (signal.aborted) {
-          onAbort();
+      const cleanup = () => {
+        if (timeout) clearTimeout(timeout);
+        signal.removeEventListener("abort", onAbort);
+      };
+      const fail = (error: MediaError) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        killChild(child);
+        reject(error);
+      };
+      const onAbort = () =>
+        fail(new MediaError("cancelled", "媒体后端请求已取消"));
+
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      timeout = setTimeout(
+        () => fail(new MediaError("timeout", "媒体后端请求超时", true)),
+        timeoutMs,
+      );
+      timeout.unref();
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdoutBytes += chunk.length;
+        if (stdoutBytes > maxOutputBytes) {
+          fail(new MediaError("output-too-large", "媒体后端输出超出限制"));
           return;
         }
-        signal.addEventListener("abort", onAbort, { once: true });
-
-        const timeout = setTimeout(() => {
-          killChild(child);
-          if (!settled) {
-            settled = true;
-            reject(new MediaError("timeout", "媒体后端请求超时", true));
-          }
-        }, timeoutMs);
-        timeout.unref();
-
-        child.stdout.on("data", (chunk: Buffer) => {
-          stdoutBytes += chunk.length;
-          if (stdoutBytes > maxOutputBytes) {
-            killChild(child);
-            if (!settled) {
-              settled = true;
-              reject(
-                new MediaError("output-too-large", "媒体后端输出超出限制"),
-              );
-            }
-            return;
-          }
-          stdout.push(chunk);
-        });
-        child.stderr.on("data", (chunk: Buffer) => {
-          const text = chunk.toString("utf8");
-          stderr.push(text);
-          if (stderr.length > 500) stderr.shift();
-          if (onProgress) {
-            for (const line of text.split("\n")) {
-              const match = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
-              if (match) onProgress(Number(match[1]));
-            }
-          }
-        });
-        child.once("error", (error) => {
-          clearTimeout(timeout);
-          if (!settled) {
-            settled = true;
-            reject(
-              new MediaError(
-                "provider-unavailable",
-                `无法启动 yt-dlp: ${error.message}`,
-                true,
-              ),
-            );
-          }
-        });
-        child.once("exit", (code) => {
-          clearTimeout(timeout);
-          signal.removeEventListener("abort", onAbort);
-          if (settled) return;
-          settled = true;
-          const text = stderr.join("");
-          if (code !== 0) {
-            reject(classifyExit(code, text));
-            return;
-          }
-          resolve({
-            stdout: Buffer.concat(stdout),
-            stderr: text,
-          });
+        stdout.push(chunk);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr.push(chunk.toString("utf8"));
+        if (stderr.length > 500) stderr.shift();
+      });
+      child.once("error", (error) => {
+        fail(
+          new MediaError(
+            "provider-unavailable",
+            `无法启动 yt-dlp: ${error.message}`,
+            true,
+          ),
+        );
+      });
+      child.once("exit", (code) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (code !== 0) {
+          reject(classifyExit(code, stderr.join("")));
+          return;
+        }
+        resolve({
+          stdout: Buffer.concat(stdout),
+          stderr: stderr.join(""),
         });
       });
     });
@@ -247,7 +240,7 @@ export class YtDlpProvider implements MediaProvider {
     signal: AbortSignal,
   ): Promise<ProviderTrack[]> {
     const url = `${MUSIC_SEARCH_URL}&q=${encodeURIComponent(query)}`;
-    const result = await this.run(
+    const result = await this.runBounded(
       [
         ...this.baseArgs(),
         // The classapp-music-search plugin puts artist/album/duration and
@@ -262,9 +255,13 @@ export class YtDlpProvider implements MediaProvider {
       this.options.searchTimeoutMs ?? 50_000,
       this.options.maxSearchOutputBytes ?? 64 * 1024 * 1024,
       signal,
-      "search",
     );
-    const parsed: unknown = JSON.parse(result.stdout.toString("utf8"));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.stdout.toString("utf8"));
+    } catch {
+      throw new MediaError("invalid-payload", "媒体搜索返回了无效数据");
+    }
     if (parsed === null || typeof parsed !== "object") {
       throw new MediaError("invalid-payload", "媒体搜索返回了无效数据");
     }
@@ -272,78 +269,24 @@ export class YtDlpProvider implements MediaProvider {
     if (!Array.isArray(rawEntries)) {
       throw new MediaError("invalid-payload", "媒体搜索没有返回结果列表");
     }
-    const tracks = rawEntries
+    return rawEntries
       .map((entry) => normalizeEntry(entry as RawEntry))
       .filter((track): track is ProviderTrack => track !== null);
-    if (tracks.length === 0) return [];
-    return tracks;
   }
 
-  async download(
+  async streamTrack(
     track: ProviderTrack,
-    outputPath: string,
-    onProgress: MediaProgressFn,
-    signal: AbortSignal,
-  ): Promise<MaterializedAsset> {
-    await this.run(
-      [
-        ...this.baseArgs(),
-        "--format",
-        "bestaudio[acodec=opus]/bestaudio",
-        "--no-playlist",
-        "--newline",
-        "--progress",
-        "--output",
-        outputPath,
-        track.canonicalUrl,
-      ],
-      this.options.downloadTimeoutMs ?? 60 * 60_000,
-      Number.MAX_SAFE_INTEGER,
-      signal,
-      "download",
-      onProgress,
-    );
-    const info = await stat(outputPath);
-    if (!info.isFile() || info.size === 0) {
-      throw new MediaError("invalid-payload", "媒体下载没有产生文件", true);
+    options: StreamOptions,
+  ): Promise<ProviderStream> {
+    if (options.signal.aborted) {
+      throw new MediaError("cancelled", "媒体流请求已取消");
     }
-    return describeFile(outputPath, info.size, "audio/webm");
-  }
-
-  async downloadCover(
-    track: ProviderTrack,
-    outputPath: string,
-    signal: AbortSignal,
-  ): Promise<MaterializedAsset> {
-    if (!track.thumbnailUrl) {
-      throw new MediaError("not-found", "该曲目没有封面");
-    }
-    const response = await fetch(track.thumbnailUrl, { signal });
-    if (!response.ok) {
-      throw new MediaError(
-        "provider-unavailable",
-        `封面下载失败：HTTP ${response.status}`,
-        true,
-      );
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(outputPath, bytes);
-    return describeFile(outputPath, bytes.length, "image/jpeg");
-  }
-
-  async openLiveStream(
-    track: ProviderTrack,
-    onProgress: MediaProgressFn,
-    signal: AbortSignal,
-  ): Promise<LiveStreamHandle> {
-    const binary = this.binary();
     const child = spawn(
-      binary,
+      this.binary(),
       [
         ...this.baseArgs(),
         "--format",
-        "bestaudio[acodec=opus]/bestaudio",
+        AUDIO_FORMAT,
         "--no-playlist",
         "--newline",
         "--progress",
@@ -353,8 +296,215 @@ export class YtDlpProvider implements MediaProvider {
       ],
       { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
     );
-    return readLiveChild(child, onProgress, signal);
+    return streamFromChild(child, "audio/webm", options);
   }
+
+  async streamCover(
+    track: ProviderTrack,
+    options: StreamOptions,
+  ): Promise<ProviderStream> {
+    // Tracks derived from search results or server rows usually carry a
+    // hidden cover locator. Otherwise parse one bounded info dump first; the
+    // caller never has to handle thumbnail URLs itself.
+    const coverUrl =
+      coverUrlOf(track) ?? (await this.resolveCoverUrl(track, options.signal));
+    if (!coverUrl) throw new MediaError("not-found", "该曲目没有封面");
+    if (options.signal.aborted) {
+      throw new MediaError("cancelled", "封面流请求已取消");
+    }
+
+    const controller = new AbortController();
+    let stopped = false;
+    const onAbort = () => {
+      stopped = true;
+      controller.abort();
+    };
+    options.signal.addEventListener("abort", onAbort, { once: true });
+    if (options.signal.aborted) {
+      onAbort();
+      throw new MediaError("cancelled", "封面流请求已取消");
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(coverUrl, { signal: controller.signal });
+    } catch (error) {
+      options.signal.removeEventListener("abort", onAbort);
+      if (options.signal.aborted) {
+        throw new MediaError("cancelled", "封面流请求已取消");
+      }
+      throw new MediaError(
+        "provider-unavailable",
+        `封面下载失败：${error instanceof Error ? error.message : String(error)}`,
+        true,
+      );
+    }
+    if (!response.ok) {
+      options.signal.removeEventListener("abort", onAbort);
+      throw new MediaError(
+        "provider-unavailable",
+        `封面下载失败：HTTP ${response.status}`,
+        true,
+      );
+    }
+    const body = response.body;
+    if (!body) {
+      options.signal.removeEventListener("abort", onAbort);
+      throw new MediaError("invalid-payload", "封面响应没有内容");
+    }
+    const contentType =
+      response.headers.get("content-type")?.split(";")[0]?.trim() ||
+      "image/jpeg";
+    return {
+      contentType,
+      async *read() {
+        const reader = body.getReader();
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return;
+            if (value) yield value;
+          }
+        } catch {
+          if (stopped || options.signal.aborted) {
+            throw new MediaError("cancelled", "封面流已取消");
+          }
+          throw new MediaError("provider-unavailable", "封面流传输中断", true);
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {
+            // Already closed or still settling; nothing to release.
+          }
+        }
+      },
+      async stop() {
+        options.signal.removeEventListener("abort", onAbort);
+        stopped = true;
+        controller.abort();
+        try {
+          await body.cancel();
+        } catch {
+          // Locked by an active reader; the abort above makes it fail instead.
+        }
+      },
+    };
+  }
+
+  /** Parse yt-dlp's own info JSON when a track carries no cover locator. */
+  private async resolveCoverUrl(
+    track: ProviderTrack,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const result = await this.runBounded(
+      [
+        ...this.baseArgs(),
+        "--skip-download",
+        "--dump-single-json",
+        "--no-playlist",
+        track.canonicalUrl,
+      ],
+      this.options.infoTimeoutMs ?? 120_000,
+      this.options.maxInfoOutputBytes ?? 16 * 1024 * 1024,
+      signal,
+    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.stdout.toString("utf8"));
+    } catch {
+      throw new MediaError("invalid-payload", "媒体信息返回了无效数据");
+    }
+    if (parsed === null || typeof parsed !== "object") {
+      throw new MediaError("invalid-payload", "媒体信息返回了无效数据");
+    }
+    return coverUrlFrom(parsed as RawEntry);
+  }
+}
+
+function streamFromChild(
+  child: ChildProcess,
+  contentType: string,
+  options: StreamOptions,
+): ProviderStream {
+  let stopped = false;
+  let stderrTail = "";
+
+  const onAbort = () => {
+    stopped = true;
+    killChild(child);
+  };
+  options.signal.addEventListener("abort", onAbort, { once: true });
+  if (options.signal.aborted) {
+    onAbort();
+  }
+
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderrTail = `${stderrTail}${chunk.toString("utf8")}`.slice(-4096);
+    if (options.onProgress) {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        const match = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
+        if (match) options.onProgress(Number(match[1]));
+      }
+    }
+  });
+
+  const completion = new Promise<void>((resolve, reject) => {
+    child.once("error", (error) => {
+      reject(
+        new MediaError(
+          "provider-unavailable",
+          `无法启动 yt-dlp: ${error.message}`,
+          true,
+        ),
+      );
+    });
+    child.once("exit", (code) => {
+      if (stopped || options.signal.aborted) {
+        reject(new MediaError("cancelled", "媒体流已取消"));
+        return;
+      }
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(classifyExit(code, stderrTail));
+    });
+  });
+  void completion.catch(() => undefined);
+
+  async function* read(): AsyncIterable<Uint8Array> {
+    const stdout = child.stdout;
+    if (!stdout) {
+      await completion;
+      return;
+    }
+    try {
+      for await (const chunk of stdout) {
+        yield chunk;
+      }
+    } catch (error) {
+      // A kill can close stdout before the exit handler wins the race;
+      // completion carries the classified reason, so prefer it here.
+      try {
+        await completion;
+      } catch (failure) {
+        throw failure;
+      }
+      throw error;
+    }
+    await completion;
+  }
+
+  return {
+    contentType,
+    read,
+    stop: async () => {
+      options.signal.removeEventListener("abort", onAbort);
+      stopped = true;
+      killChild(child);
+      await completion.catch(() => undefined);
+    },
+  };
 }
 
 function classifyExit(code: number | null, stderr: string): MediaError {
@@ -383,22 +533,6 @@ function classifyExit(code: number | null, stderr: string): MediaError {
   );
 }
 
-function describeFile(
-  path: string,
-  bytes: number,
-  mime: string,
-): Promise<MaterializedAsset> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash("sha256");
-    const stream = createReadStream(path);
-    stream.on("error", reject);
-    stream.on("data", (chunk: Buffer) => hash.update(chunk));
-    stream.on("end", () =>
-      resolve({ path, bytes, mime, sha256: hash.digest("hex") }),
-    );
-  });
-}
-
 function killChild(child: ChildProcess): void {
   if (child.exitCode !== null) return;
   if (process.platform === "win32") {
@@ -409,72 +543,4 @@ function killChild(child: ChildProcess): void {
   } else {
     child.kill("SIGKILL");
   }
-}
-
-function readLiveChild(
-  child: ChildProcess,
-  onProgress: MediaProgressFn,
-  signal: AbortSignal,
-): Promise<LiveStreamHandle> {
-  const chunks: Array<{ buffer: Uint8Array; resolve: () => void }> = [];
-  const waiters: Array<() => void> = [];
-  let ended = false;
-  let error: unknown = null;
-
-  const push = (buffer: Uint8Array): void => {
-    chunks.push({
-      buffer,
-      resolve: () => undefined,
-    });
-    const waiter = waiters.shift();
-    if (waiter) waiter();
-  };
-
-  async function* read(): AsyncIterable<Uint8Array> {
-    for (;;) {
-      const entry = chunks.shift();
-      if (entry) {
-        yield entry.buffer;
-        entry.resolve();
-        continue;
-      }
-      if (ended || error !== null) return;
-      await new Promise<void>((resolve) => waiters.push(resolve));
-    }
-  }
-
-  child.stdout?.on("data", (chunk: Buffer) => push(chunk));
-  let stderrTail = "";
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderrTail = `${stderrTail}${chunk.toString("utf8")}`.slice(-4096);
-    for (const line of chunk.toString("utf8").split("\n")) {
-      const match = /\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line);
-      if (match) onProgress(Number(match[1]));
-    }
-  });
-  child.once("error", (value) => {
-    error = value;
-    ended = true;
-    waiters.splice(0).forEach((resolve) => resolve());
-  });
-  child.once("exit", (code) => {
-    ended = true;
-    if (code !== 0 && error === null) {
-      error = classifyExit(code, stderrTail);
-    }
-    waiters.splice(0).forEach((resolve) => resolve());
-  });
-  const onAbort = () => {
-    killChild(child);
-  };
-  signal.addEventListener("abort", onAbort, { once: true });
-  return Promise.resolve({
-    read,
-    stop: async () => {
-      signal.removeEventListener("abort", onAbort);
-      killChild(child);
-      ended = true;
-      waiters.splice(0).forEach((resolve) => resolve());
-    },
-  });
 }

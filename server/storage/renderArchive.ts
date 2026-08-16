@@ -1,6 +1,5 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { Unzip } from "fflate";
 import { z } from "zod";
@@ -9,10 +8,10 @@ import type {
   BundleItem,
   BundleResource,
 } from "@/shared/bundles/protocol";
-import { DATA_ROOT } from "@/server/infra/env";
+import type { ObjectStore } from "./objectStore";
+import type { ObjectRef } from "./paths";
 import { PublicError } from "@/server/services/incidentService";
 
-const BLOB_ROOT = path.join(DATA_ROOT, "blobs");
 const MANIFEST_NAME = "manifest.json";
 const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 200_000;
@@ -81,7 +80,6 @@ type ArchiveManifest = z.infer<typeof renderArchiveManifestSchema>;
 type ArchiveResource = z.infer<typeof archiveResourceSchema>;
 
 export interface RenderArchiveIndex {
-  absolutePath: string;
   archiveSize: number;
   header: BundleHeader;
   items: BundleItem[];
@@ -92,6 +90,10 @@ export interface IndexedArchiveResource extends BundleResource {
   storedOffset: number;
 }
 
+export interface StoredRenderArchive extends RenderArchiveIndex {
+  stream(range?: { start: number; end: number }): Promise<ReadableStream<Uint8Array>>;
+}
+
 interface ZipEntrySummary {
   name: string;
   size: number;
@@ -99,27 +101,7 @@ interface ZipEntrySummary {
   compression: number;
 }
 
-const indexCache = new Map<string, Promise<RenderArchiveIndex>>();
-
-function normalizeRelativePath(relativePath: string): string {
-  const normalized = path.posix.normalize(relativePath.replaceAll("\\", "/"));
-  if (
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    path.posix.isAbsolute(normalized) ||
-    /^[A-Za-z]:\//.test(normalized)
-  ) {
-    throw new PublicError("无效归档路径");
-  }
-  return normalized;
-}
-
-export function resolveRenderArchivePath(relativePath: string): string {
-  return path.join(
-    BLOB_ROOT,
-    ...normalizeRelativePath(relativePath).split("/"),
-  );
-}
+const indexCache = new Map<string, Promise<StoredRenderArchive>>();
 
 function validEntryName(name: string): boolean {
   return (
@@ -129,10 +111,9 @@ function validEntryName(name: string): boolean {
   );
 }
 
-async function extractManifest(absolutePath: string): Promise<{
-  manifestBytes: Uint8Array;
-  entries: ZipEntrySummary[];
-}> {
+async function extractManifest(
+  chunks: AsyncIterable<Uint8Array>,
+): Promise<{ manifestBytes: Uint8Array; entries: ZipEntrySummary[] }> {
   const entries: ZipEntrySummary[] = [];
   const names = new Set<string>();
   const manifestChunks: Uint8Array[] = [];
@@ -178,9 +159,13 @@ async function extractManifest(absolutePath: string): Promise<{
   });
 
   try {
-    for await (const chunk of createReadStream(absolutePath)) {
+    for await (const chunk of chunks) {
       archive.push(
-        new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength),
+        new Uint8Array(
+          (chunk as Uint8Array).buffer,
+          (chunk as Uint8Array).byteOffset,
+          (chunk as Uint8Array).byteLength,
+        ),
         false,
       );
     }
@@ -231,7 +216,7 @@ function validateManifest(
   manifest: ArchiveManifest,
   entries: ZipEntrySummary[],
   archiveSize: number,
-): Omit<RenderArchiveIndex, "absolutePath"> {
+): Omit<RenderArchiveIndex, "archiveSize"> {
   const zipEntries = new Map(entries.map((entry) => [entry.name, entry]));
   const resources = new Map<string, IndexedArchiveResource>();
   const paths = new Set<string>();
@@ -348,7 +333,6 @@ function validateManifest(
   }
 
   return {
-    archiveSize,
     header: {
       protocol_version: 1,
       layout: "fixed",
@@ -370,54 +354,72 @@ function validateManifest(
 }
 
 /**
- * fflate owns ZIP parsing here. The resulting immutable offset index lets the
- * hot path read only selected STORED payloads without expanding the archive.
+ * Validate a renderer-produced archive on a local temporary path before it is
+ * published through the ObjectStore.
  */
-export async function inspectRenderArchive(
+export async function inspectRenderArchiveFile(
   absolutePath: string,
 ): Promise<RenderArchiveIndex> {
   const [info, { manifestBytes, entries }] = await Promise.all([
     stat(absolutePath),
-    extractManifest(absolutePath),
+    extractManifest(createReadStream(absolutePath)),
   ]);
   const manifest = parseManifest(manifestBytes);
   return {
-    absolutePath,
+    archiveSize: info.size,
     ...validateManifest(manifest, entries, info.size),
   };
 }
 
+/**
+ * Index a published archive through the ObjectStore. The immutable offset
+ * index keeps the hot path streaming selected STORED payloads only.
+ */
 export function loadRenderArchive(
-  relativePath: string,
-): Promise<RenderArchiveIndex> {
-  const absolutePath = resolveRenderArchivePath(relativePath);
-  let pending = indexCache.get(absolutePath);
+  objects: ObjectStore,
+  ref: ObjectRef,
+): Promise<StoredRenderArchive> {
+  const cacheKey = `${ref.namespace}:${ref.key}`;
+  let pending = indexCache.get(cacheKey);
   if (!pending) {
-    pending = inspectRenderArchive(absolutePath).catch((error) => {
-      indexCache.delete(absolutePath);
+    pending = (async () => {
+      const open = await objects.open(ref);
+      const { manifestBytes, entries } = await extractManifest(
+        Readable.fromWeb(open.body as never) as AsyncIterable<Uint8Array>,
+      );
+      const manifest = parseManifest(manifestBytes);
+      return {
+        archiveSize: open.size,
+        ...validateManifest(manifest, entries, open.size),
+        stream: (range: { start: number; end: number } | undefined) =>
+          objects.open(ref, range).then((value) => value.body),
+      };
+    })().catch((error) => {
+      indexCache.delete(cacheKey);
       throw error;
     });
-    indexCache.set(absolutePath, pending);
+    indexCache.set(cacheKey, pending);
   }
   return pending;
 }
 
-export function forgetRenderArchive(relativePath: string): void {
-  indexCache.delete(resolveRenderArchivePath(relativePath));
+export function forgetRenderArchive(ref: ObjectRef): void {
+  indexCache.delete(`${ref.namespace}:${ref.key}`);
 }
 
 export function streamArchiveResource(
-  index: RenderArchiveIndex,
+  archive: StoredRenderArchive,
   resource: IndexedArchiveResource,
-): ReadableStream<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
+  if (!resource.stored_size) {
+    return Promise.resolve(
+      new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+    );
+  }
   const end = resource.storedOffset + resource.stored_size - 1;
-  if (!resource.stored_size)
-    return new ReadableStream({
-      start(controller) {
-        controller.close();
-      },
-    });
-  return Readable.toWeb(
-    createReadStream(index.absolutePath, { start: resource.storedOffset, end }),
-  ) as ReadableStream<Uint8Array>;
+  return archive.stream({ start: resource.storedOffset, end });
 }

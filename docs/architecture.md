@@ -53,7 +53,8 @@ server/
   services/     coherent domain/operational mechanisms
   data/         SQL and database row mapping
   runtime/      process/request lifetimes, Actor, Facts, UnitOfWork, composition
-  infra/        filesystem, database bootstrap, render/update/runtime mechanisms
+  storage/      object blobs, manifest trees, path containment, quota service
+  infra/        database bootstrap, render process, config/update mechanisms
   validation/   semantic validation shared by server entry paths
 
 shared/         wire schemas, semantic DTOs, pure cross-runtime logic
@@ -90,7 +91,7 @@ not the domain error model.
 ```text
 protocol/http → actions → facades → services → data
 runtime -------------------↑         ↓
-infra supplies process/filesystem mechanisms where explicitly injected
+infra/storage supply process/filesystem mechanisms where explicitly injected
 ```
 
 Actions must not import Data or construct Services. Facades must not contain
@@ -137,7 +138,7 @@ from whether the client seems online.
 
 ## Data topology
 
-The authoritative server database is SQLite schema v22 in the examined working
+The authoritative server database is SQLite schema v24 in the examined working
 tree, with v17 as the accepted migration baseline. The browser uses the shared
 `classapp-runtime` IndexedDB database but has two independent schema owners:
 

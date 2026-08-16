@@ -16,8 +16,6 @@ const articleBaseShape = {
     }),
     z.object({
       type: z.literal("bundle"),
-      source_file: z.string(),
-      archive_file: z.string(),
       source_mime: z.string(),
       source_bytes: z.number().int().nonnegative(),
       archive_bytes: z.number().int().nonnegative(),
@@ -26,8 +24,6 @@ const articleBaseShape = {
     }),
   ]),
   content_kind: z.enum(["text", "bundle"]),
-  source_path: z.string().nullable().optional(),
-  archive_path: z.string().nullable().optional(),
   mime_type: z.string().nullable().optional(),
   file_size: z.number().nonnegative(),
   original_filename: z.string().nullable().optional(),

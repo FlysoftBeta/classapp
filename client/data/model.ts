@@ -49,8 +49,6 @@ export interface ObjectiveArticle {
     | "title"
     | "provider"
     | "content_kind"
-    | "source_path"
-    | "archive_path"
     | "mime_type"
     | "file_size"
     | "original_filename"

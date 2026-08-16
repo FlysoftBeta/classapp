@@ -39,16 +39,19 @@ async function main(): Promise<void> {
   ]);
   const db = getDb();
   const runtime = new Runtime(db, config.buildId);
+  await runtime.storage.start();
   await runtime.media.start();
+  runtime.teachDocuments.start();
   const backend = createServer(createHttpHandler(config, runtime));
   new WebSocketProtocol("dev", runtime).attach(backend);
-  const stopMaintenance = startMaintenance(db, runtime.media);
+  const stopMaintenance = startMaintenance(db, runtime);
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );
 
   const shutdown = async () => {
     stopMaintenance();
+    runtime.teachDocuments.stop();
     await runtime.media.stop();
     backend.close(() => process.exit(0));
   };

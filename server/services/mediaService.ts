@@ -13,6 +13,7 @@ import { issueStreamGrant } from "@/server/runtime/mediaRuntime";
 import { MediaError } from "@/lib/media";
 import { PublicError } from "@/server/services/incidentService";
 import { publishSystem, publishUser } from "@/server/services/eventBus";
+import { QuotaService } from "@/server/storage/quotaService";
 
 export function mapMediaError(error: unknown): PublicError {
   if (error instanceof MediaError) {
@@ -43,21 +44,17 @@ export class MediaService {
     const timeout = setTimeout(() => controller.abort(), 40_000);
     timeout.unref();
     try {
-      const providerTracks = await this.runtime.search(
-        query,
-        limit,
-        controller.signal,
-      );
-      const tracks = providerTracks.map((input) =>
+      const hits = await this.runtime.search(query, limit, controller.signal);
+      const tracks = hits.map(({ track, coverUrl }) =>
         ensureTrack(this.db, {
-          source: input.source,
-          providerId: input.providerId,
-          canonicalUrl: input.canonicalUrl,
-          title: input.title,
-          artists: input.artists,
-          album: input.album,
-          durationMs: input.durationMs,
-          thumbnailUrl: input.thumbnailUrl,
+          source: track.source,
+          providerId: track.providerId,
+          canonicalUrl: track.canonicalUrl,
+          title: track.title,
+          artists: [...track.artists],
+          album: track.album,
+          durationMs: track.durationMs,
+          thumbnailUrl: coverUrl,
         }),
       );
       for (const track of tracks) {
@@ -96,12 +93,9 @@ export class MediaService {
     const track = getTrack(this.db, trackId);
     if (!track) throw new PublicError("曲目不存在");
     touchTrack(this.db, trackId);
-    void this.runtime
-      .ensureMaterialized(track, "audio")
-      .catch(() => undefined);
-    void this.runtime
-      .ensureMaterialized(track, "cover")
-      .catch(() => undefined);
+    new QuotaService(this.db).touch("media", trackId);
+    void this.runtime.ensureMaterialized(track, "audio").catch(() => undefined);
+    void this.runtime.ensureMaterialized(track, "cover").catch(() => undefined);
     const grant = issueStreamGrant(this.db, trackId, userId);
     publishUser(userId, {
       kind: "media.track.changed",
@@ -118,12 +112,8 @@ export class MediaService {
   prepare(trackId: string): void {
     const track = getTrack(this.db, trackId);
     if (!track) throw new PublicError("曲目不存在");
-    void this.runtime
-      .ensureMaterialized(track, "audio")
-      .catch(() => undefined);
-    void this.runtime
-      .ensureMaterialized(track, "cover")
-      .catch(() => undefined);
+    void this.runtime.ensureMaterialized(track, "audio").catch(() => undefined);
+    void this.runtime.ensureMaterialized(track, "cover").catch(() => undefined);
   }
 
   updateConfig(input: {

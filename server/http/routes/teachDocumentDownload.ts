@@ -24,23 +24,21 @@ function contentDisposition(filename: string): string {
 }
 
 export async function GET(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    const { document, body } = await currentScope()
+    const { document, stream } = await currentScope()
       .facades()
       .administration()
       .downloadTeachDocument(id);
-    const arrayBuffer = new ArrayBuffer(body.byteLength);
-    new Uint8Array(arrayBuffer).set(body);
-    return new Response(arrayBuffer, {
+    return new Response(stream.body, {
       headers: {
         "Content-Type":
           MIME_TYPES[path.extname(document.name).toLowerCase()] ??
           "application/octet-stream",
-        "Content-Length": String(body.byteLength),
+        "Content-Length": String(stream.size),
         "Content-Disposition": contentDisposition(document.name),
         "Cache-Control": "no-store",
       },

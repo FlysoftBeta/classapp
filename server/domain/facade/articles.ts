@@ -94,6 +94,13 @@ export class ArticleActorFacade {
     this.requireCanPublish(user, groupId);
   }
 
+  /** Store and render one multipart PDF; DB publication stays a separate step. */
+  async storeBundleFile(file: File) {
+    await this.actor.requireFeature("articles");
+    await this.actor.requireFeature("ebook_reader");
+    return this.articles.storeBundle(file);
+  }
+
   async getMeta(
     articleId: string,
   ): Promise<{ article: ArticleWithMeta; users: UserMetadata[] }> {
@@ -108,9 +115,19 @@ export class ArticleActorFacade {
     return result;
   }
 
-  async bundleResource(articleId: string) {
+  async discardBundleFile(stored: Awaited<ReturnType<ArticleService["storeBundle"]>>) {
+    await this.actor.requireFeature("articles");
+    return this.articles.discardBundle(stored);
+  }
+
+  async streamBundleSource(articleId: string) {
     await this.getMeta(articleId);
-    return this.articles.bundleResource(articleId);
+    return this.articles.openSource(articleId);
+  }
+
+  async storedBundle(articleId: string) {
+    await this.getMeta(articleId);
+    return this.articles.storedBundle(articleId);
   }
 
   async segment(input: { articleId: string; offset: number }): Promise<{

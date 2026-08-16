@@ -7,7 +7,7 @@ export interface TeachDocument {
   application: string;
   document_type: TeachDocumentType;
   name: string;
-  blob_path: string;
+  object_key: string;
   file_size: number;
   created_at: string;
 }
@@ -18,14 +18,14 @@ export function insertTeachDocument(
 ): TeachDocument {
   db.prepare(
     `INSERT INTO teach_documents
-       (id, application, document_type, name, blob_path, file_size)
+       (id, application, document_type, name, object_key, file_size)
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     document.id,
     document.application,
     document.document_type,
     document.name,
-    document.blob_path,
+    document.object_key,
     document.file_size,
   );
   return findTeachDocument(db, document.id)!;
@@ -37,11 +37,24 @@ export function findTeachDocument(
 ): TeachDocument | undefined {
   return db
     .prepare(
-      `SELECT id, application, document_type, name, blob_path, file_size, created_at
+      `SELECT id, application, document_type, name, object_key, file_size, created_at
        FROM teach_documents
        WHERE id = ?`,
     )
     .get(id) as TeachDocument | undefined;
+}
+
+export function findTeachDocumentByObjectKey(
+  db: BetterSqlite3.Database,
+  objectKey: string,
+): TeachDocument | undefined {
+  return db
+    .prepare(
+      `SELECT id, application, document_type, name, object_key, file_size, created_at
+       FROM teach_documents
+       WHERE object_key = ?`,
+    )
+    .get(objectKey) as TeachDocument | undefined;
 }
 
 export function listTeachDocuments(
@@ -49,24 +62,35 @@ export function listTeachDocuments(
 ): TeachDocument[] {
   return db
     .prepare(
-      `SELECT id, application, document_type, name, blob_path, file_size, created_at
+      `SELECT id, application, document_type, name, object_key, file_size, created_at
        FROM teach_documents
        ORDER BY created_at DESC, rowid DESC`,
     )
     .all() as TeachDocument[];
 }
 
-export function listExpiredTeachDocuments(
+/**
+ * Seed/refresh teaching-document quota rows directly in SQL; the capture
+ * catalog may be large enough that Node-side iteration is unacceptable.
+ */
+export function reconcileTeachDocumentQuotaItems(
   db: BetterSqlite3.Database,
-  retentionDays: number,
-): TeachDocument[] {
-  return db
-    .prepare(
-      `SELECT id, application, document_type, name, blob_path, file_size, created_at
+): void {
+  db.prepare(
+    `INSERT INTO storage_quota_items
+       (group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms)
+     SELECT 'teach-documents', id, file_size,
+            CAST(strftime('%s', created_at) AS INTEGER) * 1000,
+            0,
+            CAST(strftime('%s', created_at) AS INTEGER) * 1000
        FROM teach_documents
-       WHERE created_at <= datetime('now', ?)`,
-    )
-    .all(`-${retentionDays} days`) as TeachDocument[];
+      WHERE true
+     ON CONFLICT(group_name, item_key) DO UPDATE SET
+       bytes = excluded.bytes,
+       touch_time_ms = excluded.touch_time_ms,
+       touch_freq = (storage_quota_items.touch_freq +
+         (excluded.touch_time_ms - storage_quota_items.touch_time_ms)) / 2.0`,
+  ).run();
 }
 
 export function deleteTeachDocuments(

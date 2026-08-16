@@ -114,6 +114,8 @@ export function useMediaPlayer() {
 
   const playTrack = useCallback(
     async (track: MediaTrack, context?: MediaPlayContext) => {
+      const player = useMediaStore.getState().player;
+      if (player.currentTrackId === track.id && player.loading) return;
       const playlistId = context?.playlistId ?? null;
       const playlist =
         playlistId === null

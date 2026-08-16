@@ -39,13 +39,25 @@ import {
   getUserConfig,
   setUserConfig,
 } from "@/server/services/userConfig";
-import { removeArticleBundle } from "@/server/infra/articleArtifacts";
+import { renderPdfArchive } from "@/server/infra/pdfRenderProcess";
+import {
+  forgetRenderArchive,
+  inspectRenderArchiveFile,
+  loadRenderArchive,
+  type StoredRenderArchive,
+} from "@/server/storage/renderArchive";
+import {
+  ObjectStore,
+  type BlobRead,
+} from "@/server/storage/objectStore";
+import { objectRef } from "@/server/storage/paths";
+import { QuotaService } from "@/server/storage/quotaService";
+import { bytes, formatBytes } from "@/shared/bytes";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
 import type { BundleSlice } from "@/shared/bundles/protocol";
-import {
-  loadRenderArchive,
-  type RenderArchiveIndex,
-} from "@/server/infra/renderArchive";
+
+const ARTICLE_QUOTA_GROUP = "article-bundles";
+const MAX_SOURCE_BYTES = bytes("200 MB");
 
 export interface CreateArticleInput {
   title: string;
@@ -64,14 +76,32 @@ export interface CreateBundleArticleInput {
   group_id: string;
 }
 
+export type StoredArticleBundle = Omit<
+  CreateBundleArticleInput,
+  "title" | "group_id"
+>;
+
 function requireTrimmed(value: string, message: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new ContractViolationError(message);
   return trimmed;
 }
 
+function normalizeArticleMime(file: File): StoredArticleBundle["source_mime"] {
+  const name = file.name.toLowerCase();
+  if (file.type === "application/pdf" || name.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+  throw new PublicError("仅支持 PDF 文件");
+}
+
 export class ArticleService {
-  constructor(private readonly db: Database) {}
+  private readonly quota = new QuotaService(this.db);
+
+  constructor(
+    private readonly db: Database,
+    private readonly objects: ObjectStore,
+  ) {}
 
   list(
     userId: string,
@@ -139,6 +169,58 @@ export class ArticleService {
     };
   }
 
+  /**
+   * Persist source, render, validate, publish both objects. The HTTP adapter
+   * only inserts the DB row after this returns.
+   */
+  async storeBundle(file: File): Promise<StoredArticleBundle> {
+    if (!file.size) throw new PublicError("文件不能为空");
+    if (file.size > MAX_SOURCE_BYTES) {
+      throw new PublicError(`文件不能超过 ${formatBytes(MAX_SOURCE_BYTES)}`);
+    }
+    const sourceMime = normalizeArticleMime(file);
+    this.ensureQuotaGroup();
+    const bundleId = crypto.randomUUID();
+    const sourceRef = objectRef("article-bundles", `${bundleId}/source`);
+    const archiveRef = objectRef("article-bundles", `${bundleId}/render`);
+    await this.objects.putBlob(sourceRef, file.stream(), {
+      expectedBytes: file.size,
+    });
+    const staged = await this.objects.stage(archiveRef);
+    let archiveCommitted = false;
+    try {
+      await renderPdfArchive(
+        this.objects.materializedPath(sourceRef),
+        staged.path,
+      );
+      const index = await inspectRenderArchiveFile(staged.path);
+      await staged.commit({ bytes: index.archiveSize });
+      archiveCommitted = true;
+      const stored: StoredArticleBundle = {
+        source_path: sourceRef.key,
+        archive_path: archiveRef.key,
+        source_mime: sourceMime,
+        source_size: file.size,
+        archive_size: index.archiveSize,
+        original_filename: file.name || "document.pdf",
+        item_count: index.header.item_count,
+      };
+      this.quota.upsert(
+        ARTICLE_QUOTA_GROUP,
+        bundleId,
+        stored.source_size + stored.archive_size,
+      );
+      return stored;
+    } catch (error) {
+      await staged.discard();
+      if (archiveCommitted) {
+        await this.objects.trash(archiveRef).catch(() => undefined);
+      }
+      await this.objects.trash(sourceRef).catch(() => undefined);
+      throw error;
+    }
+  }
+
   createBundle(
     userId: string,
     input: CreateBundleArticleInput,
@@ -181,14 +263,6 @@ export class ArticleService {
     };
   }
 
-  bundleResource(articleId: string) {
-    const article = findArticleRecord(this.db, articleId);
-    if (!article || article.content_kind !== "bundle") {
-      throw new PublicError("文档资源不存在");
-    }
-    return article;
-  }
-
   access(articleId: string) {
     const article = findArticleAccessRow(this.db, articleId);
     if (!article) throw new PublicError("文章不存在");
@@ -212,13 +286,28 @@ export class ArticleService {
     };
   }
 
+  async openSource(articleId: string): Promise<BlobRead> {
+    const article = this.requireBundleRecord(articleId);
+    return this.objects.open(
+      objectRef("article-bundles", article.source_path),
+    );
+  }
+
+  async storedBundle(articleId: string): Promise<StoredRenderArchive> {
+    const article = this.requireBundleRecord(articleId);
+    return loadRenderArchive(
+      this.objects,
+      objectRef("article-bundles", article.archive_path),
+    );
+  }
+
   async openBundle(input: {
     articleId: string;
     cursor: number | null;
     before: number;
     after: number;
   }): Promise<BundleSlice> {
-    const index = await this.requireBundle(input.articleId);
+    const index = await this.storedBundle(input.articleId);
     if (!index.items.length) return this.sliceBundle(index, 0, 0);
     const cursor = Math.min(input.cursor ?? 0, index.items.length - 1);
     return this.sliceBundle(
@@ -234,7 +323,7 @@ export class ArticleService {
     direction: "before" | "after";
     limit: number;
   }): Promise<BundleSlice> {
-    const index = await this.requireBundle(input.articleId);
+    const index = await this.storedBundle(input.articleId);
     if (input.direction === "before") {
       const end = Math.min(input.cursor, index.items.length);
       return this.sliceBundle(index, Math.max(0, end - input.limit), end);
@@ -318,7 +407,7 @@ export class ArticleService {
     const record = findArticleRecord(this.db, articleId);
     deleteArticleById(this.db, articleId);
     if (record?.content_kind === "bundle")
-      await removeArticleBundle(record.source_path, record.archive_path);
+      await this.removeBundle(record.source_path, record.archive_path);
     const affectedUsers = new Set(
       [requestingUserId, record?.user_id].filter((id): id is string => !!id),
     );
@@ -355,7 +444,7 @@ export class ArticleService {
 
   async purgeUser(userId: string): Promise<void> {
     for (const artifact of purgeArticlesForUser(this.db, userId)) {
-      await removeArticleBundle(artifact.sourcePath, artifact.archivePath);
+      await this.removeBundle(artifact.sourcePath, artifact.archivePath);
     }
   }
 
@@ -370,20 +459,53 @@ export class ArticleService {
     return this.requireOwned(id, userId);
   }
 
-  private async requireBundle(articleId: string): Promise<RenderArchiveIndex> {
+  private requireBundleRecord(articleId: string) {
     const article = findArticleRecord(this.db, articleId);
     if (
       !article ||
       article.content_kind !== "bundle" ||
+      !article.source_path ||
       !article.archive_path
     ) {
       throw new PublicError("文档资源不存在");
     }
-    return loadRenderArchive(article.archive_path);
+    return {
+      source_path: article.source_path,
+      archive_path: article.archive_path,
+    };
+  }
+
+  async discardBundle(stored: StoredArticleBundle): Promise<void> {
+    await this.removeBundle(stored.source_path, stored.archive_path);
+  }
+
+  async removeBundle(
+    sourcePath: string | null | undefined,
+    archivePath: string | null | undefined,
+  ): Promise<void> {
+    const paths = [sourcePath, archivePath].filter(
+      (value): value is string => !!value,
+    );
+    for (const key of paths) {
+      const ref = objectRef("article-bundles", key);
+      if (ref.key.split("/")[1] === "render") forgetRenderArchive(ref);
+      await this.objects.trash(ref);
+    }
+    const bundleId = paths[0]?.split("/")[0];
+    if (bundleId) this.quota.remove(ARTICLE_QUOTA_GROUP, bundleId);
+  }
+
+  private ensureQuotaGroup(): void {
+    this.quota.configure({
+      name: ARTICLE_QUOTA_GROUP,
+      maxBytes: 0,
+      targetRatio: 0.8,
+      minAgeMs: 0,
+    });
   }
 
   private sliceBundle(
-    index: RenderArchiveIndex,
+    index: StoredRenderArchive,
     start: number,
     end: number,
   ): BundleSlice {
@@ -408,11 +530,13 @@ export class ArticleService {
       exhausted_after: end >= index.items.length,
     };
   }
+
   private requireOwned(id: string, userId: string) {
     const article = findArticleForUser(this.db, id, userId);
     if (!article) throw new PublicError("文章不存在");
     return article;
   }
+
   private notifyCreated(userId: string, articleId: string) {
     this.publishList(userId, articleId, true);
     const article = findArticleRecord(this.db, articleId);
@@ -460,6 +584,9 @@ export class ArticleService {
   }
 }
 
-export function createArticleService(db: Database): ArticleService {
-  return new ArticleService(db);
+export function createArticleService(
+  db: Database,
+  objects: ObjectStore,
+): ArticleService {
+  return new ArticleService(db, objects);
 }

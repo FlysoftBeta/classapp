@@ -1,7 +1,3 @@
-import {
-  removeArticleBundle,
-  storeArticleBundle,
-} from "@/server/infra/articleArtifacts";
 import { handleHttpError } from "@/server/http/errorResponse";
 import { attachSuppressedError } from "@/server/services/incidentService";
 import { currentScope } from "@/server/runtime/scope";
@@ -30,28 +26,20 @@ export async function POST(req: Request) {
       return Response.json({ error: "文章必须归属群聊" }, { status: 400 });
     }
 
+    const articles = currentScope().facades().articles();
     // Reject an inaccessible target before consuming a bounded render slot.
-    await currentScope().facades().articles().authorizeBundleUpload(groupId);
-    const stored = await storeArticleBundle(file);
+    await articles.authorizeBundleUpload(groupId);
+    const stored = await articles.storeBundleFile(file);
     try {
-      const result = await currentScope()
-        .facades()
-        .articles()
-        .createBundle({
-          title: title || stored.originalFilename.replace(/\.pdf$/i, ""),
-          source_path: stored.sourcePath,
-          archive_path: stored.archivePath,
-          source_mime: stored.sourceMime,
-          source_size: stored.sourceSize,
-          archive_size: stored.archiveSize,
-          original_filename: stored.originalFilename,
-          item_count: stored.itemCount,
-          group_id: groupId,
-        });
+      const result = await articles.createBundle({
+        title: title || stored.original_filename.replace(/\.pdf$/i, ""),
+        ...stored,
+        group_id: groupId,
+      });
       return Response.json(result, { status: 201 });
     } catch (e) {
       try {
-        await removeArticleBundle(stored.sourcePath, stored.archivePath);
+        await articles.discardBundleFile(stored);
       } catch (cleanupError) {
         attachSuppressedError(e, cleanupError);
       }

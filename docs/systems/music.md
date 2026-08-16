@@ -20,17 +20,19 @@ cover are raw HTTP resources; business mutations are WebSocket Actions.
 
 ```text
 lib/media/                         provider SDK; no server imports
-  ytdlpProvider.ts                 normalized yt-dlp search/download/live relay
-  potServer.ts                     GPL POT provider child process supervisor
+  types.ts + track.ts + index.ts   stream-only contract + hidden track hints
+  ytdlpProvider.ts                 yt-dlp search parsing, streamTrack/streamCover
   ytdlp-plugins/classapp-music-search/
                                    fast rich music-search extractor plugin
-server/runtime/mediaRuntime.ts     process lifetime: jobs, leases, eviction
+server/runtime/mediaRuntime.ts     process lifetime: jobs, leases, eviction, relay
+server/runtime/potServer.ts        GPL POT provider child process supervisor
+server/runtime/mediaThrottle.ts    provider process pacing (search/materialize)
 server/services/mediaService.ts    track search/ensure/play/config
 server/services/mediaPlaylistService.ts  queue + playlist mechanics
 server/data/media.ts               SQL and row mapping
 server/http/routes/mediaAudio.ts   grant, Range, seek-await, live relay
 server/http/routes/mediaCover.ts   session-authenticated cover
-server/infra/mediaStore.ts         injected-root object store factory
+server/storage/                    ObjectStore, tree store, QuotaService
 client/interact/media.ts           remote/local orchestration
 client/data/media.ts               IndexedDB media projection
 client/components/media/           search, queue, playlists, now-playing bar
@@ -57,7 +59,15 @@ Joining `youtube:` and `youtubepot-bgutilhttp:` keys with `;` parses the
 built-in key but silently drops the plugin key, so yt-dlp ignores the
 configured POT server and falls back to its default local port.
 
-## Data model (server schema v23)
+`lib/media` is a parsing/streaming boundary only: `MediaProvider` exposes
+`search`, `streamTrack`, and `streamCover`. Search results carry the needed
+metadata on the public `ProviderTrack`, while provider-specific locators such
+as the cover URL ride in a hidden WeakMap slot. `streamCover` prefers that
+hidden locator and otherwise performs one bounded `--dump-single-json` parse.
+Rate limiting, staging, hashing, and quota belong to `MediaRuntime`, so the
+provider itself has no download, storage, or throttle API.
+
+## Data model (server schema v24)
 
 `media_tracks` keeps identity and basic metadata. `media_assets` has one row per
 `(track_id, kind)` with states `queued | downloading | ready | failed`; the
@@ -81,33 +91,43 @@ integers; inserts and deletes renumber in the same Service transaction.
 `media_stream_grants` row created by `media.play`.
 
 - Ready asset: single-range `206` with `Accept-Ranges`.
-- Open-ended start (`Range: bytes=0-` or no Range): yt-dlp `--output -` relay
-  as chunked `audio/webm`; seek is unavailable until materialization finishes.
+- Open-ended start (`Range: bytes=0-` or no Range):
+  `MediaRuntime.streamTrack` opens the provider's `streamTrack`
+  (`yt-dlp --output -`) and relays chunked `audio/webm`; seek is unavailable
+  until materialization finishes.
 - Real seek (`bytes=N-`, N>0, or a closed range): the request awaits
   materialization readiness (bounded waiters), then answers `206`; timeout is
   `503 Retry-After`.
 - Cover: `/api/media/tracks/:id/cover?token=...` uses the normal session token
-  and waits for the cover job on first access.
+  and waits for the cover job on first access. The cover job consumes
+  `streamCover` into the staged ObjectStore file.
 
 A background `MaterializeJob` starts when a track is queued or played, so
 listening normally populates the shared cache. The current relay and the
 background job are separate yt-dlp invocations; merging them into one tee is a
 known follow-up, not a correctness gap.
 
-## Ref counting and eviction
+## Ref counting and quota eviction
 
 - `media_tracks.last_used_at` is a last-touch timestamp: asset publish and
   playback grant both update it. Naming avoids pretending download activity was
   a play.
-- Every minute maintenance runs age eviction for
-  `ref_count = 0 AND last_used_at < now - media_eviction_days` (default 7),
-  then size eviction while `SUM(ready bytes) > media_storage_limit_bytes`
-  (default 4 GiB), targeting 80% of the limit. Size eviction removes covers
-  first (LRU), then whole tracks.
-- A stream lease must be acquired before reading a ready asset row. Eviction
-  deletes the DB row only while no lease exists, commits, then renames files
-  into trash. A later stream request sees no ready row and uses the relay, so
-  no request can open a file an eviction is reclaiming.
+- Ready bytes are accounted in the shared `storage_quota_items` ledger under
+  the dynamically configured `media` eviction group. One item per track carries
+  `bytes`, `touch_time_ms`, and `touch_freq`; touching computes
+  `touch_freq = (old_freq + (touch_time - old_touch_time)) / 2`.
+- Every maintenance minute the QuotaService sweeps aged items first
+  (`touch_time` older than `media_eviction_days`, default 7), then evicts by a
+  normalized score while `SUM(ready bytes) > media_storage_limit_bytes`
+  (default 4 GiB), targeting 80% of the limit. The score weights size,
+  recency, and touch frequency; covers and tracks are no longer two hardcoded
+  sweeps.
+- `ref_count = 0` remains a per-track compare-and-delete requirement inside the
+  owner evictor, and a stream lease must be acquired before reading a ready
+  asset row. Eviction deletes the DB rows only while no lease exists, commits,
+  then trashes the shared ObjectStore files. A later stream request sees no
+  ready row and uses the relay, so no request can open a file an eviction is
+  reclaiming.
 - Queue membership protects the track through `ref_count`. Direct grant
   playback without queue membership is protected by the lease, because clients
   are not trusted to maintain the queue.

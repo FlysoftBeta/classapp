@@ -1,5 +1,9 @@
 # Binary storage, retention, and quota
 
+This document covers browser-side binary materialization. The server-side
+object store and eviction ledger are documented separately in
+[server object storage and quota](../systems/server-storage.md).
+
 Chrome 70–80 IndexedDB behavior dictates the storage mechanism. Persist binary
 data as `ArrayBuffer`, never `Blob`. A temporary in-memory Blob is permitted
 only as an adapter for browser APIs such as object URLs.

@@ -35,9 +35,9 @@ view/component
 ### Runtime
 
 `Runtime` owns process-bound resources. Current examples are the SQLite handle,
-`EventBusRuntime`, `AiExecutionRuntime`, and `ArticleImportRuntime`. A Runtime
-member must have an explicit start/reconcile/stop story and must not capture a
-request `Scope` or Actor.
+`EventBusRuntime`, `AiExecutionRuntime`, `ArticleImportRuntime`, and
+`TeachDocumentsRuntime`. A Runtime member must have an explicit
+start/reconcile/stop story and must not capture a request `Scope` or Actor.
 
 Use process lifetime only when continuity across requests is semantically
 required. A global map is not justified merely because constructing it locally

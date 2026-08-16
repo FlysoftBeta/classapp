@@ -1,101 +1,70 @@
 import type BetterSqlite3 from "better-sqlite3";
 import {
-  deleteTeachDocuments,
-  insertTeachDocument,
-  listExpiredTeachDocuments,
-  listTeachDocuments,
   findTeachDocument,
-  type TeachDocumentType,
+  listTeachDocuments,
 } from "@/server/data/teachDocuments";
 import {
-  copyTeachDocument,
-  readTeachDocumentBlob,
-  removeTeachDocumentBlob,
-} from "@/server/infra/teachDocumentBlobs";
-import {
-  PublicError,
-  recordContainedServerIncident,
-} from "@/server/services/incidentService";
-import { BUILD_ID } from "@/server/infra/env";
+  TEACH_DOCUMENTS_QUOTA_GROUP,
+  type TeachDocumentsRuntime,
+} from "@/server/runtime/teachDocumentsRuntime";
+import { ObjectStore, type BlobRead } from "@/server/storage/objectStore";
+import { QuotaService } from "@/server/storage/quotaService";
+import { PublicError } from "@/server/services/incidentService";
 
-export interface OpenOfficeDocument {
-  application: string;
-  documentType: TeachDocumentType;
-  name: string;
-  path: string;
+export interface TeachDocumentDownload {
+  document: { id: string; name: string; file_size: number };
+  stream: BlobRead;
 }
 
-const RETENTION_DAYS = 7;
-
+/**
+ * Request-bound view of teaching documents: admin listing, download, and
+ * destructive cleanup. Process-lifetime capture/monitor and quota ownership
+ * live in `TeachDocumentsRuntime`.
+ */
 export class TeachDocumentsService {
-  constructor(private readonly db: BetterSqlite3.Database) {}
+  constructor(
+    private readonly db: BetterSqlite3.Database,
+    private readonly objects: ObjectStore,
+    private readonly runtime: TeachDocumentsRuntime,
+  ) {}
 
   list() {
     return listTeachDocuments(this.db);
   }
 
-  async download(id: string) {
+  monitorAvailable() {
+    return this.runtime.monitorAvailable;
+  }
+
+  async download(id: string): Promise<TeachDocumentDownload> {
     const document = findTeachDocument(this.db, id);
     if (!document) throw new PublicError("文档不存在");
-    return { document, body: await readTeachDocumentBlob(document.blob_path) };
-  }
-
-  async capture(document: OpenOfficeDocument): Promise<void> {
-    const stored = await copyTeachDocument(document.path);
-    try {
-      insertTeachDocument(this.db, {
-        id: stored.id,
-        application: document.application,
-        document_type: document.documentType,
+    new QuotaService(this.db).touch(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+    return {
+      document: {
+        id: document.id,
         name: document.name,
-        blob_path: stored.relativePath,
-        file_size: stored.fileSize,
-      });
-    } catch (error) {
-      try {
-        await removeTeachDocumentBlob(stored.relativePath);
-      } catch (cleanupError) {
-        recordContainedServerIncident(this.db, BUILD_ID, cleanupError, {
-          component: "teach-documents",
-          phase: "rollback-capture",
-          original_error:
-            error instanceof Error ? error.message : String(error),
-        });
-      }
-      throw error;
-    }
-  }
-
-  async cleanupExpired(): Promise<number> {
-    return this.remove(listExpiredTeachDocuments(this.db, RETENTION_DAYS));
+        file_size: document.file_size,
+      },
+      stream: await this.objects.open(
+        this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
+      ),
+    };
   }
 
   async cleanupAll(): Promise<number> {
-    return this.remove(listTeachDocuments(this.db));
-  }
-
-  private async remove(
-    documents: Array<{ id: string; blob_path: string }>,
-  ): Promise<number> {
-    const removedIds: string[] = [];
-    for (const document of documents) {
-      try {
-        await removeTeachDocumentBlob(document.blob_path);
-        removedIds.push(document.id);
-      } catch (error) {
-        recordContainedServerIncident(this.db, BUILD_ID, error, {
-          component: "teach-documents",
-          phase: "cleanup",
-          blob_path: document.blob_path,
-        });
-      }
+    let removed = 0;
+    for (const document of listTeachDocuments(this.db)) {
+      if (await this.runtime.evict(document.object_key)) removed += 1;
     }
-    return deleteTeachDocuments(this.db, removedIds);
+    return removed;
   }
 }
 
 export function createTeachDocumentsService(
   db: BetterSqlite3.Database,
+  objects: ObjectStore,
+  runtime: TeachDocumentsRuntime,
 ): TeachDocumentsService {
-  return new TeachDocumentsService(db);
+  return new TeachDocumentsService(db, objects, runtime);
 }

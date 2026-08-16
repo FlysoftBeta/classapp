@@ -10,11 +10,11 @@ items and dependencies needed by the reader.
 ```text
 multipart PDF upload
   → Facade authorizes target Group before render-slot use
-  → source stored in unique article artifact directory
+  → source streamed into the shared ObjectStore (article-bundles namespace)
   → bundled platform pdfrender process
   → temporary render archive
   → strict archive inspection
-  → atomic rename to published archive
+  → atomic publish into the shared ObjectStore
   → Article metadata transaction
   → post-commit list events
 
@@ -27,6 +27,11 @@ reader
   → sandboxed iframe with restrictive CSP and Blob URLs
   → Infini virtualizes fixed-layout items
 ```
+
+The source and render archive are ordinary objects in `server/storage/`, so
+range streaming, path containment, trash, and accounting come from one owner.
+`server/storage/renderArchive.ts` only adds the document-specific manifest
+validation and STORED-entry offset index on top of that ObjectStore.
 
 ## Render archive
 

@@ -1,7 +1,7 @@
 # Server data model and migration discipline
 
 The server database is the durable authority. In the examined working tree it
-uses SQLite schema v22 and accepts v17 as the oldest migration baseline. Unlike
+uses SQLite schema v24 and accepts v17 as the oldest migration baseline. Unlike
 the reconstructible browser projection, server rows are not casually nuked.
 
 ## Table families
@@ -17,6 +17,7 @@ the reconstructible browser projection, server rows are not casually nuked.
 | AI accounting/tools | policy, enrollments, accounts, reservations, usage, ledger, file operations                 |
 | learning            | `words`, `user_word_progress`                                                               |
 | media               | `media_tracks`, `media_assets`, `media_lists`, `media_list_items`, `media_stream_grants`   |
+| storage quota       | `storage_eviction_groups`, `storage_quota_items`                                            |
 | operations          | `incident_groups`, `incidents`, `teach_documents`, `config`, user configuration             |
 
 This is not a table-oriented architecture. Each Data module owns the SQL for a
@@ -122,8 +123,17 @@ For a destructive or representation migration:
 
 ## File relationships
 
-Database rows may name article archives, source files, AI ZIP workspaces, teaching
-document blobs, backups, or deployment metadata. SQLite cannot transact with the
-filesystem. Each owner documents staging, atomic publication, compensation,
-orphan GC, and purge. A raw relative path from the client never becomes a host
-path without normalization and root containment.
+Database rows may name article objects, AI workspace trees, teaching document
+objects, media assets, backups, or deployment metadata. All application blob
+objects live below `server/storage/`: one validated namespace/key pair maps to
+a content-sharded host path, single blobs are raw streamed files, and complex
+objects are manifest-based ZIP trees. Owner tables keep the authoritative
+reference and lifecycle; `storage_quota_items` is an accounting ledger, not a
+second owner. Quota groups are created dynamically by the mechanism that pays
+for their bytes.
+
+SQLite cannot transact with the filesystem. Each owner documents staging,
+atomic publication, compensation, orphan GC, and purge. A raw relative path
+from the client never becomes a host path without normalization and root
+containment; object keys are validated as opaque segments and are never
+client-controlled filesystem paths.

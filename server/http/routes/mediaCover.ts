@@ -1,6 +1,6 @@
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
-import type { MediaObjectStore } from "@/server/infra/mediaStore";
+import type { ObjectStore } from "@/server/storage/objectStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 /** Cover images use the normal session token query parameter, like other GET routes. */
@@ -44,13 +44,13 @@ export async function GET(
 }
 
 async function storedCoverResponse(
-  objects: MediaObjectStore,
-  objectPath: string,
+  objects: ObjectStore,
+  objectKey: string,
   mime: string,
   bytes: number,
   releaseLease: () => void,
 ): Promise<Response> {
-  const streamed = await objects.stream(objectPath);
+  const streamed = await objects.open(objects.ref("media", objectKey));
   const source = streamed.body.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {

@@ -414,8 +414,6 @@ function splitArticle(entry: ArticleWithMeta): {
     title: entry.title,
     provider: entry.provider,
     content_kind: entry.content_kind,
-    source_path: entry.source_path,
-    archive_path: entry.archive_path,
     mime_type: entry.mime_type,
     file_size: entry.file_size,
     original_filename: entry.original_filename,

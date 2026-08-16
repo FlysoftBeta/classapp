@@ -1,7 +1,7 @@
 import { consumeStreamGrant } from "@/server/data/media";
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
-import type { MediaObjectStore } from "@/server/infra/mediaStore";
+import type { ObjectStore } from "@/server/storage/objectStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 /** Audio is a raw HTTP concern: grants replace headers the audio tag cannot send. */
@@ -69,10 +69,7 @@ export async function GET(
 
       // Open-ended start: relay yt-dlp stdout as a chunked WebM stream while a
       // background materialization job fills the shared cache.
-      const handle = await scope.runtime.media.openLiveStream(
-        track,
-        req.signal,
-      );
+      const handle = await scope.runtime.media.streamTrack(track, req.signal);
       const iterator = handle.read()[Symbol.asyncIterator]();
       let pulling = false;
       const body = new ReadableStream<Uint8Array>({
@@ -118,12 +115,13 @@ export async function GET(
 }
 
 async function storedResponse(
-  objects: MediaObjectStore,
-  objectPath: string,
+  objects: ObjectStore,
+  objectKey: string,
   req: Request,
   releaseLease: () => void,
 ): Promise<Response> {
-  const size = await objects.size(objectPath);
+  const ref = objects.ref("media", objectKey);
+  const size = await objects.size(ref);
   const range = parseRange(req.headers.get("range"), size);
   if (range === "unsatisfiable") {
     releaseLease();
@@ -132,7 +130,7 @@ async function storedResponse(
       headers: { "Content-Range": `bytes */${size}` },
     });
   }
-  const selected = await objects.stream(objectPath, range || undefined);
+  const selected = await objects.open(ref, range || undefined);
   const length = range ? range.end - range.start + 1 : size;
   const source = selected.body.getReader();
   const body = new ReadableStream<Uint8Array>({

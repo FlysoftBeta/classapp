@@ -11,6 +11,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `EventBusRuntime`      | process channel fan-out; events are repair hints, not durable log                               |
 | `AiExecutionRuntime`   | active run cancellation and restart reconciliation                                              |
 | `ArticleImportRuntime` | external import pool, queue, long-running task ownership                                        |
+| `TeachDocumentsRuntime` | Office/WPS monitor child, capture, quota policy/ledger, owner eviction                        |
 | launcher               | version directories, child restart, pending metadata, rollback watchdog                         |
 | `UpdateManager`        | server-side validation/staging/cloud status; should be Runtime-owned rather than global locator |
 | `BundleManager`        | browser post-bootstrap manifest check, stage, activation coordination                           |
@@ -46,7 +47,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `GroupService`         | aggregation, discovery routes, membership, Group policy, membership Facts    |
 | `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications             |
 | `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles   |
-| `ArticleService`       | objective text/bundle metadata, list/progress/bookmark mechanisms and events |
+| `ArticleService`       | objective text/bundle metadata, object publication, list/progress/bookmark mechanisms and events |
 | `ArticleImportService` | request view of process import runtime                                       |
 | `StickerService`       | catalog/pack mechanism; Post creation still uses Post Facade                 |
 | `AnnouncementService`  | announcement content/publication mechanism                                   |
@@ -59,7 +60,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `AiService`                | conversation tree, routing, context, streaming runs, tools          |
 | `AiBillingService`         | plan windows, top-up, reservations, settlement, ledger, aggregation |
 | AI harness/prompts/pricing | internal mechanisms, not public Services                            |
-| AI file store              | per-user atomic bounded ZIP workspace                               |
+| `AiWorkspace`              | AI file-tool path/content policy over the manifest TreeStore         |
 
 ## Operations and support
 
@@ -70,10 +71,20 @@ Cross-stack system documents remain authoritative for behavior.
 | `HttpsUpgradeService`        | certificate/status/redirect setting mechanism                          |
 | `IncidentService`            | grouping, public correlation IDs, bounded diagnostic capture           |
 | `IncidentLogArchiveService`  | current-build diagnostic export                                        |
-| `TeachDocumentsService`      | office teaching-document capture/download/cleanup                      |
+| `TeachDocumentsService`      | request view: admin list/download and cleanup orchestration            |
 | `NotificationConfigService`  | system notification settings/projection                                |
 | `UserConfigService`          | raw internal user configuration                                        |
 | `VersionedUserConfigService` | independently mergeable versioned decisions                            |
+
+## Storage and quota
+
+| Owner            | Responsibility                                                       |
+| ---------------- | -------------------------------------------------------------------- |
+| `ObjectStore`    | namespace/key validation, streaming blobs, staging, trash, reconcile |
+| `TreeStore`      | manifest ZIP validation, locked mutation, bounded complex objects    |
+| `QuotaService`   | dynamic eviction groups, touch formula, bounded SQL-driven sweeps   |
+| `StorageRuntime` | process-bound ObjectStore and owner-provided evictor registry        |
+| `server/data/quota` | quota SQL, indexed min/max ranges, bounded candidate ranking     |
 
 ## Client ownership
 

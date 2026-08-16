@@ -76,18 +76,24 @@ Security and lifecycle rules:
 - the PowerShell program is fixed code; browser input never becomes command text;
 - validate parsed child output and bound buffers/line handling;
 - monitor child restart has cooldown and stop ownership;
-- capture copies to a controlled blob root before inserting metadata, with
-  compensation if DB insertion fails;
-- cleanup records per-file failures and deletes metadata only for blobs actually
-  removed;
-- download resolves a stored contained relative path, not an arbitrary path;
+- capture streams into a shared ObjectStore object (`teach-documents` namespace)
+  before inserting metadata, with compensation if DB insertion fails;
+- the dynamically configured `teach-documents` quota group ages items out after
+  seven days through the shared QuotaService evictor; downloads touch the item;
+- cleanup records per-file failures and deletes metadata only for objects
+  actually removed;
+- download resolves a stored object key through the ObjectStore, not an
+  arbitrary path;
 - audit downloads/destructive cleanup according to operations policy;
 - Incident context should avoid leaking full sensitive host paths when not
   needed.
 
-The current monitor is started outside the central `Runtime` composition in some
-paths and constructs a Service directly. Treat future changes as an opportunity
-to make process ownership and shutdown explicit.
+`TeachDocumentsRuntime` owns this process boundary: `Runtime` composes it,
+startup configures the quota group and backfills its ledger before starting the
+monitor, and shutdown kills the child and clears its restart timer. The
+request-bound `TeachDocumentsService` only lists, streams downloads, touches
+quota accounting, and orchestrates destructive cleanup through the runtime
+evictor. It never starts the monitor or configures process quota policy.
 
 ## Stickers and other catalogs
 

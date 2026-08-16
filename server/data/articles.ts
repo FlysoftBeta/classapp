@@ -100,8 +100,6 @@ function providerReadModel(provider: ArticleProvider) {
   return provider.type === "text"
     ? {
         content_kind: "text" as const,
-        source_path: null,
-        archive_path: null,
         mime_type: null,
         file_size: 0,
         original_filename: null,
@@ -109,12 +107,23 @@ function providerReadModel(provider: ArticleProvider) {
       }
     : {
         content_kind: "bundle" as const,
-        source_path: provider.source_file,
-        archive_path: provider.archive_file,
         mime_type: provider.source_mime,
         file_size: provider.source_bytes,
         original_filename: provider.original_name ?? null,
         content_length: provider.items,
+      };
+}
+
+function publicProvider(provider: ArticleProvider) {
+  return provider.type === "text"
+    ? provider
+    : {
+        type: "bundle" as const,
+        source_mime: provider.source_mime,
+        source_bytes: provider.source_bytes,
+        archive_bytes: provider.archive_bytes,
+        original_name: provider.original_name ?? null,
+        items: provider.items,
       };
 }
 
@@ -125,7 +134,7 @@ export function rowToArticle(row: Record<string, unknown>): ArticleWithMeta {
     user_id: typeof row.user_id === "string" ? row.user_id : null,
     group_id: String(row.group_id),
     title: String(row.title),
-    provider,
+    provider: publicProvider(provider),
     ...providerReadModel(provider),
     created_at: String(row.created_at),
     is_bookmarked: !!row.is_bookmarked,
@@ -181,6 +190,15 @@ export function findArticleForUser(
   return row ? rowToArticle(row) : null;
 }
 
+function providerStoragePaths(provider: ArticleProvider) {
+  return provider.type === "text"
+    ? { source_path: null, archive_path: null }
+    : {
+        source_path: provider.source_file,
+        archive_path: provider.archive_file,
+      };
+}
+
 export function findArticleRecord(
   db: Database,
   articleId: string,
@@ -206,6 +224,7 @@ export function findArticleRecord(
     >),
     provider,
     ...providerReadModel(provider),
+    ...providerStoragePaths(provider),
   };
 }
 

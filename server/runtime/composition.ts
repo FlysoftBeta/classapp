@@ -256,7 +256,7 @@ export class Composition {
             createPostService(this.scope.db),
           ),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(this.scope.db),
+            createArticleService(this.scope.db, this.scope.runtime.storage.objects),
           ),
           this.scope.getOrInit(wordsService, () =>
             createWordsService(this.scope.db),
@@ -274,6 +274,7 @@ export class Composition {
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
+              this.scope.runtime.storage.objects,
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -310,7 +311,7 @@ export class Composition {
         new ArticleActorFacade(
           this.scope.actor(),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(this.scope.db),
+            createArticleService(this.scope.db, this.scope.runtime.storage.objects),
           ),
           this.scope.getOrInit(articleImportService, () =>
             createArticleImportService(this.scope.runtime.articleImports),
@@ -351,6 +352,7 @@ export class Composition {
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
+              this.scope.runtime.storage.objects,
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -465,7 +467,11 @@ export class Composition {
             createAdminSystemService(this.scope.db),
           ),
           this.scope.getOrInit(teachDocumentsService, () =>
-            createTeachDocumentsService(this.scope.db),
+            createTeachDocumentsService(
+              this.scope.db,
+              this.scope.runtime.storage.objects,
+              this.scope.runtime.teachDocuments,
+            ),
           ),
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),

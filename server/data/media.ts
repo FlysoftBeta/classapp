@@ -7,6 +7,11 @@ import type {
   MediaPlaylistSummary,
   MediaTrack,
 } from "@/shared/media/types";
+import {
+  quotaGroupPolicy,
+  upsertQuotaGroup,
+  type QuotaGroupPolicy,
+} from "@/server/data/quota";
 
 export interface TrackInput {
   source: string;
@@ -582,57 +587,7 @@ function renumberItems(db: Database, listId: string): void {
   });
 }
 
-// ── Eviction ─────────────────────────────────────────────────────────────────
-
-export interface EvictionCandidate {
-  trackId: string;
-  paths: string[];
-}
-
-export function listExpiredEvictionCandidates(
-  db: Database,
-  days: number,
-  limit: number,
-): EvictionCandidate[] {
-  return listEvictionCandidates(
-    db,
-    limit,
-    `AND COALESCE(t.last_used_at, t.created_at) < datetime('now', '-${days} days')`,
-    [],
-  );
-}
-
-export function listLruEvictionCandidates(
-  db: Database,
-  limit: number,
-): EvictionCandidate[] {
-  return listEvictionCandidates(db, limit, "", []);
-}
-
-function listEvictionCandidates(
-  db: Database,
-  limit: number,
-  extraClause: string,
-  args: unknown[],
-): EvictionCandidate[] {
-  const rows = db
-    .prepare(
-      `SELECT t.id FROM media_tracks t
-        WHERE t.ref_count = 0
-          AND EXISTS (
-            SELECT 1 FROM media_assets a
-             WHERE a.track_id = t.id AND a.state = 'ready'
-          )
-          ${extraClause}
-        ORDER BY COALESCE(t.last_used_at, t.created_at), t.id
-        LIMIT ?`,
-    )
-    .all(...args, limit) as Array<{ id: string }>;
-  return rows.map((row) => ({
-    trackId: row.id,
-    paths: listReadyPaths(db, row.id),
-  }));
-}
+// ── Asset deletion ───────────────────────────────────────────────────────────
 
 function listReadyPaths(db: Database, trackId: string): string[] {
   const rows = db
@@ -661,32 +616,70 @@ export function deleteAssetsIfUnreferenced(
   return deleteAssetsForTrack(db, trackId);
 }
 
-export function readyAssetBytes(db: Database): number {
+export function readyAssetBytesForTrack(
+  db: Database,
+  trackId: string,
+): number {
   const row = db
     .prepare(
-      "SELECT COALESCE(SUM(bytes), 0) AS total FROM media_assets WHERE state = 'ready'",
+      `SELECT COALESCE(SUM(bytes), 0) AS total
+         FROM media_assets WHERE track_id = ? AND state = 'ready'`,
     )
-    .get() as { total: number };
+    .get(trackId) as { total: number };
   return row.total;
+}
+
+/**
+ * Seed/refresh the media quota ledger directly in SQL; ready media can be
+ * large enough that materializing every row in Node.js is not acceptable.
+ */
+export function reconcileReadyAssetQuotaItems(db: Database): void {
+  db.prepare(
+    `INSERT INTO storage_quota_items
+       (group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms)
+     SELECT 'media', a.track_id, SUM(a.bytes),
+            CAST(strftime('%s', COALESCE(t.last_used_at, t.created_at)) AS INTEGER) * 1000,
+            0,
+            CAST(strftime('%s', COALESCE(t.last_used_at, t.created_at)) AS INTEGER) * 1000
+       FROM media_assets a
+       JOIN media_tracks t ON t.id = a.track_id
+      WHERE a.state = 'ready'
+      GROUP BY a.track_id
+     ON CONFLICT(group_name, item_key) DO UPDATE SET
+       bytes = excluded.bytes,
+       touch_time_ms = excluded.touch_time_ms,
+       touch_freq = (storage_quota_items.touch_freq +
+         (excluded.touch_time_ms - storage_quota_items.touch_time_ms)) / 2.0`,
+  ).run();
 }
 
 // ── Config and grants ────────────────────────────────────────────────────────
 
+const MEDIA_QUOTA_GROUP = "media";
+const MEDIA_TARGET_RATIO = 0.8;
+const MEDIA_DEFAULT_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
+const MEDIA_DEFAULT_EVICTION_DAYS = 7;
+
 export function mediaConfig(db: Database): MediaConfig {
-  const rows = db
-    .prepare(
-      `SELECT key, value FROM config
-        WHERE key IN ('media_max_volume', 'media_eviction_days', 'media_storage_limit_bytes')`,
-    )
-    .all() as Array<{ key: string; value: string }>;
-  const values = new Map(rows.map((row) => [row.key, row.value]));
+  const volume = db
+    .prepare("SELECT value FROM config WHERE key = 'media_max_volume'")
+    .get() as { value: string } | undefined;
+  const quota =
+    quotaGroupPolicy(db, MEDIA_QUOTA_GROUP) ??
+    ({
+      name: MEDIA_QUOTA_GROUP,
+      maxBytes: MEDIA_DEFAULT_LIMIT_BYTES,
+      targetRatio: MEDIA_TARGET_RATIO,
+      minAgeMs: MEDIA_DEFAULT_EVICTION_DAYS * 24 * 60 * 60_000,
+    } satisfies QuotaGroupPolicy);
   return {
     enabled: true,
-    max_volume: Number(values.get("media_max_volume") ?? "1"),
-    eviction_days: Number(values.get("media_eviction_days") ?? "7"),
-    storage_limit_bytes: Number(
-      values.get("media_storage_limit_bytes") ?? String(4 * 1024 * 1024 * 1024),
+    max_volume: Number(volume?.value ?? "1"),
+    eviction_days: Math.max(
+      1,
+      Math.round(quota.minAgeMs / (24 * 60 * 60_000)),
     ),
+    storage_limit_bytes: quota.maxBytes,
   };
 }
 
@@ -698,15 +691,29 @@ export function updateMediaConfig(
     storage_limit_bytes?: number;
   },
 ): MediaConfig {
-  const update = db.prepare(
-    "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  );
-  if (input.max_volume !== undefined)
-    update.run("media_max_volume", String(input.max_volume));
-  if (input.eviction_days !== undefined)
-    update.run("media_eviction_days", String(input.eviction_days));
-  if (input.storage_limit_bytes !== undefined)
-    update.run("media_storage_limit_bytes", String(input.storage_limit_bytes));
+  if (input.max_volume !== undefined) {
+    db.prepare(
+      `INSERT INTO config (key, value) VALUES ('media_max_volume', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(String(input.max_volume));
+  }
+  const current =
+    quotaGroupPolicy(db, MEDIA_QUOTA_GROUP) ??
+    ({
+      name: MEDIA_QUOTA_GROUP,
+      maxBytes: MEDIA_DEFAULT_LIMIT_BYTES,
+      targetRatio: MEDIA_TARGET_RATIO,
+      minAgeMs: MEDIA_DEFAULT_EVICTION_DAYS * 24 * 60 * 60_000,
+    } satisfies QuotaGroupPolicy);
+  upsertQuotaGroup(db, {
+    name: current.name,
+    maxBytes: input.storage_limit_bytes ?? current.maxBytes,
+    targetRatio: current.targetRatio,
+    minAgeMs:
+      input.eviction_days !== undefined
+        ? input.eviction_days * 24 * 60 * 60_000
+        : current.minAgeMs,
+  });
   return mediaConfig(db);
 }
 

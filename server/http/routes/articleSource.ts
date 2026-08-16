@@ -1,8 +1,4 @@
-import {
-  articleSourceSize,
-  streamArticleSource,
-} from "@/server/infra/articleArtifacts";
-import { handleHttpError, PublicError } from "@/server/http/errorResponse";
+import { handleHttpError } from "@/server/http/errorResponse";
 import { currentScope } from "@/server/runtime/scope";
 
 export async function GET(
@@ -11,14 +7,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const article = await currentScope()
+    const selected = await currentScope()
       .facades()
       .articles()
-      .bundleResource(id);
-    if (!article || article.content_kind !== "bundle" || !article.source_path) {
-      throw new PublicError("原始文档不存在");
-    }
-    const size = await articleSourceSize(article.source_path);
+      .streamBundleSource(id);
+    const size = selected.size;
     const range = parseRange(req.headers.get("range"), size);
     if (range === "unsatisfiable") {
       return new Response(null, {
@@ -26,15 +19,11 @@ export async function GET(
         headers: { "Content-Range": `bytes */${size}` },
       });
     }
-    const selected = await streamArticleSource(
-      article.source_path,
-      range || undefined,
-    );
     const length = range ? range.end - range.start + 1 : size;
     return new Response(selected.body, {
       status: range ? 206 : 200,
       headers: {
-        "Content-Type": article.mime_type ?? "application/octet-stream",
+        "Content-Type": "application/pdf",
         "Content-Length": String(length),
         "Accept-Ranges": "bytes",
         ...(range

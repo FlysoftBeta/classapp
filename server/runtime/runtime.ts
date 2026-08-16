@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { Database } from "better-sqlite3";
 import { Scope, type RequestIdentity } from "@/server/runtime/scope";
 import { AiExecutionRuntime } from "@/server/runtime/aiExecutionRuntime";
@@ -8,6 +7,8 @@ import {
   EventBusRuntime,
 } from "@/server/services/eventBus";
 import { MediaRuntime } from "@/server/runtime/mediaRuntime";
+import { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
+import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { BUILD_ID } from "@/server/infra/env";
 
@@ -17,16 +18,19 @@ export class Runtime {
   readonly articleImports: ArticleImportRuntime;
   readonly events: EventBusRuntime;
   readonly media: MediaRuntime;
+  readonly storage: StorageRuntime;
+  readonly teachDocuments: TeachDocumentsRuntime;
 
   constructor(
     readonly db: Database,
     readonly buildId = BUILD_ID,
   ) {
     this.aiExecution = new AiExecutionRuntime(db);
-    this.articleImports = new ArticleImportRuntime(db);
+    const config = runtimeConfig();
+    this.storage = new StorageRuntime(db, config.dataRoot);
+    this.articleImports = new ArticleImportRuntime(db, this.storage.objects);
     this.events = new EventBusRuntime(db, buildId);
     bindEventBusRuntime(this.events);
-    const config = runtimeConfig();
     this.media = new MediaRuntime(
       db,
       config.platform.media ?? {
@@ -34,7 +38,18 @@ export class Runtime {
         potServerEntry: null,
         pluginDirs: [],
       },
-      path.join(config.dataRoot, "objects", "media"),
+      this.storage.objects,
+    );
+    this.storage.registerEvictor(
+      "media",
+      this.media.quotaPolicy(),
+      (item) => this.media.evictTrack(item.itemKey),
+    );
+    this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.objects);
+    this.storage.registerEvictor(
+      "teach-documents",
+      this.teachDocuments.quotaPolicy(),
+      (item) => this.teachDocuments.evict(item.itemKey),
     );
   }
 
