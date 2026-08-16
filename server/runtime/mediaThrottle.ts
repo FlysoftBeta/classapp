@@ -56,7 +56,7 @@ export class ConcurrencyLimiter {
   private readonly waiters: Array<{
     resolve: () => void;
     reject: (error: unknown) => void;
-    timer: ReturnType<typeof setTimeout>;
+    timer: ReturnType<typeof setTimeout> | null;
   }> = [];
 
   constructor(
