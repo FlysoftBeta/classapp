@@ -33,7 +33,6 @@
     "@mui/icons-material": "^7.3.11",
     "@mui/material": "^7.3.11",
     "@streamdown/cjk": "^1.0.3",
-    "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
     "better-sqlite3": "^13.0.1",
