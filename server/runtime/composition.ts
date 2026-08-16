@@ -256,7 +256,10 @@ export class Composition {
             createPostService(this.scope.db),
           ),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(this.scope.db, this.scope.runtime.storage.objects),
+            createArticleService(
+              this.scope.db,
+              this.scope.runtime.storage.objects,
+            ),
           ),
           this.scope.getOrInit(wordsService, () =>
             createWordsService(this.scope.db),
@@ -311,7 +314,10 @@ export class Composition {
         new ArticleActorFacade(
           this.scope.actor(),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(this.scope.db, this.scope.runtime.storage.objects),
+            createArticleService(
+              this.scope.db,
+              this.scope.runtime.storage.objects,
+            ),
           ),
           this.scope.getOrInit(articleImportService, () =>
             createArticleImportService(this.scope.runtime.articleImports),
@@ -476,6 +482,7 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.scope.unitOfWork,
         ),
     );
   }
@@ -536,8 +543,9 @@ export class Composition {
       () =>
         new MediaActorFacade(
           this.scope.actor(),
-          this.scope.getOrInit(mediaService, () =>
-            new MediaService(this.scope.db, this.scope.runtime.media),
+          this.scope.getOrInit(
+            mediaService,
+            () => new MediaService(this.scope.db, this.scope.runtime.media),
           ),
           this.scope.getOrInit(
             mediaPlaylistService,

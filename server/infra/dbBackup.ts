@@ -3,16 +3,24 @@ import path from "path";
 import type { Database } from "better-sqlite3";
 import { zipSingleFile } from "./archive";
 import { PublicError } from "@/server/services/incidentService";
+import { runtimeConfig } from "@/server/infra/runtimeConfig";
 
-const ROOT = process.cwd();
-const BACKUP_DIR = path.join(ROOT, "backups");
-const DB_PATH = path.join(ROOT, "data.db");
 export const MAX_BACKUPS = 5;
+/** Backups are zipped in memory for download; refuse absurdly large files. */
+export const MAX_BACKUP_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
 
 const BACKUP_NAME_RE = /^[\w.-]+\.db$/;
 
+function backupDir(): string {
+  return path.join(runtimeConfig().dataRoot, "backups");
+}
+
+function databasePath(): string {
+  return path.join(runtimeConfig().dataRoot, "data.db");
+}
+
 export function ensureBackupDir(): void {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  fs.mkdirSync(backupDir(), { recursive: true });
 }
 
 export function listBackupFiles(): {
@@ -22,10 +30,10 @@ export function listBackupFiles(): {
 }[] {
   ensureBackupDir();
   return fs
-    .readdirSync(BACKUP_DIR)
+    .readdirSync(backupDir())
     .filter((f) => f.endsWith(".db"))
     .map((f) => {
-      const stat = fs.statSync(path.join(BACKUP_DIR, f));
+      const stat = fs.statSync(path.join(backupDir(), f));
       return { name: f, size: stat.size, created_at: stat.mtime.toISOString() };
     })
     .sort(
@@ -38,19 +46,19 @@ export function listBackupFiles(): {
 export function resolveBackupFile(name: string): string {
   if (!name || !BACKUP_NAME_RE.test(name)) throw new PublicError("文件名无效");
 
-  const filePath = path.join(BACKUP_DIR, name);
+  const filePath = path.join(backupDir(), name);
   if (!fs.existsSync(filePath)) throw new PublicError("备份不存在");
 
   return filePath;
 }
 
 export function backupFilePath(name: string): string {
-  return path.join(BACKUP_DIR, name);
+  return path.join(backupDir(), name);
 }
 
 /** Snapshot data.db via SQLite backup API; returns the backup filename. */
 export async function createDbBackup(db: Database): Promise<string | null> {
-  if (!fs.existsSync(DB_PATH)) return null;
+  if (!fs.existsSync(databasePath())) return null;
 
   ensureBackupDir();
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -79,11 +87,16 @@ export function buildBackupDownload(name: string): {
 } {
   const filePath = resolveBackupFile(name);
   try {
+    const size = fs.statSync(filePath).size;
+    if (size > MAX_BACKUP_DOWNLOAD_BYTES) {
+      throw new PublicError("备份文件过大，无法打包下载");
+    }
     return {
       zipName: name.replace(/\.db$/, ".zip"),
       zipData: zipSingleFile(filePath, name),
     };
   } catch (e) {
+    if (e instanceof PublicError) throw e;
     throw new PublicError("打包失败", "Backup archive creation failed", e);
   }
 }

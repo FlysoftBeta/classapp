@@ -32,6 +32,7 @@ import { userMetadataForIds } from "@/server/data/users";
 import {
   PublicError,
   ContractViolationError,
+  recordContainedServerIncident,
 } from "@/server/services/incidentService";
 import { publishGroupArticle, publishUser } from "@/server/services/eventBus";
 import {
@@ -40,24 +41,28 @@ import {
   setUserConfig,
 } from "@/server/services/userConfig";
 import { renderPdfArchive } from "@/server/infra/pdfRenderProcess";
+import { BUILD_ID } from "@/server/infra/env";
 import {
   forgetRenderArchive,
   inspectRenderArchiveFile,
   loadRenderArchive,
   type StoredRenderArchive,
 } from "@/server/storage/renderArchive";
-import {
-  ObjectStore,
-  type BlobRead,
-} from "@/server/storage/objectStore";
+import { ObjectStore, type BlobRead } from "@/server/storage/objectStore";
 import { objectRef } from "@/server/storage/paths";
+import {
+  abandonArticleUpload,
+  claimArticleUpload,
+  insertArticleUpload,
+  updateArticleUploadBytes,
+} from "@/server/data/articleUploads";
 import { QuotaService } from "@/server/storage/quotaService";
 import { bytes, formatBytes } from "@/shared/bytes";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
 import type { BundleSlice } from "@/shared/bundles/protocol";
 
 const ARTICLE_QUOTA_GROUP = "article-bundles";
-const MAX_SOURCE_BYTES = bytes("200 MB");
+export const MAX_ARTICLE_SOURCE_BYTES = bytes("200 MB");
 
 export interface CreateArticleInput {
   title: string;
@@ -74,6 +79,7 @@ export interface CreateBundleArticleInput {
   original_filename: string;
   item_count: number;
   group_id: string;
+  upload_id?: string;
 }
 
 export type StoredArticleBundle = Omit<
@@ -170,25 +176,41 @@ export class ArticleService {
   }
 
   /**
-   * Persist source, render, validate, publish both objects. The HTTP adapter
-   * only inserts the DB row after this returns.
+   * Persist source, render, validate, publish both objects. A durable upload
+   * row is created first, so a crash or disconnected client can be compensated
+   * by ArticleUploadRuntime instead of leaking objects. The HTTP adapter only
+   * inserts the DB row after this returns.
    */
-  async storeBundle(file: File): Promise<StoredArticleBundle> {
+  async storeBundle(
+    file: File,
+    owner: { userId: string; groupId: string },
+  ): Promise<StoredArticleBundle & { upload_id: string }> {
     if (!file.size) throw new PublicError("文件不能为空");
-    if (file.size > MAX_SOURCE_BYTES) {
-      throw new PublicError(`文件不能超过 ${formatBytes(MAX_SOURCE_BYTES)}`);
+    if (file.size > MAX_ARTICLE_SOURCE_BYTES) {
+      throw new PublicError(
+        `文件不能超过 ${formatBytes(MAX_ARTICLE_SOURCE_BYTES)}`,
+      );
     }
     const sourceMime = normalizeArticleMime(file);
     this.ensureQuotaGroup();
     const bundleId = crypto.randomUUID();
+    const uploadId = crypto.randomUUID();
     const sourceRef = objectRef("article-bundles", `${bundleId}/source`);
     const archiveRef = objectRef("article-bundles", `${bundleId}/render`);
-    await this.objects.putBlob(sourceRef, file.stream(), {
-      expectedBytes: file.size,
+    insertArticleUpload(this.db, {
+      id: uploadId,
+      userId: owner.userId,
+      groupId: owner.groupId,
+      sourceKey: sourceRef.key,
+      archiveKey: archiveRef.key,
     });
-    const staged = await this.objects.stage(archiveRef);
+    let staged: Awaited<ReturnType<ObjectStore["stage"]>> | null = null;
     let archiveCommitted = false;
     try {
+      await this.objects.putBlob(sourceRef, file.stream(), {
+        expectedBytes: file.size,
+      });
+      staged = await this.objects.stage(archiveRef);
       await renderPdfArchive(
         this.objects.materializedPath(sourceRef),
         staged.path,
@@ -205,18 +227,23 @@ export class ArticleService {
         original_filename: file.name || "document.pdf",
         item_count: index.header.item_count,
       };
+      updateArticleUploadBytes(this.db, uploadId, {
+        sourceBytes: stored.source_size,
+        archiveBytes: stored.archive_size,
+      });
       this.quota.upsert(
         ARTICLE_QUOTA_GROUP,
         bundleId,
         stored.source_size + stored.archive_size,
       );
-      return stored;
+      return { ...stored, upload_id: uploadId };
     } catch (error) {
-      await staged.discard();
+      await staged?.discard();
       if (archiveCommitted) {
         await this.objects.trash(archiveRef).catch(() => undefined);
       }
       await this.objects.trash(sourceRef).catch(() => undefined);
+      abandonArticleUpload(this.db, uploadId);
       throw error;
     }
   }
@@ -230,19 +257,31 @@ export class ArticleService {
     if (input.source_mime !== "application/pdf")
       throw new ContractViolationError("仅支持 PDF 文件");
     const id = crypto.randomUUID();
-    insertBundleArticle(this.db, {
-      id,
-      userId,
-      title: requireTrimmed(input.title, "标题不能为空"),
-      sourcePath: input.source_path,
-      archivePath: input.archive_path,
-      sourceMime: input.source_mime,
-      sourceSize: input.source_size,
-      archiveSize: input.archive_size,
-      originalFilename: input.original_filename,
-      itemCount: input.item_count,
-      groupId: input.group_id,
-    });
+    this.db.transaction(() => {
+      insertBundleArticle(this.db, {
+        id,
+        userId,
+        title: requireTrimmed(input.title, "标题不能为空"),
+        sourcePath: input.source_path,
+        archivePath: input.archive_path,
+        sourceMime: input.source_mime,
+        sourceSize: input.source_size,
+        archiveSize: input.archive_size,
+        originalFilename: input.original_filename,
+        itemCount: input.item_count,
+        groupId: input.group_id,
+      });
+      if (input.upload_id) {
+        const claimed = claimArticleUpload(
+          this.db,
+          input.upload_id,
+          input.source_path,
+          input.archive_path,
+        );
+        if (!claimed)
+          throw new ContractViolationError("上传会话不存在或已失效");
+      }
+    })();
     const article = this.requireOwned(id, userId);
     this.notifyCreated(userId, id);
     return {
@@ -286,10 +325,14 @@ export class ArticleService {
     };
   }
 
-  async openSource(articleId: string): Promise<BlobRead> {
+  async openSource(
+    articleId: string,
+    range?: { start?: number; end?: number; suffixLength?: number },
+  ): Promise<BlobRead> {
     const article = this.requireBundleRecord(articleId);
     return this.objects.open(
       objectRef("article-bundles", article.source_path),
+      range,
     );
   }
 
@@ -477,6 +520,7 @@ export class ArticleService {
 
   async discardBundle(stored: StoredArticleBundle): Promise<void> {
     await this.removeBundle(stored.source_path, stored.archive_path);
+    if (stored.upload_id) abandonArticleUpload(this.db, stored.upload_id);
   }
 
   async removeBundle(
@@ -489,10 +533,30 @@ export class ArticleService {
     for (const key of paths) {
       const ref = objectRef("article-bundles", key);
       if (ref.key.split("/")[1] === "render") forgetRenderArchive(ref);
-      await this.objects.trash(ref);
+      try {
+        await this.objects.trash(ref);
+      } catch (error) {
+        // The DB row is already gone or is being discarded by the caller;
+        // cleanup failure must not make the authoritative operation fail.
+        recordContainedServerIncident(this.db, BUILD_ID, error, {
+          component: "article-bundles",
+          phase: "trash",
+          object_key: key,
+        });
+      }
     }
     const bundleId = paths[0]?.split("/")[0];
-    if (bundleId) this.quota.remove(ARTICLE_QUOTA_GROUP, bundleId);
+    if (bundleId) {
+      try {
+        this.quota.remove(ARTICLE_QUOTA_GROUP, bundleId);
+      } catch (error) {
+        recordContainedServerIncident(this.db, BUILD_ID, error, {
+          component: "article-bundles",
+          phase: "quota-remove",
+          object_key: bundleId,
+        });
+      }
+    }
   }
 
   private ensureQuotaGroup(): void {

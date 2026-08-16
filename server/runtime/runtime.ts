@@ -8,6 +8,7 @@ import {
 } from "@/server/services/eventBus";
 import { MediaRuntime } from "@/server/runtime/mediaRuntime";
 import { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
+import { ArticleUploadRuntime } from "@/server/runtime/articleUploadRuntime";
 import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { BUILD_ID } from "@/server/infra/env";
@@ -16,6 +17,7 @@ import { BUILD_ID } from "@/server/infra/env";
 export class Runtime {
   readonly aiExecution: AiExecutionRuntime;
   readonly articleImports: ArticleImportRuntime;
+  readonly articleUploads: ArticleUploadRuntime;
   readonly events: EventBusRuntime;
   readonly media: MediaRuntime;
   readonly storage: StorageRuntime;
@@ -29,6 +31,7 @@ export class Runtime {
     const config = runtimeConfig();
     this.storage = new StorageRuntime(db, config.dataRoot);
     this.articleImports = new ArticleImportRuntime(db, this.storage.objects);
+    this.articleUploads = new ArticleUploadRuntime(db, this.storage.objects);
     this.events = new EventBusRuntime(db, buildId);
     bindEventBusRuntime(this.events);
     this.media = new MediaRuntime(
@@ -40,10 +43,8 @@ export class Runtime {
       },
       this.storage.objects,
     );
-    this.storage.registerEvictor(
-      "media",
-      this.media.quotaPolicy(),
-      (item) => this.media.evictTrack(item.itemKey),
+    this.storage.registerEvictor("media", this.media.quotaPolicy(), (item) =>
+      this.media.evictTrack(item.itemKey),
     );
     this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.objects);
     this.storage.registerEvictor(

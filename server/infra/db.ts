@@ -1,6 +1,7 @@
 import { Database, default as BetterSQLite3 } from "better-sqlite3";
 import path from "path";
 import crypto from "crypto";
+import { rmSync } from "node:fs";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
@@ -22,9 +23,13 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 24;
+const CURRENT_SCHEMA_VERSION = 25;
 
-type SchemaMigration = (db: Database) => void;
+interface SchemaMigration {
+  /** Schema version after this migration commits. */
+  readonly nextVersion: number;
+  readonly run: (db: Database) => void;
+}
 
 const INCIDENT_SCHEMA = `
   CREATE TABLE IF NOT EXISTS incident_groups (
@@ -374,114 +379,128 @@ const STORAGE_QUOTA_SCHEMA = `
     ON storage_quota_items(group_name, touch_freq);
 `;
 
+const ARTICLE_UPLOADS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS article_uploads (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL CHECK (status IN ('staging', 'published', 'abandoned')),
+    source_key   TEXT NOT NULL,
+    archive_key  TEXT NOT NULL,
+    source_bytes INTEGER NOT NULL DEFAULT 0 CHECK (source_bytes >= 0),
+    archive_bytes INTEGER NOT NULL DEFAULT 0 CHECK (archive_bytes >= 0),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_article_uploads_status_created
+    ON article_uploads(status, created_at);
+`;
+
+/** v17 → v18: original incident/AI introduction and legacy feature bit. */
+function migrateV17ToV18(db: Database): void {
+  db.exec(INCIDENT_SCHEMA);
+  db.exec(AI_SCHEMA);
+  // Schema v18 still used the legacy bit layout where bit 0 was admin.
+  db.prepare("UPDATE users SET feature_mask = feature_mask | ?").run(1 << 7);
+}
+
+/**
+ * Production databases are schema v18. Everything after v18 is consolidated
+ * into one ordered migration: v18 → v25. Intermediate versions are not
+ * supported and the ledger can jump several versions in one transaction.
+ */
+function consolidatePostV18Schema(db: Database): void {
+  // v19: roles moved out of the feature bitset into user_admin_roles.
+  db.exec(`
+    ALTER TABLE users RENAME COLUMN feature_mask TO feature_bitset;
+    CREATE TABLE user_admin_roles (
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role       TEXT NOT NULL CHECK (role IN (${ADMIN_ROLES.map((role) => `'${role}'`).join(", ")})),
+      granted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, role)
+    );
+    CREATE INDEX idx_user_admin_roles_role
+      ON user_admin_roles(role, user_id);
+  `);
+  const oldAdmins = db
+    .prepare(
+      "SELECT id FROM users WHERE (feature_bitset & 1) != 0 ORDER BY created_at, id",
+    )
+    .all() as Array<{ id: string }>;
+  const insert = db.prepare(
+    `INSERT INTO user_admin_roles (user_id, role, granted_by)
+     VALUES (?, ?, NULL)`,
+  );
+  for (const admin of oldAdmins) {
+    for (const role of ADMIN_ROLES) {
+      if (role !== "root") insert.run(admin.id, role);
+    }
+  }
+  if (oldAdmins[0]) insert.run(oldAdmins[0].id, "root");
+  db.exec(`
+    UPDATE users SET feature_bitset = feature_bitset >> 1;
+    ALTER TABLE users DROP COLUMN role;
+  `);
+
+  // v20: AI credit columns changed unit and naming from whole credits to micros.
+  const aiColumns = db.prepare("PRAGMA table_info(ai_runs)").all() as Array<{
+    name: string;
+  }>;
+  if (aiColumns.some((column) => column.name === "reserved_credits")) {
+    db.exec(`
+      ALTER TABLE ai_runs RENAME COLUMN reserved_credits TO reserved_credit_micros;
+      ALTER TABLE ai_runs RENAME COLUMN charged_credits TO charged_credit_micros;
+      ALTER TABLE ai_credit_accounts RENAME COLUMN balance TO top_up_credit_micros;
+      ALTER TABLE ai_credit_accounts RENAME COLUMN reserved TO reserved_credit_micros;
+      ALTER TABLE ai_credit_ledger RENAME COLUMN delta TO delta_credit_micros;
+      ALTER TABLE ai_credit_ledger RENAME COLUMN balance_after TO top_up_after_credit_micros;
+      UPDATE ai_runs SET
+        reserved_credit_micros = reserved_credit_micros * 1000000,
+        charged_credit_micros = charged_credit_micros * 1000000;
+      UPDATE ai_credit_accounts SET
+        top_up_credit_micros = top_up_credit_micros * 1000000,
+        reserved_credit_micros = reserved_credit_micros * 1000000;
+      UPDATE ai_credit_ledger SET
+        delta_credit_micros = delta_credit_micros * 1000000,
+        top_up_after_credit_micros = top_up_after_credit_micros * 1000000;
+    `);
+  }
+  db.exec(AI_SCHEMA);
+
+  // v21: user profile revision.
+  db.exec(
+    "ALTER TABLE users ADD COLUMN profile_revision INTEGER NOT NULL DEFAULT 0",
+  );
+
+  // v22: media catalog; enabled by default for existing accounts.
+  db.exec(MEDIA_SCHEMA);
+  db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
+    1 << 7,
+  );
+
+  // v23: shared object storage and quota; teach_documents object references.
+  db.exec(STORAGE_QUOTA_SCHEMA);
+  db.exec("ALTER TABLE teach_documents RENAME COLUMN blob_path TO object_key");
+  db.exec(
+    "ALTER TABLE teach_documents ADD COLUMN status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('capturing', 'ready'))",
+  );
+
+  // v24: durable multipart article-upload intents.
+  db.exec(ARTICLE_UPLOADS_SCHEMA);
+  const teachColumns = db
+    .prepare("PRAGMA table_info(teach_documents)")
+    .all() as Array<{ name: string }>;
+  if (!teachColumns.some((column) => column.name === "status")) {
+    db.exec(
+      "ALTER TABLE teach_documents ADD COLUMN status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('capturing', 'ready'))",
+    );
+  }
+}
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
-  [17, (db) => db.exec(INCIDENT_SCHEMA)],
-  [
-    18,
-    (db) => {
-      db.exec(AI_SCHEMA);
-      // Schema v18 still used the legacy bit layout where bit 0 was admin.
-      db.prepare("UPDATE users SET feature_mask = feature_mask | ?").run(
-        1 << 7,
-      );
-    },
-  ],
-  [
-    19,
-    (db) => {
-      db.exec(`
-        ALTER TABLE users RENAME COLUMN feature_mask TO feature_bitset;
-        CREATE TABLE user_admin_roles (
-          user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          role       TEXT NOT NULL CHECK (role IN (${ADMIN_ROLES.map((role) => `'${role}'`).join(", ")})),
-          granted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-          granted_at TEXT NOT NULL DEFAULT (datetime('now')),
-          PRIMARY KEY (user_id, role)
-        );
-        CREATE INDEX idx_user_admin_roles_role
-          ON user_admin_roles(role, user_id);
-      `);
-      const oldAdmins = db
-        .prepare(
-          "SELECT id FROM users WHERE (feature_bitset & 1) != 0 ORDER BY created_at, id",
-        )
-        .all() as Array<{ id: string }>;
-      const insert = db.prepare(
-        `INSERT INTO user_admin_roles (user_id, role, granted_by)
-         VALUES (?, ?, NULL)`,
-      );
-      for (const admin of oldAdmins) {
-        for (const role of ADMIN_ROLES) {
-          if (role !== "root") insert.run(admin.id, role);
-        }
-      }
-      if (oldAdmins[0]) insert.run(oldAdmins[0].id, "root");
-      db.exec(`
-        UPDATE users SET feature_bitset = feature_bitset >> 1;
-        ALTER TABLE users DROP COLUMN role;
-      `);
-    },
-  ],
-  [
-    20,
-    (db) => {
-      const columns = db.prepare("PRAGMA table_info(ai_runs)").all() as Array<{
-        name: string;
-      }>;
-      const legacy = columns.some(
-        (column) => column.name === "reserved_credits",
-      );
-      if (legacy) {
-        db.exec(`
-          ALTER TABLE ai_runs RENAME COLUMN reserved_credits TO reserved_credit_micros;
-          ALTER TABLE ai_runs RENAME COLUMN charged_credits TO charged_credit_micros;
-          ALTER TABLE ai_credit_accounts RENAME COLUMN balance TO top_up_credit_micros;
-          ALTER TABLE ai_credit_accounts RENAME COLUMN reserved TO reserved_credit_micros;
-          ALTER TABLE ai_credit_ledger RENAME COLUMN delta TO delta_credit_micros;
-          ALTER TABLE ai_credit_ledger RENAME COLUMN balance_after TO top_up_after_credit_micros;
-          UPDATE ai_runs SET
-            reserved_credit_micros = reserved_credit_micros * 1000000,
-            charged_credit_micros = charged_credit_micros * 1000000;
-          UPDATE ai_credit_accounts SET
-            top_up_credit_micros = top_up_credit_micros * 1000000,
-            reserved_credit_micros = reserved_credit_micros * 1000000;
-          UPDATE ai_credit_ledger SET
-            delta_credit_micros = delta_credit_micros * 1000000,
-            top_up_after_credit_micros = top_up_after_credit_micros * 1000000;
-        `);
-      }
-      db.exec(AI_SCHEMA);
-    },
-  ],
-  [
-    21,
-    (db) => {
-      db.exec(
-        "ALTER TABLE users ADD COLUMN profile_revision INTEGER NOT NULL DEFAULT 0",
-      );
-    },
-  ],
-  [
-    22,
-    (db) => {
-      db.exec(MEDIA_SCHEMA);
-      // Media is enabled by default for existing accounts; append the new
-      // feature bit without disturbing the historical bit layout.
-      db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
-        1 << 7,
-      );
-    },
-  ],
-  // Storage ownership moved to server/storage. Quota tables and the new
-  // teach-document reference name are installed here; existing feature-owned
-  // files are intentionally not rewritten by a compatibility layer.
-  [
-    23,
-    (db) => {
-      db.exec(STORAGE_QUOTA_SCHEMA);
-      db.exec("ALTER TABLE teach_documents RENAME COLUMN blob_path TO object_key");
-    },
-  ],
+  [17, { nextVersion: 18, run: migrateV17ToV18 }],
+  [18, { nextVersion: CURRENT_SCHEMA_VERSION, run: consolidatePostV18Schema }],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -516,16 +535,21 @@ function runMigrations(db: Database): void {
   while (version < CURRENT_SCHEMA_VERSION) {
     const migration = MIGRATIONS.get(version);
     if (!migration) {
-      throw new Error(`缺少 Schema v${version} → v${version + 1} 迁移`);
+      throw new Error(`缺少 Schema v${version} 的迁移`);
     }
-    const nextVersion = version + 1;
+    if (
+      migration.nextVersion <= version ||
+      migration.nextVersion > CURRENT_SCHEMA_VERSION
+    ) {
+      throw new Error(`Schema v${version} 的迁移目标版本无效`);
+    }
     db.transaction(() => {
-      migration(db);
+      migration.run(db);
       db.prepare(
         "UPDATE config SET value = ? WHERE key = 'schema_version'",
-      ).run(String(nextVersion));
+      ).run(String(migration.nextVersion));
     })();
-    version = nextVersion;
+    version = migration.nextVersion;
   }
 }
 
@@ -753,6 +777,7 @@ function installSchema(db: Database): void {
       name          TEXT NOT NULL,
       object_key    TEXT NOT NULL UNIQUE,
       file_size     INTEGER NOT NULL DEFAULT 0,
+      status        TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('capturing', 'ready')),
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_teach_documents_created
@@ -806,11 +831,13 @@ function installSchema(db: Database): void {
   db.exec(AI_SCHEMA);
   db.exec(MEDIA_SCHEMA);
   db.exec(STORAGE_QUOTA_SCHEMA);
+  db.exec(ARTICLE_UPLOADS_SCHEMA);
   // Worktree/dev databases created while schema v23 was being developed may
   // already have media_lists without retention_days. Production upgrades from
   // v22 always create the complete table above, so this is a narrow repair.
-  const mediaListColumns = db.prepare("PRAGMA table_info(media_lists)").all() as
-    Array<{ name: string }>;
+  const mediaListColumns = db
+    .prepare("PRAGMA table_info(media_lists)")
+    .all() as Array<{ name: string }>;
   if (!mediaListColumns.some((column) => column.name === "retention_days")) {
     db.exec(
       "ALTER TABLE media_lists ADD COLUMN retention_days INTEGER NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365)",
@@ -924,9 +951,55 @@ function installSchema(db: Database): void {
   `);
 }
 
+/**
+ * One-time removal of the pre-v25 article/teach-document feature data. Both
+ * features are work-in-progress, so their old rows and blob layouts are not
+ * migrated; the marker prevents the reset from running again on later starts.
+ */
+function resetWipArticleAndTeachData(db: Database): void {
+  const marker = "wip_storage_reset_v25";
+  const existing = db.prepare("SELECT 1 FROM config WHERE key = ?").get(marker);
+  if (existing) return;
+
+  for (const directory of [
+    path.join(DATA_ROOT, "blobs", "articles"),
+    path.join(DATA_ROOT, "blobs", "teach"),
+    path.join(DATA_ROOT, "storage", "objects", "article-bundles"),
+    path.join(DATA_ROOT, "storage", "objects", "teach-documents"),
+  ]) {
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch (error) {
+      console.error(
+        `[Database] failed to remove WIP feature directory ${directory}`,
+        error,
+      );
+    }
+  }
+
+  db.transaction(() => {
+    db.prepare("DELETE FROM article_bookmarks").run();
+    db.prepare("DELETE FROM article_read_progress").run();
+    db.prepare("DELETE FROM article_uploads").run();
+    db.prepare("DELETE FROM text_article_segments").run();
+    db.prepare("DELETE FROM articles").run();
+    db.prepare("DELETE FROM teach_documents").run();
+    db.prepare(
+      `DELETE FROM storage_quota_items
+        WHERE group_name IN ('article-bundles', 'teach-documents')`,
+    ).run();
+    db.prepare(
+      `DELETE FROM storage_eviction_groups
+        WHERE name IN ('article-bundles', 'teach-documents')`,
+    ).run();
+    db.prepare("INSERT INTO config (key, value) VALUES (?, '1')").run(marker);
+  })();
+}
+
 function initializeDatabase(db: Database): void {
   runMigrations(db);
   installSchema(db);
+  resetWipArticleAndTeachData(db);
   ensurePinSecret(db);
   ensureConfigDefaults(db);
   initWordSchema(db);

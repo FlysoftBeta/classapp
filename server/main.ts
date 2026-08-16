@@ -30,6 +30,7 @@ export async function bootstrap(
   const db = getDb();
   const runtime = new Runtime(db, config.buildId);
   await runtime.storage.start();
+  await runtime.articleUploads.reconcile();
   await runtime.media.start();
   runtime.teachDocuments.start();
   if (config.update) setUpdateManager(new UpdateManager(db, config.update));

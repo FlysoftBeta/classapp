@@ -25,8 +25,9 @@ lib/media/                         provider SDK; no server imports
   ytdlp-plugins/classapp-music-search/
                                    fast rich music-search extractor plugin
 server/runtime/mediaRuntime.ts     process lifetime: jobs, leases, eviction, relay
+server/runtime/mediaStreamSession.ts  one shared yt-dlp audio stream per track
 server/runtime/potServer.ts        GPL POT provider child process supervisor
-server/runtime/mediaThrottle.ts    provider process pacing (search/materialize)
+server/runtime/mediaThrottle.ts    provider process pacing and stream concurrency
 server/services/mediaService.ts    track search/ensure/play/config
 server/services/mediaPlaylistService.ts  queue + playlist mechanics
 server/data/media.ts               SQL and row mapping
@@ -67,7 +68,7 @@ hidden locator and otherwise performs one bounded `--dump-single-json` parse.
 Rate limiting, staging, hashing, and quota belong to `MediaRuntime`, so the
 provider itself has no download, storage, or throttle API.
 
-## Data model (server schema v24)
+## Data model (server schema v25)
 
 `media_tracks` keeps identity and basic metadata. `media_assets` has one row per
 `(track_id, kind)` with states `queued | downloading | ready | failed`; the
@@ -102,10 +103,18 @@ integers; inserts and deletes renumber in the same Service transaction.
   and waits for the cover job on first access. The cover job consumes
   `streamCover` into the staged ObjectStore file.
 
-A background `MaterializeJob` starts when a track is queued or played, so
-listening normally populates the shared cache. The current relay and the
-background job are separate yt-dlp invocations; merging them into one tee is a
-known follow-up, not a correctness gap.
+A background materialization starts when a track is queued or played, so
+listening normally populates the shared cache. Every attempt publishes under a
+fresh generation key (`track/kind/<uuid>`), so eviction of a deleted asset row
+can never reclaim a newer attempt's file. Audio materialization and all
+live relays for the same track share one yt-dlp invocation through
+`AudioStreamSession`: the session owns the provider stream, fans chunks out to
+each relay subscriber with a bounded queue, and feeds the materialization
+subscription that writes the staged ObjectStore file. Relay consumers that fall
+more than 64 MiB behind are dropped so a stalled client cannot block the shared
+stream; materialization applies backpressure instead. `ConcurrencyLimiter`
+bounds distinct provider-backed audio streams to a small fixed number, so many
+different tracks cannot spawn unbounded yt-dlp processes at once.
 
 ## Ref counting and quota eviction
 
@@ -187,8 +196,9 @@ before using media features in `npm run dev`.
   player stores a ready server asset into `media:<track_id>:audio` after
   checking byte size and SHA-256. Tracks that were only streamed live must be
   materialized by the server before their first offline use.
-- Live relay and background materialization duplicate external bandwidth for
-  the first listener of a track.
+- Relay subscribers have a bounded 64 MiB queue; a client that stops reading
+  for long enough is dropped from the shared stream and must resume by
+  re-requesting playback.
 - Seek before materialization waits; very slow downloads can exceed the
   120-second seek wait and surface `503`.
 - Playlist retention (1-365 days) controls the local claim for tracks played

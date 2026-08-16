@@ -2,12 +2,16 @@ import { MediaError, type ProviderStream } from "@/lib/media";
 
 /**
  * One yt-dlp audio stream can feed several HTTP relays and the background
- * materialization job at once. Each consumer gets its own bounded queue so a
- * slow client can never stall the shared provider or the other listeners; if a
- * consumer falls more than ~8 MiB behind, it is dropped instead of growing
- * without limit.
+ * materialization job at once.
+ *
+ * Relay consumers get a bounded queue: if a client stalls and falls more than
+ * 64 MiB behind, it is dropped rather than letting a paused tab block the
+ * shared stream forever. The materialization consumer is not droppable;
+ * instead the pump stops pulling from the provider while materialization is
+ * above its high-water mark, so disk backpressure bounds memory.
  */
-const MAX_SUBSCRIBER_BUFFER_BYTES = 8 * 1024 * 1024;
+const RELAY_BUFFER_LIMIT = 64 * 1024 * 1024;
+const MATERIALIZATION_HIGH_WATER = 8 * 1024 * 1024;
 
 interface PendingNext {
   resolve(): void;
@@ -21,11 +25,20 @@ interface StreamSubscriber {
   error: unknown;
   released: boolean;
   pending: PendingNext | null;
+  droppable: boolean;
+  maxBufferBytes: number;
+  drainWaiters: Array<() => void>;
 }
 
 export interface StreamSubscription {
   read(): AsyncIterable<Uint8Array>;
   release(): void;
+}
+
+interface SubscribeOptions {
+  /** Slow subscribers are dropped when their queue exceeds maxBufferBytes. */
+  droppable: boolean;
+  maxBufferBytes: number;
 }
 
 class ChunkFanout {
@@ -43,7 +56,7 @@ class ChunkFanout {
     return this.subscribers.size;
   }
 
-  subscribe(): StreamSubscription {
+  subscribe(options: SubscribeOptions): StreamSubscription {
     const sub: StreamSubscriber = {
       queue: [],
       queueBytes: 0,
@@ -51,6 +64,9 @@ class ChunkFanout {
       error: null,
       released: false,
       pending: null,
+      droppable: options.droppable,
+      maxBufferBytes: options.maxBufferBytes,
+      drainWaiters: [],
     };
     if (this.sourceEnded) {
       sub.done = this.sourceError === null;
@@ -59,7 +75,7 @@ class ChunkFanout {
       this.subscribers.add(sub);
     }
     return {
-      read: () => readSubscriber(sub),
+      read: () => readSubscriber(sub, () => this.chunkConsumed(sub)),
       release: () => this.release(sub),
     };
   }
@@ -73,6 +89,7 @@ class ChunkFanout {
     const cancelled = new MediaError("cancelled", "媒体流已取消");
     if (pending) pending.reject(cancelled);
     else sub.error = cancelled;
+    this.resolveDrainWaiters(sub);
   }
 
   /** Start consuming the source. Subscribers added after this still share it. */
@@ -92,6 +109,7 @@ class ChunkFanout {
     try {
       for await (const chunk of this.source!) {
         this.broadcast(chunk);
+        await this.waitForRequiredDrain();
       }
       this.finish(null);
     } catch (error) {
@@ -102,7 +120,10 @@ class ChunkFanout {
   private broadcast(chunk: Uint8Array): void {
     for (const sub of [...this.subscribers]) {
       if (sub.released) continue;
-      if (sub.queueBytes + chunk.byteLength > MAX_SUBSCRIBER_BUFFER_BYTES) {
+      if (
+        sub.droppable &&
+        sub.queueBytes + chunk.byteLength > sub.maxBufferBytes
+      ) {
         this.drop(
           sub,
           new MediaError("rate-limited", "媒体流消费者读取过慢", true),
@@ -117,6 +138,28 @@ class ChunkFanout {
     }
   }
 
+  private async waitForRequiredDrain(): Promise<void> {
+    for (const sub of [...this.subscribers]) {
+      if (sub.released || sub.droppable) continue;
+      while (sub.queueBytes > sub.maxBufferBytes && !sub.released) {
+        await new Promise<void>((resolve) => {
+          sub.drainWaiters.push(resolve);
+        });
+      }
+    }
+  }
+
+  private chunkConsumed(sub: StreamSubscriber): void {
+    if (sub.queueBytes <= sub.maxBufferBytes) {
+      this.resolveDrainWaiters(sub);
+    }
+  }
+
+  private resolveDrainWaiters(sub: StreamSubscriber): void {
+    const waiters = sub.drainWaiters.splice(0);
+    for (const resolve of waiters) resolve();
+  }
+
   private drop(sub: StreamSubscriber, error: MediaError): void {
     sub.released = true;
     sub.error = error;
@@ -124,6 +167,7 @@ class ChunkFanout {
     const pending = sub.pending;
     sub.pending = null;
     if (pending) pending.reject(error);
+    this.resolveDrainWaiters(sub);
   }
 
   private finish(error: unknown): void {
@@ -140,17 +184,20 @@ class ChunkFanout {
         if (error) pending.reject(error);
         else pending.resolve();
       }
+      this.resolveDrainWaiters(sub);
     }
   }
 }
 
 async function* readSubscriber(
   sub: StreamSubscriber,
+  onChunkConsumed: () => void,
 ): AsyncIterable<Uint8Array> {
   while (true) {
     if (sub.queue.length > 0) {
       const chunk = sub.queue.shift()!;
       sub.queueBytes -= chunk.byteLength;
+      onChunkConsumed();
       yield chunk;
       continue;
     }
@@ -203,7 +250,10 @@ export class AudioStreamSession {
 
   /** Join this stream for live relay playback. */
   subscribe(): ProviderStream {
-    const subscription = this.fanout.subscribe();
+    const subscription = this.fanout.subscribe({
+      droppable: true,
+      maxBufferBytes: RELAY_BUFFER_LIMIT,
+    });
     let released = false;
     return {
       contentType: "audio/webm",
@@ -228,21 +278,24 @@ export class AudioStreamSession {
   }
 
   private async start(): Promise<void> {
-    if (!this.deps.findReady()) {
-      this.materializationSettled = false;
-      this.materializationSub = this.fanout.subscribe();
-      this.materializationPromise = this.deps
-        .materializeFrom(this.materializationSub)
-        .catch(() => undefined)
-        .finally(() => {
-          this.materializationSettled = true;
-          this.materializationSub?.release();
-          this.materializationSub = null;
-          this.maybeDispose();
-        });
-    }
-
     try {
+      if (!this.deps.findReady()) {
+        this.materializationSettled = false;
+        this.materializationSub = this.fanout.subscribe({
+          droppable: false,
+          maxBufferBytes: MATERIALIZATION_HIGH_WATER,
+        });
+        this.materializationPromise = this.deps
+          .materializeFrom(this.materializationSub)
+          .catch(() => undefined)
+          .finally(() => {
+            this.materializationSettled = true;
+            this.materializationSub?.release();
+            this.materializationSub = null;
+            this.maybeDispose();
+          });
+      }
+
       const started = await this.deps.startProvider(this.abort.signal);
       if (this.disposed) {
         started.release();

@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { unzipSync, zipSync } from "fflate";
 import { z } from "zod";
-import { createKeyedLock } from "./keyedLock";
 import type { ObjectStore } from "./objectStore";
 import { normalizeTreePath, type ObjectRef } from "./paths";
 
@@ -112,12 +111,19 @@ function loadFromArchive(archive: Uint8Array): LoadedTree {
   const byId = new Map<string, TreeManifestEntry>();
   for (const entry of manifest.entries) {
     const normalized = normalizeTreePath(entry.path);
-    if (normalized !== entry.path || byPath.has(normalized) || byId.has(entry.id)) {
+    if (
+      normalized !== entry.path ||
+      byPath.has(normalized) ||
+      byId.has(entry.id)
+    ) {
       throw new Error("Tree manifest contains a duplicate or invalid path");
     }
     const bytes = entries[payloadName(entry.id)];
     if (!bytes || bytes.byteLength !== entry.size) {
       throw new Error("Tree archive payload does not match its manifest");
+    }
+    if (sha256(bytes) !== entry.sha256) {
+      throw new Error("Tree archive payload failed its checksum");
     }
     byPath.set(normalized, entry);
     byId.set(entry.id, entry);
@@ -174,11 +180,17 @@ function encodeArchive(
   const entries = [...byPath.values()].sort((left, right) =>
     left.path.localeCompare(right.path),
   );
-  const manifest: TreeManifest = { format: "classapp-object-tree", version: 1, revision, entries };
+  const manifest: TreeManifest = {
+    format: "classapp-object-tree",
+    version: 1,
+    revision,
+    entries,
+  };
   const archive: Record<string, Uint8Array> = {
     [MANIFEST_NAME]: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`),
   };
-  for (const entry of entries) archive[payloadName(entry.id)] = payloads[payloadName(entry.id)]!;
+  for (const entry of entries)
+    archive[payloadName(entry.id)] = payloads[payloadName(entry.id)]!;
   return zipSync(archive, { level: 6 });
 }
 
@@ -205,7 +217,12 @@ export class EditableTree {
     return { entry: publicFile(entry), bytes };
   }
 
-  put(path: string, bytes: Uint8Array, mime: string, updatedAt: string): TreeFile {
+  put(
+    path: string,
+    bytes: Uint8Array,
+    mime: string,
+    updatedAt: string,
+  ): TreeFile {
     const normalized = normalizeTreePath(path);
     const entry: TreeManifestEntry = {
       id: crypto.randomUUID(),
@@ -271,12 +288,10 @@ export class EditableTree {
  * raw files with no metadata at all.
  */
 export class TreeStore {
-  private readonly locks = createKeyedLock();
-
   constructor(private readonly store: ObjectStore) {}
 
   async inspect(ref: ObjectRef, limits: TreeLimits): Promise<TreeSnapshot> {
-    return this.locks.run(ref, () => this.load(ref, limits));
+    return this.store.withLock(ref, () => this.load(ref, limits));
   }
 
   async read(
@@ -284,7 +299,7 @@ export class TreeStore {
     limits: TreeLimits,
     path: string,
   ): Promise<{ entry: TreeFile; bytes: Uint8Array } | null> {
-    return this.locks.run(ref, async () => {
+    return this.store.withLock(ref, async () => {
       const tree = await this.load(ref, limits);
       return tree.read(path);
     });
@@ -292,29 +307,40 @@ export class TreeStore {
 
   /**
    * Load, mutate, validate, and atomically republish in one per-object lock.
-   * Mutators never see another request's intermediate state.
+   * Mutators never see another request's intermediate state. The archive is
+   * fully re-parsed and checksummed before any bytes are published.
    */
   async mutate(
     ref: ObjectRef,
     limits: TreeLimits,
     mutation: TreeMutation,
   ): Promise<TreeSnapshot> {
-    return this.locks.run(ref, async () => {
+    return this.store.withLock(ref, async () => {
       const loaded = await this.load(ref, limits);
       const editable = loaded.toEditable();
       await mutation(editable);
       editable.validate(limits);
       const revision = editable.revision + 1;
       const archive = editable.toArchiveBytes(revision);
-      await this.store.putBlob(ref, archive, { expectedBytes: archive.byteLength });
       const parsed = loadFromArchive(archive);
-      if (parsed.revision !== revision) throw new Error("Tree revision mismatch");
-      return parsed;
+      if (parsed.revision !== revision)
+        throw new Error("Tree revision mismatch");
+      await this.store.putBlobLocked(ref, archive, {
+        expectedBytes: archive.byteLength,
+      });
+      const publishedBytes = new Uint8Array(
+        await this.store.read(ref, limits.maxArchiveBytes),
+      );
+      const published = loadFromArchive(publishedBytes);
+      if (published.revision !== revision) {
+        throw new Error("Published tree revision mismatch");
+      }
+      return published;
     });
   }
 
   async remove(ref: ObjectRef): Promise<void> {
-    return this.locks.run(ref, () => this.store.trash(ref));
+    return this.store.withLock(ref, () => this.store.trashLocked(ref));
   }
 
   private async load(ref: ObjectRef, limits: TreeLimits): Promise<LoadedTree> {

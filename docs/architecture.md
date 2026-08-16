@@ -99,9 +99,11 @@ SQL. Services must not infer the caller's administrative authority. Data must
 not publish events or choose actor policy.
 
 The current code has exceptions, such as incident-key SQL in
-`IncidentService`, singleton access to `UpdateManager`, and some Service-level
-event publication outside a Scope `UnitOfWork`. These are migration defects,
-not precedents.
+`IncidentService` and singleton access to `UpdateManager`. Service-level event
+publication now goes through a UnitOfWork deferral queue whenever a Facade runs
+a mutation inside `unitOfWork.run`, so events are delivered only after the
+outermost commit; Facades that still bypass UnitOfWork remain migration
+defects, not precedents.
 
 ## Client request path
 
@@ -138,8 +140,10 @@ from whether the client seems online.
 
 ## Data topology
 
-The authoritative server database is SQLite schema v24 in the examined working
-tree, with v17 as the accepted migration baseline. The browser uses the shared
+The authoritative server database is SQLite schema v25 in the examined working
+tree. Production is schema v18; migrations accept v17 as the oldest baseline
+and consolidate everything after v18 into one v18 → v25 step. The browser uses
+the shared
 `classapp-runtime` IndexedDB database but has two independent schema owners:
 
 - Shell: `shell_bundles`, `shell_kv`, Shell schema marker;

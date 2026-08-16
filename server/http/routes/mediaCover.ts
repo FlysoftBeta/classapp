@@ -20,7 +20,13 @@ export async function GET(
     try {
       const ready = findReadyAsset(scope.db, id, "cover");
       if (ready?.object_path) {
-        return await storedCoverResponse(scope.runtime.media.objects, ready.object_path, ready.mime ?? "image/jpeg", ready.bytes, releaseLease);
+        return await storedCoverResponse(
+          scope.runtime.media.objects,
+          ready.object_path,
+          ready.mime ?? "image/jpeg",
+          ready.bytes,
+          releaseLease,
+        );
       }
       void scope.runtime.media
         .ensureMaterialized(track, "cover")
@@ -33,7 +39,13 @@ export async function GET(
       if (!becameReady) throw new PublicError("封面尚未就绪");
       const nowReady = findReadyAsset(scope.db, id, "cover");
       if (!nowReady?.object_path) throw new PublicError("封面尚未就绪");
-      return await storedCoverResponse(scope.runtime.media.objects, nowReady.object_path, nowReady.mime ?? "image/jpeg", nowReady.bytes, releaseLease);
+      return await storedCoverResponse(
+        scope.runtime.media.objects,
+        nowReady.object_path,
+        nowReady.mime ?? "image/jpeg",
+        nowReady.bytes,
+        releaseLease,
+      );
     } catch (error) {
       releaseLease();
       throw error;
@@ -54,13 +66,19 @@ async function storedCoverResponse(
   const source = streamed.body.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const { value, done } = await source.read();
-      if (done) {
+      try {
+        const { value, done } = await source.read();
+        if (done) {
+          releaseLease();
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
         releaseLease();
-        controller.close();
-        return;
+        await source.cancel(error).catch(() => undefined);
+        controller.error(error);
       }
-      controller.enqueue(value);
     },
     async cancel(reason) {
       releaseLease();

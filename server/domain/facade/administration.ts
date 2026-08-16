@@ -9,6 +9,7 @@ import type {
 } from "@/server/services/adminSystemService";
 import type { TeachDocumentsService } from "@/server/services/teachDocumentsService";
 import type { AuditService } from "@/server/services/auditService";
+import type { UnitOfWork } from "@/server/runtime/unitOfWork";
 import { PublicError } from "@/server/services/incidentService";
 import { normalizeManifestUrl } from "@/server/validation/update";
 
@@ -22,6 +23,7 @@ export class AdministrationActorFacade {
     private readonly system: AdminSystemService,
     private readonly teachDocuments: TeachDocumentsService,
     private readonly audit: AuditService,
+    private readonly unitOfWork: UnitOfWork,
   ) {}
 
   listClients(offset: number, query: string) {
@@ -101,85 +103,87 @@ export class AdministrationActorFacade {
     update_auto_check?: boolean;
     update_manifest_url?: string;
   }) {
-    const actor = this.actor.requireUser();
-    if (
-      input.idle_lock_enabled !== undefined ||
-      input.system_locked !== undefined
-    ) {
-      this.actor.requireRole("operations_assistant");
-    }
-    if (input.https_redirect_enabled !== undefined)
-      this.actor.requireRole("operations");
-    const updatesCloudConfig =
-      input.cloud_deploy_enabled !== undefined ||
-      input.update_auto_check !== undefined ||
-      input.update_manifest_url !== undefined;
-    if (updatesCloudConfig) this.actor.requireRole("operations");
-    if (
-      input.whitelist_enabled !== undefined ||
-      input.identity_methods !== undefined
-    ) {
-      this.actor.requireRole("access_manager");
-    }
-    if (input.announcement_content !== undefined) {
-      this.actor.requireRole("advanced_community_manager");
-    }
-    let cloudConfig = this.appState.getCloudUpdateConfig();
-    const cloudInput = updatesCloudConfig
-      ? {
-          cloud_deploy_enabled: input.cloud_deploy_enabled,
-          update_auto_check: input.update_auto_check,
+    return this.unitOfWork.run(() => {
+      const actor = this.actor.requireUser();
+      if (
+        input.idle_lock_enabled !== undefined ||
+        input.system_locked !== undefined
+      ) {
+        this.actor.requireRole("operations_assistant");
+      }
+      if (input.https_redirect_enabled !== undefined)
+        this.actor.requireRole("operations");
+      const updatesCloudConfig =
+        input.cloud_deploy_enabled !== undefined ||
+        input.update_auto_check !== undefined ||
+        input.update_manifest_url !== undefined;
+      if (updatesCloudConfig) this.actor.requireRole("operations");
+      if (
+        input.whitelist_enabled !== undefined ||
+        input.identity_methods !== undefined
+      ) {
+        this.actor.requireRole("access_manager");
+      }
+      if (input.announcement_content !== undefined) {
+        this.actor.requireRole("advanced_community_manager");
+      }
+      let cloudConfig = this.appState.getCloudUpdateConfig();
+      const cloudInput = updatesCloudConfig
+        ? {
+            cloud_deploy_enabled: input.cloud_deploy_enabled,
+            update_auto_check: input.update_auto_check,
+            update_manifest_url:
+              input.update_manifest_url === undefined
+                ? undefined
+                : normalizeManifestUrl(input.update_manifest_url),
+          }
+        : null;
+      if (cloudInput) {
+        const next = {
+          ...cloudConfig,
+          ...cloudInput,
           update_manifest_url:
-            input.update_manifest_url === undefined
-              ? undefined
-              : normalizeManifestUrl(input.update_manifest_url),
+            cloudInput.update_manifest_url ?? cloudConfig.update_manifest_url,
+        };
+        if (next.cloud_deploy_enabled && !next.update_manifest_url) {
+          throw new PublicError("开启云端部署前请设置 Manifest 链接");
         }
-      : null;
-    if (cloudInput) {
-      const next = {
+        if (next.update_auto_check && !next.cloud_deploy_enabled) {
+          throw new PublicError("自动检查依赖云端部署");
+        }
+      }
+      const appConfig = this.appState.updateConfig({
+        idle_lock_enabled: input.idle_lock_enabled,
+        system_locked: input.system_locked,
+      });
+      if (input.https_redirect_enabled !== undefined) {
+        this.https.setRedirectEnabled(input.https_redirect_enabled);
+      }
+      const clientConfig = this.clients.updateConfig({
+        whitelist_enabled: input.whitelist_enabled,
+        identity_methods: input.identity_methods,
+      });
+      const announcement =
+        input.announcement_content !== undefined
+          ? this.announcements.update(input.announcement_content)
+          : this.announcements.get();
+      if (cloudInput) {
+        cloudConfig = this.appState.updateCloudUpdateConfig(cloudInput);
+        this.unitOfWork.afterCommit(() => this.system.cloudConfigChanged());
+      }
+      this.record(actor.id, "system.config.update", "runtime-config", null, {
+        fields: Object.keys(input),
+      });
+      return {
+        ok: true as const,
+        ...appConfig,
+        https_redirect_enabled: this.https.isRedirectEnabled(),
+        ...clientConfig,
+        announcement_content: announcement.content,
+        announcement_revision: announcement.revision,
         ...cloudConfig,
-        ...cloudInput,
-        update_manifest_url:
-          cloudInput.update_manifest_url ?? cloudConfig.update_manifest_url,
       };
-      if (next.cloud_deploy_enabled && !next.update_manifest_url) {
-        throw new PublicError("开启云端部署前请设置 Manifest 链接");
-      }
-      if (next.update_auto_check && !next.cloud_deploy_enabled) {
-        throw new PublicError("自动检查依赖云端部署");
-      }
-    }
-    const appConfig = this.appState.updateConfig({
-      idle_lock_enabled: input.idle_lock_enabled,
-      system_locked: input.system_locked,
     });
-    if (input.https_redirect_enabled !== undefined) {
-      this.https.setRedirectEnabled(input.https_redirect_enabled);
-    }
-    const clientConfig = this.clients.updateConfig({
-      whitelist_enabled: input.whitelist_enabled,
-      identity_methods: input.identity_methods,
-    });
-    const announcement =
-      input.announcement_content !== undefined
-        ? this.announcements.update(input.announcement_content)
-        : this.announcements.get();
-    if (cloudInput) {
-      cloudConfig = this.appState.updateCloudUpdateConfig(cloudInput);
-      this.system.cloudConfigChanged();
-    }
-    this.record(actor.id, "system.config.update", "runtime-config", null, {
-      fields: Object.keys(input),
-    });
-    return {
-      ok: true as const,
-      ...appConfig,
-      https_redirect_enabled: this.https.isRedirectEnabled(),
-      ...clientConfig,
-      announcement_content: announcement.content,
-      announcement_revision: announcement.revision,
-      ...cloudConfig,
-    };
   }
 
   listBackups() {

@@ -3,13 +3,13 @@ import type { MediaRuntime } from "@/server/runtime/mediaRuntime";
 import {
   ensureTrack,
   getTrack,
+  issueStreamGrant,
   listTracks,
   mediaConfig,
   touchTrack,
   updateMediaConfig,
   type TrackInput,
 } from "@/server/data/media";
-import { issueStreamGrant } from "@/server/runtime/mediaRuntime";
 import { MediaError } from "@/lib/media";
 import { PublicError } from "@/server/services/incidentService";
 import { publishSystem, publishUser } from "@/server/services/eventBus";

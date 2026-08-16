@@ -1,9 +1,9 @@
 import type { Database } from "better-sqlite3";
 import {
-  finishAiRun,
+  finishAndSettleAiRun,
   getAiRunBilling,
   listInterruptedAiRuns,
-  settleAiCredits,
+  settleTerminalAiReservations,
 } from "@/server/data/ai";
 
 /** Process-bound ownership of active AI executions and restart reconciliation. */
@@ -12,7 +12,7 @@ export class AiExecutionRuntime {
 
   constructor(private readonly db: Database) {
     for (const run of listInterruptedAiRuns(db)) {
-      finishAiRun(db, run.id, {
+      finishAndSettleAiRun(db, run.id, {
         status: "failed",
         content: "服务重启中断了本次生成，请重新发送。",
         error: "AI run interrupted by server restart",
@@ -21,8 +21,10 @@ export class AiExecutionRuntime {
         cachedInputTokens: 0,
         outputTokens: 0,
       });
-      settleAiCredits(db, run.user_id, run.id, run.reserved_credit_micros, 0);
     }
+    // Terminal runs whose reservation settlement was interrupted by a crash
+    // are repaired from their stored charged amount.
+    settleTerminalAiReservations(db);
   }
 
   begin(runId: string): AbortController {

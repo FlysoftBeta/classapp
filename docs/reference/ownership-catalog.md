@@ -5,17 +5,17 @@ Cross-stack system documents remain authoritative for behavior.
 
 ## Process runtime and infrastructure
 
-| Owner                  | Lifetime and responsibility                                                                     |
-| ---------------------- | ----------------------------------------------------------------------------------------------- |
-| `Runtime`              | process composition: database, event bus, AI execution, article import                          |
-| `EventBusRuntime`      | process channel fan-out; events are repair hints, not durable log                               |
-| `AiExecutionRuntime`   | active run cancellation and restart reconciliation                                              |
-| `ArticleImportRuntime` | external import pool, queue, long-running task ownership                                        |
-| `TeachDocumentsRuntime` | Office/WPS monitor child, capture, quota policy/ledger, owner eviction                        |
-| launcher               | version directories, child restart, pending metadata, rollback watchdog                         |
-| `UpdateManager`        | server-side validation/staging/cloud status; should be Runtime-owned rather than global locator |
-| `BundleManager`        | browser post-bootstrap manifest check, stage, activation coordination                           |
-| Service Worker         | selected Shell cache/pointer and navigation fallback only                                       |
+| Owner                   | Lifetime and responsibility                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `Runtime`               | process composition: database, event bus, AI execution, article import                          |
+| `EventBusRuntime`       | process channel fan-out; events are repair hints, not durable log                               |
+| `AiExecutionRuntime`    | active run cancellation and restart reconciliation                                              |
+| `ArticleImportRuntime`  | external import pool, queue, long-running task ownership                                        |
+| `TeachDocumentsRuntime` | Office/WPS monitor child, capture, quota policy/ledger, owner eviction                          |
+| launcher                | version directories, child restart, pending metadata, rollback watchdog                         |
+| `UpdateManager`         | server-side validation/staging/cloud status; should be Runtime-owned rather than global locator |
+| `BundleManager`         | browser post-bootstrap manifest check, stage, activation coordination                           |
+| Service Worker          | selected Shell cache/pointer and navigation fallback only                                       |
 
 ## Request foundation
 
@@ -42,16 +42,16 @@ Cross-stack system documents remain authoritative for behavior.
 
 ## Community and content
 
-| Service                | Mechanism and exclusions                                                     |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `GroupService`         | aggregation, discovery routes, membership, Group policy, membership Facts    |
-| `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications             |
-| `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles   |
+| Service                | Mechanism and exclusions                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `GroupService`         | aggregation, discovery routes, membership, Group policy, membership Facts                        |
+| `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications                                 |
+| `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles                       |
 | `ArticleService`       | objective text/bundle metadata, object publication, list/progress/bookmark mechanisms and events |
-| `ArticleImportService` | request view of process import runtime                                       |
-| `StickerService`       | catalog/pack mechanism; Post creation still uses Post Facade                 |
-| `AnnouncementService`  | announcement content/publication mechanism                                   |
-| `WordsService`         | learning/review state and purge behavior                                     |
+| `ArticleImportService` | request view of process import runtime                                                           |
+| `StickerService`       | catalog/pack mechanism; Post creation still uses Post Facade                                     |
+| `AnnouncementService`  | announcement content/publication mechanism                                                       |
+| `WordsService`         | learning/review state and purge behavior                                                         |
 
 ## AI
 
@@ -60,7 +60,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `AiService`                | conversation tree, routing, context, streaming runs, tools          |
 | `AiBillingService`         | plan windows, top-up, reservations, settlement, ledger, aggregation |
 | AI harness/prompts/pricing | internal mechanisms, not public Services                            |
-| `AiWorkspace`              | AI file-tool path/content policy over the manifest TreeStore         |
+| `AiWorkspace`              | AI file-tool path/content policy over the manifest TreeStore        |
 
 ## Operations and support
 
@@ -78,13 +78,14 @@ Cross-stack system documents remain authoritative for behavior.
 
 ## Storage and quota
 
-| Owner            | Responsibility                                                       |
-| ---------------- | -------------------------------------------------------------------- |
-| `ObjectStore`    | namespace/key validation, streaming blobs, staging, trash, reconcile |
-| `TreeStore`      | manifest ZIP validation, locked mutation, bounded complex objects    |
-| `QuotaService`   | dynamic eviction groups, touch formula, bounded SQL-driven sweeps   |
-| `StorageRuntime` | process-bound ObjectStore and owner-provided evictor registry        |
-| `server/data/quota` | quota SQL, indexed min/max ranges, bounded candidate ranking     |
+| Owner                  | Responsibility                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `ObjectStore`          | namespace/key validation, fd-based streaming blobs, staging, trash, staged/trash/orphan reconcile |
+| `TreeStore`            | manifest ZIP validation, locked mutation, bounded complex objects                                 |
+| `QuotaService`         | dynamic eviction groups, touch formula, bounded SQL-driven sweeps                                 |
+| `StorageRuntime`       | process-bound ObjectStore, owner-provided evictor registry, live-key orphan collectors            |
+| `ArticleUploadRuntime` | compensation for stale multipart bundle upload intents                                            |
+| `server/data/quota`    | quota SQL, indexed min/max ranges, bounded candidate ranking                                      |
 
 ## Client ownership
 

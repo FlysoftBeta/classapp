@@ -464,6 +464,69 @@ export function finishAiRun(
   })();
 }
 
+/**
+ * Terminal run state and its credit reservation move together. Keeping them in
+ * one transaction removes the crash window that left a completed/failed run
+ * with an active reservation forever.
+ */
+export function finishAndSettleAiRun(
+  db: Database,
+  runId: string,
+  input: {
+    status: "completed" | "failed" | "cancelled";
+    content: string;
+    error?: string | null;
+    chargedCreditMicros: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+  },
+): void {
+  db.transaction(() => {
+    const run = db
+      .prepare("SELECT user_id FROM ai_runs WHERE id = ?")
+      .get(runId) as { user_id: string } | undefined;
+    if (!run) return;
+    finishAiRun(db, runId, input);
+    settleCredits(
+      db,
+      run.user_id,
+      `run:${runId}`,
+      runId,
+      input.chargedCreditMicros,
+    );
+  })();
+}
+
+/** Repair terminal runs whose reservation was never settled before a crash. */
+export function settleTerminalAiReservations(db: Database): number {
+  return db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT r.id, r.user_id, r.charged_credit_micros
+           FROM ai_credit_reservations res
+           JOIN ai_runs r ON r.id = res.run_id
+          WHERE res.status = 'active'
+            AND r.status IN ('completed', 'failed', 'cancelled')`,
+      )
+      .all() as Array<{
+      id: string;
+      user_id: string;
+      charged_credit_micros: number;
+    }>;
+    for (const row of rows) {
+      settleCredits(
+        db,
+        row.user_id,
+        `run:${row.id}`,
+        row.id,
+        row.charged_credit_micros,
+      );
+    }
+    return rows.length;
+  })();
+}
+
 export function getAiRun(
   db: Database,
   userId: string,

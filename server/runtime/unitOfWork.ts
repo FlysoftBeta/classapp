@@ -1,4 +1,8 @@
 import type { Database } from "better-sqlite3";
+import {
+  deliverDeferredEvents,
+  withDeferredEvents,
+} from "@/server/services/eventBus";
 
 /** Owns transaction nesting and defers observable side effects until commit. */
 export class UnitOfWork {
@@ -12,15 +16,28 @@ export class UnitOfWork {
     const checkpoint = this.committed.length;
     this.depth += 1;
     let result: T;
+    let deferred: Parameters<typeof deliverDeferredEvents>[0] = [];
     try {
-      result = this.db.transaction(operation)();
+      if (outermost) {
+        result = withDeferredEvents(
+          () => this.db.transaction(operation)(),
+          (events) => {
+            deferred = events;
+          },
+        );
+      } else {
+        result = this.db.transaction(operation)();
+      }
     } catch (error) {
       this.depth -= 1;
       this.committed.length = checkpoint;
       throw error;
     }
     this.depth -= 1;
-    if (outermost) this.flushCommitted();
+    if (outermost) {
+      this.flushCommitted();
+      deliverDeferredEvents(deferred);
+    }
     return result;
   }
 
@@ -34,6 +51,16 @@ export class UnitOfWork {
 
   private flushCommitted(): void {
     const effects = this.committed.splice(0);
-    for (const effect of effects) effect();
+    let firstError: unknown = null;
+    for (const effect of effects) {
+      try {
+        effect();
+      } catch (error) {
+        // One failed post-commit effect must not suppress the others.
+        console.error("[UnitOfWork] post-commit effect failed", error);
+        firstError ??= error;
+      }
+    }
+    if (firstError) throw firstError;
   }
 }

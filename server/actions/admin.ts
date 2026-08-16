@@ -124,34 +124,36 @@ export async function adminCreateGroupAction(
 export async function adminMutateGroupsAction(
   input: ActionInput<"adminMutateGroupsAction">,
 ) {
-  return withActionScope(async (scope) => {
-    const groups = scope.facades().groups();
-    const ids = new Set<string>();
-    for (const {
-      groupId,
-      delete: shouldDelete,
-      memberAction,
-      userId,
-      ...changes
-    } of input.changes) {
-      if (ids.has(groupId) && !memberAction)
-        throw new PublicError("请求包含重复群组");
-      ids.add(groupId);
-      if (shouldDelete) await groups.adminDelete(groupId);
-      else if (memberAction === "add") {
-        await groups.adminAddMember(
-          groupId,
-          expectString(userId, "缺少 userId"),
-        );
-      } else if (memberAction === "remove") {
-        await groups.adminRemoveMember(
-          groupId,
-          expectString(userId, "缺少 userId"),
-        );
-      } else await groups.adminUpdate(groupId, changes);
-    }
-    return { ok: true as const };
-  });
+  return withActionScope(async (scope) =>
+    scope.unitOfWork.run(() => {
+      const groups = scope.facades().groups();
+      const ids = new Set<string>();
+      for (const {
+        groupId,
+        delete: shouldDelete,
+        memberAction,
+        userId,
+        ...changes
+      } of input.changes) {
+        if (ids.has(groupId) && !memberAction)
+          throw new PublicError("请求包含重复群组");
+        ids.add(groupId);
+        if (shouldDelete) {
+          groups.adminDelete(groupId);
+        } else if (memberAction === "add") {
+          groups.adminAddMember(groupId, expectString(userId, "缺少 userId"));
+        } else if (memberAction === "remove") {
+          groups.adminRemoveMember(
+            groupId,
+            expectString(userId, "缺少 userId"),
+          );
+        } else {
+          groups.adminUpdate(groupId, changes);
+        }
+      }
+      return { ok: true as const };
+    }),
+  );
 }
 
 export async function adminFetchClientsAction(
@@ -171,34 +173,36 @@ export async function adminFetchClientsAction(
 export async function adminMutateClientsAction(
   input: ActionInput<"adminMutateClientsAction">,
 ) {
-  return withActionScope(async (scope) => {
-    const administration = scope.facades().administration();
-    const ids = new Set<string>();
-    for (const update of input.changes) {
-      if (ids.has(update.id)) throw new PublicError("请求包含重复客户端");
-      ids.add(update.id);
-      if (update.delete) {
-        administration.deleteClient(update.id);
-        continue;
+  return withActionScope(async (scope) =>
+    scope.unitOfWork.run(() => {
+      const administration = scope.facades().administration();
+      const ids = new Set<string>();
+      for (const update of input.changes) {
+        if (ids.has(update.id)) throw new PublicError("请求包含重复客户端");
+        ids.add(update.id);
+        if (update.delete) {
+          administration.deleteClient(update.id);
+          continue;
+        }
+        if (update.promote) administration.promoteClient(update.id);
+        if (update.locked !== undefined) {
+          administration.setClientLock(update.id, update.locked);
+        }
+        if (
+          update.remark !== undefined ||
+          update.whitelisted !== undefined ||
+          update.bound_user_id !== undefined
+        ) {
+          administration.updateClient(update.id, {
+            remark: update.remark,
+            whitelisted: update.whitelisted,
+            bound_user_id: update.bound_user_id,
+          });
+        }
       }
-      if (update.promote) administration.promoteClient(update.id);
-      if (update.locked !== undefined) {
-        administration.setClientLock(update.id, update.locked);
-      }
-      if (
-        update.remark !== undefined ||
-        update.whitelisted !== undefined ||
-        update.bound_user_id !== undefined
-      ) {
-        administration.updateClient(update.id, {
-          remark: update.remark,
-          whitelisted: update.whitelisted,
-          bound_user_id: update.bound_user_id,
-        });
-      }
-    }
-    return { ok: true as const };
-  });
+      return { ok: true as const };
+    }),
+  );
 }
 
 export async function adminWhitelistCurrentClientAction() {

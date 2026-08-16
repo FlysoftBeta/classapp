@@ -6,7 +6,7 @@ import { normalizeAiSearchText, provisionalAiTitle } from "@/shared/ai/text";
 import {
   createAiConversation,
   createAiRunRecords,
-  finishAiRun,
+  finishAndSettleAiRun,
   getAiConversationDetail,
   getAiMessage,
   getAiRun,
@@ -768,7 +768,11 @@ export class AiService {
       instructions += `\n\n<workspace_catalog revision="${workspaceCatalog.revision}">\n${workspaceCatalog.files
         .map((file) => `${file.path} (${file.size} bytes)`)
         .join("\n")}\n</workspace_catalog>`;
-      let items = await messageItems(input.user.id, compacted.recent, workspace);
+      let items = await messageItems(
+        input.user.id,
+        compacted.recent,
+        workspace,
+      );
       let lastPersist = 0;
       for (let round = 0; round <= route.maxToolRounds; round += 1) {
         if (
@@ -878,7 +882,7 @@ export class AiService {
       }
       const billing = this.billing.runReservation(input.runId)!;
       const finalCharge = Math.min(billing.reserved_credit_micros, charged);
-      finishAiRun(this.db, input.runId, {
+      finishAndSettleAiRun(this.db, input.runId, {
         status: "completed",
         content: output,
         chargedCreditMicros: finalCharge,
@@ -886,7 +890,6 @@ export class AiService {
         cachedInputTokens: usage.cachedInputTokens,
         outputTokens: usage.outputTokens,
       });
-      this.billing.settleRun(input.user.id, input.runId, finalCharge);
       this.publish(input.user.id, input.runId);
       publishUser(input.user.id, {
         kind: "ai.sidebar.updated",
@@ -900,7 +903,7 @@ export class AiService {
         billing?.reserved_credit_micros ?? 0,
         charged,
       );
-      finishAiRun(this.db, input.runId, {
+      finishAndSettleAiRun(this.db, input.runId, {
         status: cancelled ? "cancelled" : "failed",
         content: output,
         error: cancelled ? null : "AI 暂时无法完成请求",
@@ -909,9 +912,6 @@ export class AiService {
         cachedInputTokens: usage.cachedInputTokens,
         outputTokens: usage.outputTokens,
       });
-      if (billing) {
-        this.billing.settleRun(input.user.id, input.runId, finalCharge);
-      }
       this.publish(input.user.id, input.runId);
       publishUser(input.user.id, {
         kind: "ai.sidebar.updated",

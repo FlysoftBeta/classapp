@@ -34,11 +34,9 @@ import {
   publishAsset,
   readyAssetBytesForTrack,
   reconcileReadyAssetQuotaItems,
+  touchTrack,
 } from "@/server/data/media";
-import {
-  ObjectStore,
-  type StagedWrite,
-} from "@/server/storage/objectStore";
+import { ObjectStore, type StagedWrite } from "@/server/storage/objectStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import { publishSystem } from "@/server/services/eventBus";
 import { recordContainedServerIncident } from "@/server/services/incidentService";
@@ -218,7 +216,8 @@ export class MediaRuntime {
     const promise = this.runCoverMaterialization(track);
     this.coverJobs.set(key, { trackId: track.id, kind: "cover", promise });
     void promise.finally(() => {
-      if (this.coverJobs.get(key)?.promise === promise) this.coverJobs.delete(key);
+      if (this.coverJobs.get(key)?.promise === promise)
+        this.coverJobs.delete(key);
     });
     return promise;
   }
@@ -280,21 +279,21 @@ export class MediaRuntime {
     track: MediaTrack,
     subscription: StreamSubscription,
   ): Promise<void> {
-    const ref = this.objects.ref("media", `${track.id}/audio`);
+    const generation = crypto.randomUUID();
+    const ref = this.objects.ref("media", `${track.id}/audio/${generation}`);
     let staged: StagedWrite | null = null;
+    let committed = false;
     try {
       if (findReadyAsset(this.db, track.id, "audio")) return;
       markAssetDownloading(this.db, track.id, "audio");
       staged = await this.objects.stage(ref);
-      const materialized = await writeChunks(
-        subscription.read(),
-        staged.path,
-      );
+      const materialized = await writeChunks(subscription.read(), staged.path);
       const object = await staged.commit({
         bytes: materialized.bytes,
         sha256: materialized.sha256,
       });
       staged = null;
+      committed = true;
       publishAsset(this.db, track.id, "audio", {
         objectPath: object.ref.key,
         mime: "audio/webm",
@@ -314,6 +313,9 @@ export class MediaRuntime {
       });
     } catch (error) {
       await staged?.discard();
+      if (committed && !findReadyAsset(this.db, track.id, "audio")) {
+        await this.objects.trash(ref).catch(() => undefined);
+      }
       if (error instanceof MediaError && error.kind === "cancelled") return;
       const code =
         error instanceof MediaError ? error.kind : "materialization-failed";
@@ -337,8 +339,10 @@ export class MediaRuntime {
 
   private async runCoverMaterialization(track: MediaTrack): Promise<void> {
     const kind = "cover";
-    const ref = this.objects.ref("media", `${track.id}/${kind}`);
+    const generation = crypto.randomUUID();
+    const ref = this.objects.ref("media", `${track.id}/${kind}/${generation}`);
     let staged: StagedWrite | null = null;
+    let committed = false;
     try {
       const ready = findReadyAsset(this.db, track.id, kind);
       if (ready) return;
@@ -346,10 +350,9 @@ export class MediaRuntime {
       staged = await this.objects.stage(ref);
       const outputPath = staged.path;
       const materialized = await this.materializeThrottle.run(async () => {
-        const stream = await this.provider.streamCover(
-          trackToProvider(track),
-          { signal: new AbortController().signal },
-        );
+        const stream = await this.provider.streamCover(trackToProvider(track), {
+          signal: new AbortController().signal,
+        });
         return {
           stream,
           ...(await writeProviderStream(stream, outputPath)),
@@ -360,6 +363,7 @@ export class MediaRuntime {
         sha256: materialized.sha256,
       });
       staged = null;
+      committed = true;
       publishAsset(this.db, track.id, kind, {
         objectPath: object.ref.key,
         mime: materialized.stream.contentType,
@@ -379,6 +383,9 @@ export class MediaRuntime {
       });
     } catch (error) {
       await staged?.discard();
+      if (committed && !findReadyAsset(this.db, track.id, kind)) {
+        await this.objects.trash(ref).catch(() => undefined);
+      }
       if (error instanceof MediaError && error.kind === "cancelled") return;
       const code =
         error instanceof MediaError ? error.kind : "materialization-failed";
@@ -425,11 +432,7 @@ export class MediaRuntime {
   }
 
   private touchOnStreamStart(trackId: string): void {
-    this.db
-      .prepare(
-        "UPDATE media_tracks SET last_used_at = datetime('now') WHERE id = ?",
-      )
-      .run(trackId);
+    touchTrack(this.db, trackId);
     new QuotaService(this.db).touch("media", trackId);
   }
 
@@ -480,20 +483,34 @@ export class MediaRuntime {
   ): Promise<boolean> {
     if (findReadyAsset(this.db, track.id, kind)) return true;
     const key = `${track.id}:${kind}`;
-    if ((this.waiters.get(key)?.length ?? 0) >= 16) {
+    const current = this.waiters.get(key) ?? [];
+    if (current.length >= 16) {
       throw new MediaError("rate-limited", "等待该曲目的请求过多", true);
     }
+    let waiter: ReadyWaiter;
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new MediaError("timeout", "等待媒体就绪超时", true));
-      }, timeoutMs);
+      waiter = {
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          reject(new MediaError("timeout", "等待媒体就绪超时", true));
+        }, timeoutMs),
+      };
       const waiters = this.waiters.get(key) ?? [];
-      waiters.push({ resolve, reject, timeout });
+      waiters.push(waiter);
       this.waiters.set(key, waiters);
-    }).catch((error) => {
-      if (error instanceof MediaError && error.kind === "timeout") return;
-      throw error;
-    });
+    })
+      .catch((error) => {
+        if (error instanceof MediaError && error.kind === "timeout") return;
+        throw error;
+      })
+      .finally(() => {
+        const waiters = this.waiters.get(key) ?? [];
+        const remaining = waiters.filter((entry) => entry !== waiter);
+        if (remaining.length) this.waiters.set(key, remaining);
+        else this.waiters.delete(key);
+        clearTimeout(waiter.timeout);
+      });
     return findReadyAsset(this.db, track.id, kind) !== null;
   }
 
@@ -588,20 +605,4 @@ function assetState(
 ): "absent" | "queued" | "downloading" | "ready" | "failed" {
   const row = listAssets(db, trackId).find((asset) => asset.kind === kind);
   return row?.state ?? "absent";
-}
-
-/** Generate a short-lived grant used by the raw audio HTTP route. */
-export function issueStreamGrant(
-  db: Database,
-  trackId: string,
-  userId: string | null,
-  ttlMs = 10 * 60_000,
-): { token: string; expiresAt: number } {
-  const token = crypto.randomBytes(24).toString("base64url");
-  const expiresAt = Date.now() + ttlMs;
-  db.prepare(
-    `INSERT INTO media_stream_grants (token, track_id, user_id, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(token, trackId, userId, expiresAt, Date.now());
-  return { token, expiresAt };
 }

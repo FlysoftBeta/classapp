@@ -5,6 +5,7 @@
  * retained as the domain-event API used by request Services.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { EventData, ServerEventName } from "@/shared/protocol/events";
 import { eventContracts } from "@/shared/protocol/events";
 import type { Database } from "better-sqlite3";
@@ -23,6 +24,30 @@ export type BusEvent = {
 }[ServerEventName];
 
 type Subscriber = (e: BusEvent) => void;
+
+const deferredEvents = new AsyncLocalStorage<BusEvent[]>();
+
+/**
+ * While a UnitOfWork transaction is open, `publish` records events instead of
+ * delivering them. The UnitOfWork delivers the queue only after the outermost
+ * commit; a rolled-back operation discards the queue with the context.
+ */
+export function withDeferredEvents<T>(
+  operation: () => T,
+  deliver: (events: BusEvent[]) => void,
+): T {
+  const queue: BusEvent[] = [];
+  const result = deferredEvents.run(queue, operation);
+  deliver(queue);
+  return result;
+}
+
+function deferEvent(event: BusEvent): boolean {
+  const queue = deferredEvents.getStore();
+  if (!queue) return false;
+  queue.push(event);
+  return true;
+}
 
 export class EventBusRuntime {
   private readonly subscribers = new Map<string, Set<Subscriber>>();
@@ -63,9 +88,13 @@ export class EventBusRuntime {
         parsed.error.issues,
       );
     }
-    const set = this.subscribers.get(channel);
+    this.deliver({ kind, channel, data: parsed.data } as BusEvent);
+  }
+
+  /** Deliver an already validated event to every current subscriber. */
+  deliver(evt: BusEvent): void {
+    const set = this.subscribers.get(evt.channel);
     if (!set) return;
-    const evt = { kind, channel, data: parsed.data } as BusEvent;
     let uncaptured: unknown = null;
     for (const fn of set) {
       try {
@@ -75,7 +104,11 @@ export class EventBusRuntime {
           createIncidentService(this.db, this.buildId).capture({
             environment: "server",
             error,
-            context: { component: "event-bus", event: kind, channel },
+            context: {
+              component: "event-bus",
+              event: evt.kind,
+              channel: evt.channel,
+            },
           });
         } catch (captureError) {
           console.error("[EventBus] Incident capture failed", captureError);
@@ -108,7 +141,21 @@ export function publish<K extends ServerEventName>(
   kind: K,
   data: EventData<K>,
 ): void {
-  runtime().publish(channel, kind, data);
+  const parsed = eventContracts[kind].safeParse(data);
+  if (!parsed.success) {
+    throw new ContractViolationError(
+      `${kind} Event payload 不符合契约`,
+      parsed.error.issues,
+    );
+  }
+  const evt = { kind, channel, data: parsed.data } as BusEvent;
+  if (deferEvent(evt)) return;
+  runtime().deliver(evt);
+}
+
+export function deliverDeferredEvents(events: BusEvent[]): void {
+  const active = runtime();
+  for (const event of events) active.deliver(event);
 }
 
 // ── Channel helpers ──────────────────────────────────────────────────────────

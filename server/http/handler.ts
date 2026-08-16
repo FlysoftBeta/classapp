@@ -86,15 +86,37 @@ function sendFile(
   res: ServerResponse,
   cacheControl: string,
 ): boolean {
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return false;
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return false;
+  }
+  let info: fs.Stats;
+  try {
+    info = fs.fstatSync(fd);
+    if (!info.isFile()) {
+      fs.closeSync(fd);
+      return false;
+    }
+  } catch (error) {
+    fs.closeSync(fd);
+    throw error;
+  }
   res.statusCode = 200;
   res.setHeader(
     "Content-Type",
     TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
   );
-  res.setHeader("Content-Length", fs.statSync(file).size);
+  res.setHeader("Content-Length", info.size);
   res.setHeader("Cache-Control", cacheControl);
-  fs.createReadStream(file).pipe(res);
+  const stream = fs.createReadStream("", { fd, autoClose: true });
+  stream.on("error", (error) => {
+    console.error(`[Http] failed to stream static file ${file}`, error);
+    res.destroy(error);
+  });
+  res.on("close", () => stream.destroy());
+  stream.pipe(res);
   return true;
 }
 

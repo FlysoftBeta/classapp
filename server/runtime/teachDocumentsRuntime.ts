@@ -6,6 +6,8 @@ import {
   deleteTeachDocuments,
   findTeachDocumentByObjectKey,
   insertTeachDocument,
+  listCapturingTeachDocuments,
+  publishTeachDocument,
   reconcileTeachDocumentQuotaItems,
   type TeachDocumentType,
 } from "@/server/data/teachDocuments";
@@ -122,6 +124,7 @@ export class TeachDocumentsRuntime {
     this.started = true;
     this.quota.configure(this.quotaPolicy());
     this.reconcileQuotaItems();
+    void this.reconcileCapturing();
     this.stopped = false;
     this.launchMonitor();
   }
@@ -141,24 +144,34 @@ export class TeachDocumentsRuntime {
     if (!source.isFile()) throw new PublicError("源文档不是文件");
     const id = crypto.randomUUID();
     const ref = this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, id);
-    let rowInserted = false;
+    // Durable intent first: a crash between the row and the object is
+    // compensated on the next start by reconcileCapturing.
+    insertTeachDocument(this.db, {
+      id,
+      application: document.application,
+      document_type: document.documentType,
+      name: document.name,
+      object_key: id,
+      file_size: source.size,
+      status: "capturing",
+    });
     try {
-      const stored = await this.objects.copyBlob(ref, document.path);
-      insertTeachDocument(this.db, {
-        id,
-        application: document.application,
-        document_type: document.documentType,
-        name: document.name,
-        object_key: id,
-        file_size: stored.bytes,
+      const stored = await this.objects.copyBlob(ref, document.path, {
+        expectedBytes: source.size,
       });
-      rowInserted = true;
+      const after = await stat(document.path);
+      if (
+        !after.isFile() ||
+        after.size !== source.size ||
+        after.mtimeMs !== source.mtimeMs
+      ) {
+        throw new PublicError("源文档在复制期间发生变化，请稍后重试");
+      }
+      publishTeachDocument(this.db, id, stored.bytes);
       this.quota.upsert(TEACH_DOCUMENTS_QUOTA_GROUP, id, stored.bytes);
     } catch (error) {
-      if (rowInserted) {
-        deleteTeachDocuments(this.db, [id]);
-        this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, id);
-      }
+      deleteTeachDocuments(this.db, [id]);
+      this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, id);
       try {
         await this.objects.trash(ref);
       } catch (cleanupError) {
@@ -184,12 +197,13 @@ export class TeachDocumentsRuntime {
     id: string;
     object_key: string;
   }): Promise<boolean> {
+    // The SQLite row is authority; delete it before the materialized bytes.
+    deleteTeachDocuments(this.db, [document.id]);
+    this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
     try {
       await this.objects.trash(
         this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
       );
-      deleteTeachDocuments(this.db, [document.id]);
-      this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
       return true;
     } catch (error) {
       recordContainedServerIncident(this.db, BUILD_ID, error, {
@@ -204,6 +218,25 @@ export class TeachDocumentsRuntime {
   /** Backfill quota rows with one SQL upsert-seed, never a Node-side scan. */
   private reconcileQuotaItems(): void {
     reconcileTeachDocumentQuotaItems(this.db);
+  }
+
+  /** Compensation for captures interrupted before they reached ready. */
+  private async reconcileCapturing(): Promise<void> {
+    for (const document of listCapturingTeachDocuments(this.db)) {
+      try {
+        await this.objects.trash(
+          this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
+        );
+      } catch (error) {
+        recordContainedServerIncident(this.db, BUILD_ID, error, {
+          component: "teach-documents",
+          phase: "reconcile-capturing",
+          object_key: document.object_key,
+        });
+      }
+      deleteTeachDocuments(this.db, [document.id]);
+      this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+    }
   }
 
   private handleSnapshot = async (

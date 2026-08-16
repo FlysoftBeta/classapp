@@ -1,7 +1,11 @@
 import { consumeStreamGrant } from "@/server/data/media";
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
-import type { ObjectStore } from "@/server/storage/objectStore";
+import {
+  RangeNotSatisfiableError,
+  type ObjectReadRange,
+  type ObjectStore,
+} from "@/server/storage/objectStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 /** Audio is a raw HTTP concern: grants replace headers the audio tag cannot send. */
@@ -110,6 +114,12 @@ export async function GET(
       throw error;
     }
   } catch (error) {
+    if (error instanceof RangeNotSatisfiableError) {
+      return new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${error.size}` },
+      });
+    }
     return handleHttpError(error);
   }
 }
@@ -121,27 +131,40 @@ async function storedResponse(
   releaseLease: () => void,
 ): Promise<Response> {
   const ref = objects.ref("media", objectKey);
-  const size = await objects.size(ref);
-  const range = parseRange(req.headers.get("range"), size);
-  if (range === "unsatisfiable") {
+  const requested = parseRequestedRange(req.headers.get("range"));
+  if (requested === "unsatisfiable") {
     releaseLease();
     return new Response(null, {
       status: 416,
-      headers: { "Content-Range": `bytes */${size}` },
+      headers: { "Content-Range": "bytes */0" },
     });
   }
-  const selected = await objects.open(ref, range || undefined);
+  const selected = await objects.open(ref, requested ?? undefined);
+  const size = selected.size;
+  const range =
+    requested === null
+      ? null
+      : {
+          start: requestedStart(requested, size),
+          end: requestedEnd(requested, size),
+        };
   const length = range ? range.end - range.start + 1 : size;
   const source = selected.body.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const { value, done } = await source.read();
-      if (done) {
+      try {
+        const { value, done } = await source.read();
+        if (done) {
+          releaseLease();
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
         releaseLease();
-        controller.close();
-        return;
+        await source.cancel(error).catch(() => undefined);
+        controller.error(error);
       }
-      controller.enqueue(value);
     },
     async cancel(reason) {
       releaseLease();
@@ -161,6 +184,43 @@ async function storedResponse(
       "Cache-Control": "private, max-age=31536000, immutable",
     },
   });
+}
+
+/**
+ * Parse a single bytes range without knowing the asset size yet; ObjectStore
+ * resolves end/suffix against the same opened file descriptor used for the body.
+ */
+function parseRequestedRange(
+  value: string | null,
+): ObjectReadRange | "unsatisfiable" | null {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return "unsatisfiable";
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+      return "unsatisfiable";
+    }
+    return { suffixLength };
+  }
+  const start = Number(match[1]);
+  if (!Number.isSafeInteger(start) || start < 0) return "unsatisfiable";
+  if (!match[2]) return { start };
+  const end = Number(match[2]);
+  if (!Number.isSafeInteger(end) || end < start) return "unsatisfiable";
+  return { start, end };
+}
+
+function requestedStart(range: ObjectReadRange, size: number): number {
+  if (range.suffixLength !== undefined) {
+    return Math.max(0, size - range.suffixLength);
+  }
+  return range.start ?? 0;
+}
+
+function requestedEnd(range: ObjectReadRange, size: number): number {
+  if (range.suffixLength !== undefined) return size - 1;
+  return Math.min(range.end ?? size - 1, size - 1);
 }
 
 interface ByteRange {

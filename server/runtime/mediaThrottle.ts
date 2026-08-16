@@ -56,7 +56,6 @@ export class ConcurrencyLimiter {
   private readonly waiters: Array<{
     resolve: () => void;
     reject: (error: unknown) => void;
-    timer: ReturnType<typeof setTimeout> | null;
   }> = [];
 
   constructor(
@@ -104,6 +103,7 @@ export class ConcurrencyLimiter {
       state.timer.unref?.();
       this.waiters.push(waiter);
       signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 

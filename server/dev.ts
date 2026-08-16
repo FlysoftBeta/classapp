@@ -40,6 +40,7 @@ async function main(): Promise<void> {
   const db = getDb();
   const runtime = new Runtime(db, config.buildId);
   await runtime.storage.start();
+  await runtime.articleUploads.reconcile();
   await runtime.media.start();
   runtime.teachDocuments.start();
   const backend = createServer(createHttpHandler(config, runtime));

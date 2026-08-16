@@ -88,17 +88,19 @@ export class ArticleActorFacade {
   }
 
   /** Authorize the multipart target before the HTTP adapter renders the file. */
-  async authorizeBundleUpload(groupId: string): Promise<void> {
+  async authorizeBundleUpload(groupId: string): Promise<string> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
     this.requireCanPublish(user, groupId);
+    return user.id;
   }
 
   /** Store and render one multipart PDF; DB publication stays a separate step. */
-  async storeBundleFile(file: File) {
+  async storeBundleFile(file: File, userId: string, groupId: string) {
     await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    return this.articles.storeBundle(file);
+    this.requireCanPublish(await this.actor.requireUser(), groupId);
+    return this.articles.storeBundle(file, { userId, groupId });
   }
 
   async getMeta(
@@ -115,14 +117,19 @@ export class ArticleActorFacade {
     return result;
   }
 
-  async discardBundleFile(stored: Awaited<ReturnType<ArticleService["storeBundle"]>>) {
+  async discardBundleFile(
+    stored: Awaited<ReturnType<ArticleService["storeBundle"]>>,
+  ) {
     await this.actor.requireFeature("articles");
     return this.articles.discardBundle(stored);
   }
 
-  async streamBundleSource(articleId: string) {
+  async streamBundleSource(
+    articleId: string,
+    range?: { start?: number; end?: number; suffixLength?: number },
+  ) {
     await this.getMeta(articleId);
-    return this.articles.openSource(articleId);
+    return this.articles.openSource(articleId, range);
   }
 
   async storedBundle(articleId: string) {

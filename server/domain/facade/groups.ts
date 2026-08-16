@@ -66,7 +66,7 @@ export class GroupActorFacade {
     return this.groups.adminList(offset);
   }
 
-  async adminCreate(input: CreateGroupInput): Promise<Group> {
+  adminCreate(input: CreateGroupInput): Group {
     const admin = this.actor.requireRole("community_manager");
     const group = this.groups.adminCreate(input);
     this.audit.record({
@@ -78,7 +78,7 @@ export class GroupActorFacade {
     return group;
   }
 
-  async adminUpdate(groupId: string, input: UpdateGroupInput): Promise<Group> {
+  adminUpdate(groupId: string, input: UpdateGroupInput): Group {
     const admin = this.actor.requireRole("advanced_community_manager");
     const group = this.groups.adminUpdate(groupId, input);
     this.audit.record({
@@ -91,7 +91,7 @@ export class GroupActorFacade {
     return group;
   }
 
-  async adminDelete(groupId: string): Promise<void> {
+  adminDelete(groupId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
     this.groups.adminDelete(groupId);
     this.audit.record({
@@ -102,7 +102,7 @@ export class GroupActorFacade {
     });
   }
 
-  async adminAddMember(groupId: string, userId: string): Promise<void> {
+  adminAddMember(groupId: string, userId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
     this.groups.adminAddMember(groupId, userId);
     this.audit.record({
@@ -114,7 +114,7 @@ export class GroupActorFacade {
     });
   }
 
-  async adminRemoveMember(groupId: string, userId: string): Promise<void> {
+  adminRemoveMember(groupId: string, userId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
     this.groups.adminRemoveMember(groupId, userId);
     this.audit.record({

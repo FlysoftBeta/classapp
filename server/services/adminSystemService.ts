@@ -84,18 +84,24 @@ export class AdminSystemService {
   }
 
   confirmUpdate(): void {
-    updateManager()?.confirmUpdate();
+    const manager = updateManager();
+    if (!manager) throw new PublicError("当前环境已禁用在线更新");
+    manager.confirmUpdate();
   }
 
   rollback(): { ok: true; message: string } {
-    updateManager()?.requestRollback();
+    const manager = updateManager();
+    if (!manager) throw new PublicError("当前环境已禁用在线更新");
+    manager.requestRollback();
     return { ok: true, message: "服务器即将回滚并重启" };
   }
 
   async deployPackage(
     zipBytes: Uint8Array,
   ): Promise<{ ok: true; message: string }> {
-    await updateManager()?.deployUpdate(zipBytes);
+    const manager = updateManager();
+    if (!manager) throw new PublicError("当前环境已禁用在线更新");
+    await manager.deployUpdate(zipBytes);
     return { ok: true, message: "服务器即将重启以应用更新" };
   }
 

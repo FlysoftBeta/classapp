@@ -65,6 +65,7 @@ async function runMaintenance(
   notifyIdleLockedClients(db);
   runtime.media.reconcileTransient();
   await runtime.storage.reconcileStorage();
+  await runtime.articleUploads.reconcile();
 }
 
 export function startMaintenance(

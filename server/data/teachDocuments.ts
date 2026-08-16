@@ -1,6 +1,7 @@
 import type BetterSqlite3 from "better-sqlite3";
 
 export type TeachDocumentType = "word" | "powerpoint" | "excel";
+export type TeachDocumentStatus = "capturing" | "ready";
 
 export interface TeachDocument {
   id: string;
@@ -9,8 +10,14 @@ export interface TeachDocument {
   name: string;
   object_key: string;
   file_size: number;
+  status: TeachDocumentStatus;
   created_at: string;
 }
+
+const TEACH_DOCUMENT_SELECT = `
+  SELECT id, application, document_type, name, object_key, file_size,
+         status, created_at
+    FROM teach_documents`;
 
 export function insertTeachDocument(
   db: BetterSqlite3.Database,
@@ -18,8 +25,8 @@ export function insertTeachDocument(
 ): TeachDocument {
   db.prepare(
     `INSERT INTO teach_documents
-       (id, application, document_type, name, object_key, file_size)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+       (id, application, document_type, name, object_key, file_size, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     document.id,
     document.application,
@@ -27,8 +34,21 @@ export function insertTeachDocument(
     document.name,
     document.object_key,
     document.file_size,
+    document.status,
   );
   return findTeachDocument(db, document.id)!;
+}
+
+export function publishTeachDocument(
+  db: BetterSqlite3.Database,
+  id: string,
+  fileSize: number,
+): TeachDocument {
+  db.prepare(
+    `UPDATE teach_documents SET file_size = ?, status = 'ready'
+      WHERE id = ? AND status = 'capturing'`,
+  ).run(fileSize, id);
+  return findTeachDocument(db, id)!;
 }
 
 export function findTeachDocument(
@@ -36,11 +56,7 @@ export function findTeachDocument(
   id: string,
 ): TeachDocument | undefined {
   return db
-    .prepare(
-      `SELECT id, application, document_type, name, object_key, file_size, created_at
-       FROM teach_documents
-       WHERE id = ?`,
-    )
+    .prepare(`${TEACH_DOCUMENT_SELECT} WHERE id = ? AND status = 'ready'`)
     .get(id) as TeachDocument | undefined;
 }
 
@@ -50,9 +66,7 @@ export function findTeachDocumentByObjectKey(
 ): TeachDocument | undefined {
   return db
     .prepare(
-      `SELECT id, application, document_type, name, object_key, file_size, created_at
-       FROM teach_documents
-       WHERE object_key = ?`,
+      `${TEACH_DOCUMENT_SELECT} WHERE object_key = ? AND status = 'ready'`,
     )
     .get(objectKey) as TeachDocument | undefined;
 }
@@ -62,10 +76,18 @@ export function listTeachDocuments(
 ): TeachDocument[] {
   return db
     .prepare(
-      `SELECT id, application, document_type, name, object_key, file_size, created_at
-       FROM teach_documents
-       ORDER BY created_at DESC, rowid DESC`,
+      `${TEACH_DOCUMENT_SELECT} WHERE status = 'ready'
+        ORDER BY created_at DESC, rowid DESC`,
     )
+    .all() as TeachDocument[];
+}
+
+/** Capturing rows whose copy was interrupted; compensation trashes objects. */
+export function listCapturingTeachDocuments(
+  db: BetterSqlite3.Database,
+): TeachDocument[] {
+  return db
+    .prepare(`${TEACH_DOCUMENT_SELECT} WHERE status = 'capturing'`)
     .all() as TeachDocument[];
 }
 
@@ -84,7 +106,7 @@ export function reconcileTeachDocumentQuotaItems(
             0,
             CAST(strftime('%s', created_at) AS INTEGER) * 1000
        FROM teach_documents
-      WHERE true
+      WHERE status = 'ready'
      ON CONFLICT(group_name, item_key) DO UPDATE SET
        bytes = excluded.bytes,
        touch_time_ms = excluded.touch_time_ms,

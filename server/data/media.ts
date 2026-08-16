@@ -616,10 +616,7 @@ export function deleteAssetsIfUnreferenced(
   return deleteAssetsForTrack(db, trackId);
 }
 
-export function readyAssetBytesForTrack(
-  db: Database,
-  trackId: string,
-): number {
+export function readyAssetBytesForTrack(db: Database, trackId: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(bytes), 0) AS total
@@ -675,10 +672,7 @@ export function mediaConfig(db: Database): MediaConfig {
   return {
     enabled: true,
     max_volume: Number(volume?.value ?? "1"),
-    eviction_days: Math.max(
-      1,
-      Math.round(quota.minAgeMs / (24 * 60 * 60_000)),
-    ),
+    eviction_days: Math.max(1, Math.round(quota.minAgeMs / (24 * 60 * 60_000))),
     storage_limit_bytes: quota.maxBytes,
   };
 }
@@ -747,33 +741,48 @@ export function insertStreamGrant(db: Database, grant: StreamGrant): void {
   ).run(grant.token, grant.trackId, grant.userId, grant.expiresAt, Date.now());
 }
 
+/** Generate and insert a short-lived grant used by the raw audio HTTP route. */
+export function issueStreamGrant(
+  db: Database,
+  trackId: string,
+  userId: string | null,
+  ttlMs = 10 * 60_000,
+): { token: string; expiresAt: number } {
+  const token = crypto.randomBytes(24).toString("base64url");
+  const expiresAt = Date.now() + ttlMs;
+  insertStreamGrant(db, { token, trackId, userId, expiresAt });
+  return { token, expiresAt };
+}
+
 export function consumeStreamGrant(
   db: Database,
   token: string,
   now = Date.now(),
 ): StreamGrant | null {
-  const row = db
-    .prepare(
-      `SELECT token, track_id, user_id, expires_at
-         FROM media_stream_grants WHERE token = ?`,
-    )
-    .get(token) as
-    | {
-        token: string;
-        track_id: string;
-        user_id: string | null;
-        expires_at: number;
-      }
-    | undefined;
-  if (!row) return null;
-  db.prepare("DELETE FROM media_stream_grants WHERE token = ?").run(token);
-  if (row.expires_at <= now) return null;
-  return {
-    token: row.token,
-    trackId: row.track_id,
-    userId: row.user_id,
-    expiresAt: row.expires_at,
-  };
+  return db.transaction(() => {
+    const row = db
+      .prepare(
+        `SELECT token, track_id, user_id, expires_at
+           FROM media_stream_grants WHERE token = ?`,
+      )
+      .get(token) as
+      | {
+          token: string;
+          track_id: string;
+          user_id: string | null;
+          expires_at: number;
+        }
+      | undefined;
+    if (!row) return null;
+    db.prepare("DELETE FROM media_stream_grants WHERE token = ?").run(token);
+    if (row.expires_at <= now) return null;
+    return {
+      token: row.token,
+      trackId: row.track_id,
+      userId: row.user_id,
+      expiresAt: row.expires_at,
+    };
+  })();
 }
 
 export function deleteExpiredStreamGrants(db: Database): number {

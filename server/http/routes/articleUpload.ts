@@ -1,6 +1,9 @@
 import { handleHttpError } from "@/server/http/errorResponse";
 import { attachSuppressedError } from "@/server/services/incidentService";
 import { currentScope } from "@/server/runtime/scope";
+import { MAX_ARTICLE_SOURCE_BYTES } from "@/server/services/articlesService";
+
+const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
 export async function POST(req: Request) {
   try {
@@ -13,6 +16,13 @@ export async function POST(req: Request) {
         },
         { status: 410 },
       );
+    }
+    const declared = Number(req.headers.get("content-length"));
+    if (
+      Number.isFinite(declared) &&
+      declared > MAX_ARTICLE_SOURCE_BYTES + MAX_MULTIPART_OVERHEAD_BYTES
+    ) {
+      return Response.json({ error: "文件不能超过 200 MB" }, { status: 413 });
     }
 
     const form = await req.formData();
@@ -28,8 +38,8 @@ export async function POST(req: Request) {
 
     const articles = currentScope().facades().articles();
     // Reject an inaccessible target before consuming a bounded render slot.
-    await articles.authorizeBundleUpload(groupId);
-    const stored = await articles.storeBundleFile(file);
+    const userId = await articles.authorizeBundleUpload(groupId);
+    const stored = await articles.storeBundleFile(file, userId, groupId);
     try {
       const result = await articles.createBundle({
         title: title || stored.original_filename.replace(/\.pdf$/i, ""),
