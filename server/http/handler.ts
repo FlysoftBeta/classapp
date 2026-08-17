@@ -206,6 +206,20 @@ export function createHttpHandler(
             res.end();
             return;
           }
+
+          if (
+            (req.method === "GET" || req.method === "HEAD") &&
+            url.pathname === "/client-lzysso/h5-sso"
+          ) {
+            res.setHeader("Location", `/`);
+            res.setHeader(
+              "Cache-Control",
+              "public, max-age=315360000, immutable",
+            );
+            res.setHeader("Content-Length", "0");
+            res.end();
+            return;
+          }
           if (url.pathname === "/") {
             if (sendFile(shellFile, res, "no-store, max-age=0")) return;
           }
