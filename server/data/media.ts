@@ -8,9 +8,9 @@ import type {
   MediaTrack,
 } from "@/shared/media/types";
 import {
-  quotaGroupPolicy,
-  upsertQuotaGroup,
-  type QuotaGroupPolicy,
+  quotaPoolPolicy,
+  upsertQuotaPool,
+  type QuotaPoolPolicy,
 } from "@/server/data/quota";
 
 export interface TrackInput {
@@ -28,7 +28,7 @@ export interface MediaAssetRow {
   track_id: string;
   kind: "audio" | "cover";
   state: "queued" | "downloading" | "ready" | "failed";
-  object_path: string | null;
+  blob_id: string | null;
   mime: string | null;
   bytes: number;
   sha256: string | null;
@@ -174,7 +174,7 @@ export function getTrack(db: Database, id: string): MediaTrack | null {
 export function listAssets(db: Database, trackId: string): MediaAssetRow[] {
   return db
     .prepare(
-      `SELECT track_id, kind, state, object_path, mime, bytes, sha256,
+      `SELECT track_id, kind, state, blob_id, mime, bytes, sha256,
               failed_code, downloaded_at, updated_at
          FROM media_assets WHERE track_id = ?`,
     )
@@ -189,7 +189,7 @@ export function listTracks(db: Database, ids: string[]): MediaTrack[] {
     .all(...ids) as Array<Record<string, unknown>>;
   const assets = db
     .prepare(
-      `SELECT track_id, kind, state, object_path, mime, bytes, sha256,
+      `SELECT track_id, kind, state, blob_id, mime, bytes, sha256,
               failed_code, downloaded_at, updated_at
          FROM media_assets WHERE track_id IN (${placeholders})`,
     )
@@ -210,7 +210,7 @@ export function findReadyAsset(
 ): MediaAssetRow | null {
   const row = db
     .prepare(
-      `SELECT track_id, kind, state, object_path, mime, bytes, sha256,
+      `SELECT track_id, kind, state, blob_id, mime, bytes, sha256,
               failed_code, downloaded_at, updated_at
          FROM media_assets WHERE track_id = ? AND kind = ? AND state = 'ready'`,
     )
@@ -222,28 +222,31 @@ export function markAssetDownloading(
   db: Database,
   trackId: string,
   kind: "audio" | "cover",
+  blobId: string,
 ): void {
   db.prepare(
-    `INSERT INTO media_assets (track_id, kind, state, updated_at)
-     VALUES (?, ?, 'downloading', datetime('now'))
+    `INSERT INTO media_assets (track_id, kind, state, blob_id, updated_at)
+     VALUES (?, ?, 'downloading', ?, datetime('now'))
      ON CONFLICT(track_id, kind) DO UPDATE SET
        state = CASE WHEN media_assets.state = 'ready'
          THEN media_assets.state ELSE 'downloading' END,
+       blob_id = CASE WHEN media_assets.state = 'ready'
+         THEN media_assets.blob_id ELSE excluded.blob_id END,
        failed_code = NULL,
        updated_at = datetime('now')`,
-  ).run(trackId, kind);
+  ).run(trackId, kind, blobId);
 }
 
 export function publishAsset(
   db: Database,
   trackId: string,
   kind: "audio" | "cover",
-  input: { objectPath: string; mime: string; bytes: number; sha256: string },
+  input: { blobId: string; mime: string; bytes: number; sha256: string },
 ): void {
   db.prepare(
     `UPDATE media_assets SET
        state = 'ready',
-       object_path = ?,
+       blob_id = ?,
        mime = ?,
        bytes = ?,
        sha256 = ?,
@@ -251,7 +254,7 @@ export function publishAsset(
        downloaded_at = datetime('now'),
        updated_at = datetime('now')
      WHERE track_id = ? AND kind = ?`,
-  ).run(input.objectPath, input.mime, input.bytes, input.sha256, trackId, kind);
+  ).run(input.blobId, input.mime, input.bytes, input.sha256, trackId, kind);
   touchTrack(db, trackId);
 }
 
@@ -589,19 +592,19 @@ function renumberItems(db: Database, listId: string): void {
 
 // ── Asset deletion ───────────────────────────────────────────────────────────
 
-function listReadyPaths(db: Database, trackId: string): string[] {
+function listReadyBlobIds(db: Database, trackId: string): string[] {
   const rows = db
     .prepare(
-      "SELECT object_path FROM media_assets WHERE track_id = ? AND state = 'ready' AND object_path IS NOT NULL",
+      "SELECT blob_id FROM media_assets WHERE track_id = ? AND state = 'ready' AND blob_id IS NOT NULL",
     )
-    .all(trackId) as Array<{ object_path: string }>;
-  return rows.map((row) => row.object_path);
+    .all(trackId) as Array<{ blob_id: string }>;
+  return rows.map((row) => row.blob_id);
 }
 
 export function deleteAssetsForTrack(db: Database, trackId: string): string[] {
-  const paths = listReadyPaths(db, trackId);
+  const ids = listReadyBlobIds(db, trackId);
   db.prepare("DELETE FROM media_assets WHERE track_id = ?").run(trackId);
-  return paths;
+  return ids;
 }
 
 /** Compare-and-delete: only reclaim a track that is still unreferenced. */
@@ -627,53 +630,50 @@ export function readyAssetBytesForTrack(db: Database, trackId: string): number {
 }
 
 /**
- * Seed/refresh the media quota ledger directly in SQL; ready media can be
- * large enough that materializing every row in Node.js is not acceptable.
+ * Seed/refresh media cache weights. Heat and touched_at are left untouched so
+ * a maintenance backfill cannot rewind the clock.
  */
-export function reconcileReadyAssetQuotaItems(db: Database): void {
+export function reconcileReadyAssetQuotaItems(db: Database, now = Date.now()): void {
   db.prepare(
     `INSERT INTO storage_quota_items
-       (group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms)
-     SELECT 'media', a.track_id, SUM(a.bytes),
-            CAST(strftime('%s', COALESCE(t.last_used_at, t.created_at)) AS INTEGER) * 1000,
-            0,
-            CAST(strftime('%s', COALESCE(t.last_used_at, t.created_at)) AS INTEGER) * 1000
-       FROM media_assets a
-       JOIN media_tracks t ON t.id = a.track_id
-      WHERE a.state = 'ready'
-      GROUP BY a.track_id
-     ON CONFLICT(group_name, item_key) DO UPDATE SET
-       bytes = excluded.bytes,
-       touch_time_ms = excluded.touch_time_ms,
-       touch_freq = (storage_quota_items.touch_freq +
-         (excluded.touch_time_ms - storage_quota_items.touch_time_ms)) / 2.0`,
-  ).run();
+       (pool, item_id, class, weight, heat, touched_at_ms, pin_until_ms, created_at_ms)
+     SELECT 'media', track_id, 'cache', SUM(bytes), 1, ?, 0, ?
+       FROM media_assets
+      WHERE state = 'ready'
+      GROUP BY track_id
+     ON CONFLICT(pool, item_id) DO UPDATE SET
+       weight = excluded.weight`,
+  ).run(now, now);
 }
 
 // ── Config and grants ────────────────────────────────────────────────────────
 
-const MEDIA_QUOTA_GROUP = "media";
+export const MEDIA_QUOTA_POOL = "media";
 const MEDIA_TARGET_RATIO = 0.8;
 const MEDIA_DEFAULT_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
-const MEDIA_DEFAULT_EVICTION_DAYS = 7;
+const MEDIA_DEFAULT_HALF_LIFE_MS = 7 * 24 * 60 * 60_000;
+
+export function mediaQuotaPolicy(db: Database): QuotaPoolPolicy {
+  return (
+    quotaPoolPolicy(db, MEDIA_QUOTA_POOL) ?? {
+      name: MEDIA_QUOTA_POOL,
+      maxWeight: MEDIA_DEFAULT_LIMIT_BYTES,
+      targetRatio: MEDIA_TARGET_RATIO,
+      halfLifeMs: MEDIA_DEFAULT_HALF_LIFE_MS,
+    }
+  );
+}
 
 export function mediaConfig(db: Database): MediaConfig {
   const volume = db
     .prepare("SELECT value FROM config WHERE key = 'media_max_volume'")
     .get() as { value: string } | undefined;
-  const quota =
-    quotaGroupPolicy(db, MEDIA_QUOTA_GROUP) ??
-    ({
-      name: MEDIA_QUOTA_GROUP,
-      maxBytes: MEDIA_DEFAULT_LIMIT_BYTES,
-      targetRatio: MEDIA_TARGET_RATIO,
-      minAgeMs: MEDIA_DEFAULT_EVICTION_DAYS * 24 * 60 * 60_000,
-    } satisfies QuotaGroupPolicy);
+  const quota = mediaQuotaPolicy(db);
   return {
     enabled: true,
     max_volume: Number(volume?.value ?? "1"),
-    eviction_days: Math.max(1, Math.round(quota.minAgeMs / (24 * 60 * 60_000))),
-    storage_limit_bytes: quota.maxBytes,
+    eviction_days: Math.max(1, Math.round(quota.halfLifeMs / (24 * 60 * 60_000))),
+    storage_limit_bytes: quota.maxWeight,
   };
 }
 
@@ -691,22 +691,15 @@ export function updateMediaConfig(
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     ).run(String(input.max_volume));
   }
-  const current =
-    quotaGroupPolicy(db, MEDIA_QUOTA_GROUP) ??
-    ({
-      name: MEDIA_QUOTA_GROUP,
-      maxBytes: MEDIA_DEFAULT_LIMIT_BYTES,
-      targetRatio: MEDIA_TARGET_RATIO,
-      minAgeMs: MEDIA_DEFAULT_EVICTION_DAYS * 24 * 60 * 60_000,
-    } satisfies QuotaGroupPolicy);
-  upsertQuotaGroup(db, {
+  const current = mediaQuotaPolicy(db);
+  upsertQuotaPool(db, {
     name: current.name,
-    maxBytes: input.storage_limit_bytes ?? current.maxBytes,
+    maxWeight: input.storage_limit_bytes ?? current.maxWeight,
     targetRatio: current.targetRatio,
-    minAgeMs:
+    halfLifeMs:
       input.eviction_days !== undefined
         ? input.eviction_days * 24 * 60 * 60_000
-        : current.minAgeMs,
+        : current.halfLifeMs,
   });
   return mediaConfig(db);
 }

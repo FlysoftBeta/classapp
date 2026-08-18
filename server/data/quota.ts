@@ -1,308 +1,261 @@
 import type { Database } from "better-sqlite3";
 
-export interface QuotaGroupPolicy {
+export type QuotaClass = "cache" | "durable";
+
+export interface QuotaPoolPolicy {
   name: string;
-  maxBytes: number;
+  /** Cache high watermark in weight units (usually bytes). 0 disables size eviction. */
+  maxWeight: number;
   targetRatio: number;
-  minAgeMs: number;
+  halfLifeMs: number;
 }
 
 export interface QuotaItem {
-  groupName: string;
-  itemKey: string;
-  bytes: number;
-  touchTimeMs: number;
-  touchFreq: number;
+  pool: string;
+  itemId: string;
+  class: QuotaClass;
+  weight: number;
+  heat: number;
+  touchedAtMs: number;
+  pinUntilMs: number;
   createdAtMs: number;
 }
 
 export interface QuotaItemInput {
-  groupName: string;
-  itemKey: string;
-  bytes: number;
+  pool: string;
+  itemId: string;
+  class: QuotaClass;
+  weight: number;
   now: number;
+  /** Admission pin so a fresh cache item is not immediately evicted. */
+  pinUntilMs?: number;
+  /** Starting heat; defaults to 1 so a new item is not colder than a first touch. */
+  heat?: number;
 }
 
-export interface EvictionWeights {
-  bytes: number;
-  recency: number;
-  frequency: number;
+const HEAT_EPSILON = 1e-9;
+
+export function heatNow(
+  heat: number,
+  touchedAtMs: number,
+  now: number,
+  halfLifeMs: number,
+): number {
+  const delta = Math.max(0, now - touchedAtMs);
+  if (halfLifeMs <= 0) return Math.max(0, heat);
+  return Math.max(0, heat) * 0.5 ** (delta / halfLifeMs);
 }
 
-export interface QuotaRanges {
-  minBytes: number;
-  maxBytes: number;
-  minTouchTimeMs: number;
-  maxTouchTimeMs: number;
-  minTouchFreq: number;
-  maxTouchFreq: number;
+export function evictScore(weight: number, heat: number): number {
+  return weight / (heat + HEAT_EPSILON);
 }
 
-interface QuotaGroupRow {
+interface PoolRow {
   name: string;
-  max_bytes: number;
+  max_weight: number;
   target_ratio: number;
-  min_age_ms: number;
+  half_life_ms: number;
 }
 
-interface QuotaItemRow {
-  group_name: string;
-  item_key: string;
-  bytes: number;
-  touch_time_ms: number;
-  touch_freq: number;
+interface ItemRow {
+  pool: string;
+  item_id: string;
+  class: QuotaClass;
+  weight: number;
+  heat: number;
+  touched_at_ms: number;
+  pin_until_ms: number;
   created_at_ms: number;
 }
 
-interface QuotaRangeRow {
-  min_bytes: number | null;
-  max_bytes: number | null;
-  min_touch: number | null;
-  max_touch: number | null;
-  min_freq: number | null;
-  max_freq: number | null;
-}
-
-export function quotaGroupPolicy(
-  db: Database,
-  name: string,
-): QuotaGroupPolicy | null {
-  const row = db
-    .prepare(
-      `SELECT name, max_bytes, target_ratio, min_age_ms
-         FROM storage_eviction_groups WHERE name = ?`,
-    )
-    .get(name) as QuotaGroupRow | undefined;
-  if (!row) return null;
+function rowToItem(row: ItemRow): QuotaItem {
   return {
-    name: row.name,
-    maxBytes: row.max_bytes,
-    targetRatio: row.target_ratio,
-    minAgeMs: row.min_age_ms,
+    pool: row.pool,
+    itemId: row.item_id,
+    class: row.class,
+    weight: row.weight,
+    heat: row.heat,
+    touchedAtMs: row.touched_at_ms,
+    pinUntilMs: row.pin_until_ms,
+    createdAtMs: row.created_at_ms,
   };
 }
 
-export function upsertQuotaGroup(
+export function quotaPoolPolicy(
   db: Database,
-  policy: QuotaGroupPolicy,
-): void {
+  name: string,
+): QuotaPoolPolicy | null {
+  const row = db
+    .prepare(
+      `SELECT name, max_weight, target_ratio, half_life_ms
+         FROM storage_quota_pools WHERE name = ?`,
+    )
+    .get(name) as PoolRow | undefined;
+  if (!row) return null;
+  return {
+    name: row.name,
+    maxWeight: row.max_weight,
+    targetRatio: row.target_ratio,
+    halfLifeMs: row.half_life_ms,
+  };
+}
+
+export function upsertQuotaPool(db: Database, policy: QuotaPoolPolicy): void {
   db.prepare(
-    `INSERT INTO storage_eviction_groups (name, max_bytes, target_ratio, min_age_ms)
+    `INSERT INTO storage_quota_pools (name, max_weight, target_ratio, half_life_ms)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(name) DO UPDATE SET
-       max_bytes = excluded.max_bytes,
+       max_weight = excluded.max_weight,
        target_ratio = excluded.target_ratio,
-       min_age_ms = excluded.min_age_ms,
+       half_life_ms = excluded.half_life_ms,
        updated_at = datetime('now')`,
-  ).run(policy.name, policy.maxBytes, policy.targetRatio, policy.minAgeMs);
+  ).run(policy.name, policy.maxWeight, policy.targetRatio, policy.halfLifeMs);
 }
 
-export function deleteQuotaGroup(db: Database, name: string): void {
-  db.prepare("DELETE FROM storage_eviction_groups WHERE name = ?").run(name);
-}
-
-/** Sweep accounting rows whose group was removed without a cascade path. */
-export function deleteOrphanQuotaItems(db: Database): number {
-  const result = db
-    .prepare(
-      `DELETE FROM storage_quota_items
-        WHERE group_name NOT IN (SELECT name FROM storage_eviction_groups)`,
-    )
-    .run();
-  return result.changes;
-}
-
-/**
- * Persist a touch. The frequency half-life uses the caller-provided monotonic
- * clock value exactly as specified:
- *   freq' = (freq + (now - previousTouchTime)) / 2
- * A same-millisecond touch is advanced by one millisecond so it still counts.
- */
-export function upsertQuotaItem(db: Database, input: QuotaItemInput): void {
-  const existing = findQuotaItem(db, input.groupName, input.itemKey);
-  if (!existing) {
-    db.prepare(
-      `INSERT INTO storage_quota_items
-         (group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms)
-       VALUES (?, ?, ?, ?, 0, ?)`,
-    ).run(input.groupName, input.itemKey, input.bytes, input.now, input.now);
-    return;
-  }
-  const nextTouch = Math.max(input.now, existing.touchTimeMs + 1);
-  const nextFreq =
-    (existing.touchFreq + (nextTouch - existing.touchTimeMs)) / 2;
-  db.prepare(
-    `UPDATE storage_quota_items
-        SET bytes = ?, touch_time_ms = ?, touch_freq = ?
-      WHERE group_name = ? AND item_key = ?`,
-  ).run(input.bytes, nextTouch, nextFreq, input.groupName, input.itemKey);
-}
-
-export function touchQuotaItem(
-  db: Database,
-  groupName: string,
-  itemKey: string,
-  now: number,
-): void {
-  const existing = findQuotaItem(db, groupName, itemKey);
-  if (!existing) return;
-  upsertQuotaItem(db, {
-    groupName,
-    itemKey,
-    bytes: existing.bytes,
-    now,
-  });
-}
-
-export function deleteQuotaItem(
-  db: Database,
-  groupName: string,
-  itemKey: string,
-): void {
-  db.prepare(
-    "DELETE FROM storage_quota_items WHERE group_name = ? AND item_key = ?",
-  ).run(groupName, itemKey);
+export function deleteQuotaPool(db: Database, name: string): void {
+  db.prepare("DELETE FROM storage_quota_pools WHERE name = ?").run(name);
 }
 
 export function findQuotaItem(
   db: Database,
-  groupName: string,
-  itemKey: string,
+  pool: string,
+  itemId: string,
 ): QuotaItem | null {
   const row = db
     .prepare(
-      `SELECT group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms
+      `SELECT pool, item_id, class, weight, heat, touched_at_ms, pin_until_ms,
+              created_at_ms
          FROM storage_quota_items
-        WHERE group_name = ? AND item_key = ?`,
+        WHERE pool = ? AND item_id = ?`,
     )
-    .get(groupName, itemKey) as QuotaItemRow | undefined;
-  return row ? rowToQuotaItem(row) : null;
+    .get(pool, itemId) as ItemRow | undefined;
+  return row ? rowToItem(row) : null;
 }
 
-export function quotaGroupBytes(db: Database, groupName: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(bytes), 0) AS total
-         FROM storage_quota_items WHERE group_name = ?`,
-    )
-    .get(groupName) as { total: number };
+/**
+ * Insert or refresh weight/class. Heat and touched_at are preserved on
+ * conflict so a byte-size backfill cannot rewind the clock.
+ */
+export function upsertQuotaItem(db: Database, input: QuotaItemInput): void {
+  if (input.weight < 0) throw new Error("Quota item weight must be non-negative");
+  const existing = findQuotaItem(db, input.pool, input.itemId);
+  if (!existing) {
+    const heat = input.heat ?? 1;
+    db.prepare(
+      `INSERT INTO storage_quota_items
+         (pool, item_id, class, weight, heat, touched_at_ms, pin_until_ms, created_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.pool,
+      input.itemId,
+      input.class,
+      input.weight,
+      heat,
+      input.now,
+      input.pinUntilMs ?? 0,
+      input.now,
+    );
+    return;
+  }
+  db.prepare(
+    `UPDATE storage_quota_items
+        SET class = ?, weight = ?,
+            pin_until_ms = CASE WHEN ? > pin_until_ms THEN ? ELSE pin_until_ms END
+      WHERE pool = ? AND item_id = ?`,
+  ).run(
+    input.class,
+    input.weight,
+    input.pinUntilMs ?? 0,
+    input.pinUntilMs ?? 0,
+    input.pool,
+    input.itemId,
+  );
+}
+
+export function touchQuotaItem(
+  db: Database,
+  pool: string,
+  itemId: string,
+  intensity: number,
+  now: number,
+  halfLifeMs: number,
+): void {
+  if (intensity < 0) throw new Error("Touch intensity must be non-negative");
+  const existing = findQuotaItem(db, pool, itemId);
+  if (!existing) return;
+  const nextTouch = Math.max(now, existing.touchedAtMs);
+  const nextHeat =
+    heatNow(existing.heat, existing.touchedAtMs, nextTouch, halfLifeMs) +
+    intensity;
+  db.prepare(
+    `UPDATE storage_quota_items
+        SET heat = ?, touched_at_ms = ?
+      WHERE pool = ? AND item_id = ?`,
+  ).run(nextHeat, nextTouch, pool, itemId);
+}
+
+export function deleteQuotaItem(
+  db: Database,
+  pool: string,
+  itemId: string,
+): void {
+  db.prepare(
+    "DELETE FROM storage_quota_items WHERE pool = ? AND item_id = ?",
+  ).run(pool, itemId);
+}
+
+export function quotaPoolWeight(
+  db: Database,
+  pool: string,
+  itemClass?: QuotaClass,
+): number {
+  const row = itemClass
+    ? (db
+        .prepare(
+          `SELECT COALESCE(SUM(weight), 0) AS total
+             FROM storage_quota_items WHERE pool = ? AND class = ?`,
+        )
+        .get(pool, itemClass) as { total: number })
+    : (db
+        .prepare(
+          `SELECT COALESCE(SUM(weight), 0) AS total
+             FROM storage_quota_items WHERE pool = ?`,
+        )
+        .get(pool) as { total: number });
   return row.total;
 }
 
-/** Min/max normalization ranges, computed by SQL over the group indexes. */
-export function quotaRanges(
-  db: Database,
-  groupName: string,
-  olderThanMs?: number,
-): QuotaRanges {
-  const filters = olderThanMs === undefined ? "" : "AND touch_time_ms <= ?";
-  const args =
-    olderThanMs === undefined ? [groupName] : [groupName, olderThanMs];
-  const row = db
-    .prepare(
-      `SELECT MIN(bytes)         AS min_bytes,
-              MAX(bytes)         AS max_bytes,
-              MIN(touch_time_ms) AS min_touch,
-              MAX(touch_time_ms) AS max_touch,
-              MIN(touch_freq)    AS min_freq,
-              MAX(touch_freq)    AS max_freq
-         FROM storage_quota_items
-        WHERE group_name = ? ${filters}`,
-    )
-    .get(...args) as QuotaRangeRow;
-  if (
-    row.min_bytes === null ||
-    row.max_bytes === null ||
-    row.min_touch === null ||
-    row.max_touch === null ||
-    row.min_freq === null ||
-    row.max_freq === null
-  ) {
-    return {
-      minBytes: 0,
-      maxBytes: 0,
-      minTouchTimeMs: 0,
-      maxTouchTimeMs: 0,
-      minTouchFreq: 0,
-      maxTouchFreq: 0,
-    };
-  }
-  return {
-    minBytes: row.min_bytes,
-    maxBytes: row.max_bytes,
-    minTouchTimeMs: row.min_touch,
-    maxTouchTimeMs: row.max_touch,
-    minTouchFreq: row.min_freq,
-    maxTouchFreq: row.max_freq,
-  };
-}
-
-const SCORE_SQL = `
-  SELECT i.group_name, i.item_key, i.bytes, i.touch_time_ms, i.touch_freq,
-         i.created_at_ms,
-         (
-           ? * CASE WHEN s.max_bytes = s.min_bytes THEN 0.5
-                    ELSE CAST(i.bytes - s.min_bytes AS REAL) /
-                         (s.max_bytes - s.min_bytes) END
-         + ? * CASE WHEN s.max_touch = s.min_touch THEN 0.5
-                    ELSE 1.0 - CAST(i.touch_time_ms - s.min_touch AS REAL) /
-                         (s.max_touch - s.min_touch) END
-         + ? * CASE WHEN s.max_freq = s.min_freq THEN 0.5
-                    ELSE 1.0 - CAST(i.touch_freq - s.min_freq AS REAL) /
-                         (s.max_freq - s.min_freq) END
-         ) AS score
-    FROM storage_quota_items i
-    JOIN (
-      SELECT MIN(bytes) AS min_bytes, MAX(bytes) AS max_bytes,
-             MIN(touch_time_ms) AS min_touch, MAX(touch_time_ms) AS max_touch,
-             MIN(touch_freq) AS min_freq, MAX(touch_freq) AS max_freq
-        FROM storage_quota_items
-       WHERE group_name = ? $RANGE_FILTER
-    ) s ON 1 = 1
-   WHERE i.group_name = ? $ITEM_FILTER
-   ORDER BY score DESC, i.touch_time_ms ASC, i.item_key ASC
-   LIMIT ?
-`;
-
 /**
- * Bounded eviction ranking. Min/max normalization runs as one SQL aggregate
- * subquery backed by the per-group column indexes; Node.js only ever sees the
- * requested limit of ranked rows.
+ * Cache candidates only, ranked by hold cost over current heat. Pins that have
+ * not expired are skipped. Node computes heat so idle rows need no write.
  */
-export function listEvictionCandidates(
+export function listCacheEvictionCandidates(
   db: Database,
-  groupName: string,
-  weights: EvictionWeights,
-  input: { olderThanMs?: number; limit: number },
+  pool: string,
+  halfLifeMs: number,
+  input: { now: number; limit: number },
 ): QuotaItem[] {
-  const rangeFilter =
-    input.olderThanMs === undefined ? "" : "AND touch_time_ms <= ?";
-  const sql = SCORE_SQL.replace("$RANGE_FILTER", rangeFilter).replace(
-    "$ITEM_FILTER",
-    rangeFilter,
-  );
-  const older = input.olderThanMs === undefined ? [] : [input.olderThanMs];
-  const args = [
-    weights.bytes,
-    weights.recency,
-    weights.frequency,
-    groupName,
-    ...older,
-    groupName,
-    ...older,
-    input.limit,
-  ];
-  const rows = db.prepare(sql).all(...args) as QuotaItemRow[];
-  return rows.map(rowToQuotaItem);
-}
-
-function rowToQuotaItem(row: QuotaItemRow): QuotaItem {
-  return {
-    groupName: row.group_name,
-    itemKey: row.item_key,
-    bytes: row.bytes,
-    touchTimeMs: row.touch_time_ms,
-    touchFreq: row.touch_freq,
-    createdAtMs: row.created_at_ms,
-  };
+  const rows = db
+    .prepare(
+      `SELECT pool, item_id, class, weight, heat, touched_at_ms, pin_until_ms,
+              created_at_ms
+         FROM storage_quota_items
+        WHERE pool = ? AND class = 'cache' AND pin_until_ms <= ?
+          AND weight > 0`,
+    )
+    .all(pool, input.now) as ItemRow[];
+  return rows
+    .map((row) => {
+      const item = rowToItem(row);
+      const heat = heatNow(item.heat, item.touchedAtMs, input.now, halfLifeMs);
+      return { item, score: evictScore(item.weight, heat) };
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.item.touchedAtMs - right.item.touchedAtMs ||
+        left.item.itemId.localeCompare(right.item.itemId),
+    )
+    .slice(0, input.limit)
+    .map((entry) => entry.item);
 }

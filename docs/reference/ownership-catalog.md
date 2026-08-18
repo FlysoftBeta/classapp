@@ -80,12 +80,12 @@ Cross-stack system documents remain authoritative for behavior.
 
 | Owner                  | Responsibility                                                                                    |
 | ---------------------- | ------------------------------------------------------------------------------------------------- |
-| `ObjectStore`          | namespace/key validation, fd-based streaming blobs, staging, trash, staged/trash/orphan reconcile |
-| `TreeStore`            | manifest ZIP validation, locked mutation, bounded complex objects                                 |
-| `QuotaService`         | dynamic eviction groups, touch formula, bounded SQL-driven sweeps                                 |
-| `StorageRuntime`       | process-bound ObjectStore, owner-provided evictor registry, live-key orphan collectors            |
-| `ArticleUploadRuntime` | compensation for stale multipart bundle upload intents                                            |
-| `server/data/quota`    | quota SQL, indexed min/max ranges, bounded candidate ranking                                      |
+| `BlobStore`            | allocated UUID blobs, staging/commit/open/drop, staging/trash mtime GC (never objects/) |
+| `TreeStore`            | manifest ZIP validation, mutation into a caller-owned staging slot                       |
+| `QuotaService`         | heat ledger, cache candidate ranking, no file I/O                                        |
+| `StorageRuntime`       | process-bound BlobStore, owner-provided evictor registry                                 |
+| `ArticleUploadRuntime` | compensation for stale multipart bundle upload intents                                   |
+| `server/data/quota`    | pool/item SQL and lazy heat ranking                                                      |
 
 ## Client ownership
 

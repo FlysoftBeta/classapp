@@ -1,6 +1,6 @@
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
-import type { ObjectStore } from "@/server/storage/objectStore";
+import type { BlobStore } from "@/server/storage/blobStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 /** Cover images use the normal session token query parameter, like other GET routes. */
@@ -19,10 +19,10 @@ export async function GET(
     const releaseLease = scope.runtime.media.acquireLease(id);
     try {
       const ready = findReadyAsset(scope.db, id, "cover");
-      if (ready?.object_path) {
+      if (ready?.blob_id) {
         return await storedCoverResponse(
-          scope.runtime.media.objects,
-          ready.object_path,
+          scope.runtime.media.blobs,
+          ready.blob_id,
           ready.mime ?? "image/jpeg",
           ready.bytes,
           releaseLease,
@@ -38,10 +38,10 @@ export async function GET(
       );
       if (!becameReady) throw new PublicError("封面尚未就绪");
       const nowReady = findReadyAsset(scope.db, id, "cover");
-      if (!nowReady?.object_path) throw new PublicError("封面尚未就绪");
+      if (!nowReady?.blob_id) throw new PublicError("封面尚未就绪");
       return await storedCoverResponse(
-        scope.runtime.media.objects,
-        nowReady.object_path,
+        scope.runtime.media.blobs,
+        nowReady.blob_id,
         nowReady.mime ?? "image/jpeg",
         nowReady.bytes,
         releaseLease,
@@ -56,13 +56,13 @@ export async function GET(
 }
 
 async function storedCoverResponse(
-  objects: ObjectStore,
-  objectKey: string,
+  blobs: BlobStore,
+  blobId: string,
   mime: string,
   bytes: number,
   releaseLease: () => void,
 ): Promise<Response> {
-  const streamed = await objects.open(objects.ref("media", objectKey));
+  const streamed = await blobs.open(blobId);
   const source = streamed.body.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {

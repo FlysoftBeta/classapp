@@ -48,8 +48,7 @@ import {
   loadRenderArchive,
   type StoredRenderArchive,
 } from "@/server/storage/renderArchive";
-import { ObjectStore, type BlobRead } from "@/server/storage/objectStore";
-import { objectRef } from "@/server/storage/paths";
+import { BlobStore, type BlobRead } from "@/server/storage/blobStore";
 import {
   abandonArticleUpload,
   claimArticleUpload,
@@ -61,7 +60,9 @@ import { bytes, formatBytes } from "@/shared/bytes";
 import { READING_HISTORY_MIN_SECONDS } from "@/shared/types/api/article";
 import type { BundleSlice } from "@/shared/bundles/protocol";
 
-const ARTICLE_QUOTA_GROUP = "article-bundles";
+export const ARTICLE_SOURCE_POOL = "article-source";
+export const ARTICLE_ARCHIVE_POOL = "article-archive";
+const ARTICLE_HALF_LIFE_MS = 7 * 24 * 60 * 60_000;
 export const MAX_ARTICLE_SOURCE_BYTES = bytes("200 MB");
 
 export interface CreateArticleInput {
@@ -106,7 +107,7 @@ export class ArticleService {
 
   constructor(
     private readonly db: Database,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
   ) {}
 
   list(
@@ -192,35 +193,31 @@ export class ArticleService {
       );
     }
     const sourceMime = normalizeArticleMime(file);
-    this.ensureQuotaGroup();
-    const bundleId = crypto.randomUUID();
+    this.ensureQuotaPools();
     const uploadId = crypto.randomUUID();
-    const sourceRef = objectRef("article-bundles", `${bundleId}/source`);
-    const archiveRef = objectRef("article-bundles", `${bundleId}/render`);
+    const sourceSlot = await this.blobs.create();
+    const archiveSlot = await this.blobs.create();
     insertArticleUpload(this.db, {
       id: uploadId,
       userId: owner.userId,
       groupId: owner.groupId,
-      sourceKey: sourceRef.key,
-      archiveKey: archiveRef.key,
+      sourceBlobId: sourceSlot.id,
+      archiveBlobId: archiveSlot.id,
     });
-    let staged: Awaited<ReturnType<ObjectStore["stage"]>> | null = null;
     let archiveCommitted = false;
     try {
-      await this.objects.putBlob(sourceRef, file.stream(), {
-        expectedBytes: file.size,
-      });
-      staged = await this.objects.stage(archiveRef);
+      await this.blobs.writeSlot(sourceSlot, file.stream(), file.size);
+      await sourceSlot.commit({ expectedBytes: file.size });
       await renderPdfArchive(
-        this.objects.materializedPath(sourceRef),
-        staged.path,
+        this.blobs.materializedPath(sourceSlot.id),
+        archiveSlot.path,
       );
-      const index = await inspectRenderArchiveFile(staged.path);
-      await staged.commit({ bytes: index.archiveSize });
+      const index = await inspectRenderArchiveFile(archiveSlot.path);
+      await archiveSlot.commit({ expectedBytes: index.archiveSize });
       archiveCommitted = true;
       const stored: StoredArticleBundle = {
-        source_path: sourceRef.key,
-        archive_path: archiveRef.key,
+        source_path: sourceSlot.id,
+        archive_path: archiveSlot.id,
         source_mime: sourceMime,
         source_size: file.size,
         archive_size: index.archiveSize,
@@ -231,18 +228,24 @@ export class ArticleService {
         sourceBytes: stored.source_size,
         archiveBytes: stored.archive_size,
       });
-      this.quota.upsert(
-        ARTICLE_QUOTA_GROUP,
-        bundleId,
-        stored.source_size + stored.archive_size,
-      );
+      this.quota.account(ARTICLE_SOURCE_POOL, sourceSlot.id, {
+        weight: stored.source_size,
+        class: "durable",
+      });
+      this.quota.account(ARTICLE_ARCHIVE_POOL, archiveSlot.id, {
+        weight: stored.archive_size,
+        class: "cache",
+      });
       return { ...stored, upload_id: uploadId };
     } catch (error) {
-      await staged?.discard();
+      await archiveSlot.discard();
+      await sourceSlot.discard();
       if (archiveCommitted) {
-        await this.objects.trash(archiveRef).catch(() => undefined);
+        await this.blobs.drop(archiveSlot.id).catch(() => undefined);
       }
-      await this.objects.trash(sourceRef).catch(() => undefined);
+      await this.blobs.drop(sourceSlot.id).catch(() => undefined);
+      this.quota.release(ARTICLE_SOURCE_POOL, sourceSlot.id);
+      this.quota.release(ARTICLE_ARCHIVE_POOL, archiveSlot.id);
       abandonArticleUpload(this.db, uploadId);
       throw error;
     }
@@ -282,6 +285,17 @@ export class ArticleService {
           throw new ContractViolationError("上传会话不存在或已失效");
       }
     })();
+    this.ensureQuotaPools();
+    this.quota.release(ARTICLE_SOURCE_POOL, input.source_path);
+    this.quota.release(ARTICLE_ARCHIVE_POOL, input.archive_path);
+    this.quota.account(ARTICLE_SOURCE_POOL, id, {
+      weight: input.source_size,
+      class: "durable",
+    });
+    this.quota.account(ARTICLE_ARCHIVE_POOL, id, {
+      weight: input.archive_size,
+      class: "cache",
+    });
     const article = this.requireOwned(id, userId);
     this.notifyCreated(userId, id);
     return {
@@ -330,18 +344,14 @@ export class ArticleService {
     range?: { start?: number; end?: number; suffixLength?: number },
   ): Promise<BlobRead> {
     const article = this.requireBundleRecord(articleId);
-    return this.objects.open(
-      objectRef("article-bundles", article.source_path),
-      range,
-    );
+    this.quota.touch(ARTICLE_SOURCE_POOL, articleId, 1);
+    return this.blobs.open(article.source_path, range);
   }
 
   async storedBundle(articleId: string): Promise<StoredRenderArchive> {
     const article = this.requireBundleRecord(articleId);
-    return loadRenderArchive(
-      this.objects,
-      objectRef("article-bundles", article.archive_path),
-    );
+    this.quota.touch(ARTICLE_ARCHIVE_POOL, articleId, 1);
+    return loadRenderArchive(this.blobs, article.archive_path);
   }
 
   async openBundle(input: {
@@ -450,7 +460,7 @@ export class ArticleService {
     const record = findArticleRecord(this.db, articleId);
     deleteArticleById(this.db, articleId);
     if (record?.content_kind === "bundle")
-      await this.removeBundle(record.source_path, record.archive_path);
+      await this.removeBundle(record.source_path, record.archive_path, articleId);
     const affectedUsers = new Set(
       [requestingUserId, record?.user_id].filter((id): id is string => !!id),
     );
@@ -487,7 +497,11 @@ export class ArticleService {
 
   async purgeUser(userId: string): Promise<void> {
     for (const artifact of purgeArticlesForUser(this.db, userId)) {
-      await this.removeBundle(artifact.sourcePath, artifact.archivePath);
+      await this.removeBundle(
+        artifact.sourcePath,
+        artifact.archivePath,
+        artifact.articleId,
+      );
     }
   }
 
@@ -526,46 +540,35 @@ export class ArticleService {
   async removeBundle(
     sourcePath: string | null | undefined,
     archivePath: string | null | undefined,
+    quotaItemId?: string | null,
   ): Promise<void> {
-    const paths = [sourcePath, archivePath].filter(
-      (value): value is string => !!value,
-    );
-    for (const key of paths) {
-      const ref = objectRef("article-bundles", key);
-      if (ref.key.split("/")[1] === "render") forgetRenderArchive(ref);
+    if (archivePath) forgetRenderArchive(archivePath);
+    for (const blobId of [sourcePath, archivePath]) {
+      if (!blobId) continue;
       try {
-        await this.objects.trash(ref);
-      } catch (error) {
-        // The DB row is already gone or is being discarded by the caller;
-        // cleanup failure must not make the authoritative operation fail.
-        recordContainedServerIncident(this.db, BUILD_ID, error, {
-          component: "article-bundles",
-          phase: "trash",
-          object_key: key,
-        });
-      }
-    }
-    const bundleId = paths[0]?.split("/")[0];
-    if (bundleId) {
-      try {
-        this.quota.remove(ARTICLE_QUOTA_GROUP, bundleId);
+        await this.blobs.drop(blobId);
       } catch (error) {
         recordContainedServerIncident(this.db, BUILD_ID, error, {
           component: "article-bundles",
-          phase: "quota-remove",
-          object_key: bundleId,
+          phase: "drop",
+          blob_id: blobId,
         });
       }
     }
+    const sourceItem = quotaItemId ?? sourcePath;
+    const archiveItem = quotaItemId ?? archivePath;
+    if (sourceItem) this.quota.release(ARTICLE_SOURCE_POOL, sourceItem);
+    if (archiveItem) this.quota.release(ARTICLE_ARCHIVE_POOL, archiveItem);
   }
 
-  private ensureQuotaGroup(): void {
-    this.quota.configure({
-      name: ARTICLE_QUOTA_GROUP,
-      maxBytes: 0,
+  private ensureQuotaPools(): void {
+    const shared = {
+      maxWeight: 0,
       targetRatio: 0.8,
-      minAgeMs: 0,
-    });
+      halfLifeMs: ARTICLE_HALF_LIFE_MS,
+    };
+    this.quota.configure({ name: ARTICLE_SOURCE_POOL, ...shared });
+    this.quota.configure({ name: ARTICLE_ARCHIVE_POOL, ...shared });
   }
 
   private sliceBundle(
@@ -650,7 +653,7 @@ export class ArticleService {
 
 export function createArticleService(
   db: Database,
-  objects: ObjectStore,
+  blobs: BlobStore,
 ): ArticleService {
-  return new ArticleService(db, objects);
+  return new ArticleService(db, blobs);
 }

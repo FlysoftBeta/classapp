@@ -1,6 +1,7 @@
 import { Database, default as BetterSQLite3 } from "better-sqlite3";
 import path from "path";
 import crypto from "crypto";
+import { rmSync } from "node:fs";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { DATA_ROOT } from "./env";
@@ -22,7 +23,7 @@ export function getDb(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 25;
+const CURRENT_SCHEMA_VERSION = 26;
 
 interface SchemaMigration {
   /** Schema version after this migration commits. */
@@ -259,6 +260,13 @@ const AI_SCHEMA = `
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_id, call_id)
   );
+
+  CREATE TABLE IF NOT EXISTS ai_workspaces (
+    user_id          TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    blob_id          TEXT,
+    staging_blob_id  TEXT,
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
 
 const MEDIA_SCHEMA = `
@@ -286,7 +294,7 @@ const MEDIA_SCHEMA = `
     track_id      TEXT NOT NULL REFERENCES media_tracks(id) ON DELETE CASCADE,
     kind          TEXT NOT NULL CHECK (kind IN ('audio', 'cover')),
     state         TEXT NOT NULL CHECK (state IN ('queued', 'downloading', 'ready', 'failed')),
-    object_path   TEXT UNIQUE,
+    blob_id       TEXT UNIQUE,
     mime          TEXT,
     bytes         INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
     sha256        TEXT,
@@ -353,29 +361,27 @@ const MEDIA_SCHEMA = `
 `;
 
 const STORAGE_QUOTA_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS storage_eviction_groups (
-    name         TEXT PRIMARY KEY,
-    max_bytes    INTEGER NOT NULL DEFAULT 0 CHECK (max_bytes >= 0),
-    target_ratio REAL NOT NULL DEFAULT 0.8 CHECK (target_ratio > 0 AND target_ratio <= 1),
-    min_age_ms   INTEGER NOT NULL DEFAULT 0 CHECK (min_age_ms >= 0),
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  CREATE TABLE IF NOT EXISTS storage_quota_pools (
+    name          TEXT PRIMARY KEY,
+    max_weight    INTEGER NOT NULL DEFAULT 0 CHECK (max_weight >= 0),
+    target_ratio  REAL NOT NULL DEFAULT 0.8 CHECK (target_ratio > 0 AND target_ratio <= 1),
+    half_life_ms  INTEGER NOT NULL CHECK (half_life_ms > 0),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS storage_quota_items (
-    group_name     TEXT NOT NULL REFERENCES storage_eviction_groups(name) ON DELETE CASCADE,
-    item_key       TEXT NOT NULL,
-    bytes          INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
-    touch_time_ms  INTEGER NOT NULL,
-    touch_freq     REAL NOT NULL DEFAULT 0 CHECK (touch_freq >= 0),
+    pool           TEXT NOT NULL REFERENCES storage_quota_pools(name) ON DELETE CASCADE,
+    item_id        TEXT NOT NULL,
+    class          TEXT NOT NULL CHECK (class IN ('cache', 'durable')),
+    weight         INTEGER NOT NULL DEFAULT 0 CHECK (weight >= 0),
+    heat           REAL NOT NULL DEFAULT 0 CHECK (heat >= 0),
+    touched_at_ms  INTEGER NOT NULL,
+    pin_until_ms   INTEGER NOT NULL DEFAULT 0 CHECK (pin_until_ms >= 0),
     created_at_ms  INTEGER NOT NULL,
-    PRIMARY KEY (group_name, item_key)
+    PRIMARY KEY (pool, item_id)
   );
-  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_touch
-    ON storage_quota_items(group_name, touch_time_ms);
-  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_bytes
-    ON storage_quota_items(group_name, bytes);
-  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_freq
-    ON storage_quota_items(group_name, touch_freq);
+  CREATE INDEX IF NOT EXISTS idx_storage_quota_items_pool_class
+    ON storage_quota_items(pool, class, weight);
 `;
 
 const ARTICLE_UPLOADS_SCHEMA = `
@@ -384,8 +390,8 @@ const ARTICLE_UPLOADS_SCHEMA = `
     user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     status       TEXT NOT NULL CHECK (status IN ('staging', 'published', 'abandoned')),
-    source_key   TEXT NOT NULL,
-    archive_key  TEXT NOT NULL,
+    source_blob_id   TEXT NOT NULL,
+    archive_blob_id  TEXT NOT NULL,
     source_bytes INTEGER NOT NULL DEFAULT 0 CHECK (source_bytes >= 0),
     archive_bytes INTEGER NOT NULL DEFAULT 0 CHECK (archive_bytes >= 0),
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -407,6 +413,7 @@ function migrateV17ToV18(db: Database): void {
  * Production databases are schema v18. Everything after v18 is consolidated
  * into one ordered migration: v18 → v25. Intermediate versions are not
  * supported and the ledger can jump several versions in one transaction.
+ * Schema v26 then replaces the object/quota model and drops reconstructible cache.
  */
 function consolidatePostV18Schema(db: Database): void {
   // v19: roles moved out of the feature bitset into user_admin_roles.
@@ -506,9 +513,67 @@ function consolidatePostV18Schema(db: Database): void {
   db.prepare("DELETE FROM teach_documents").run();
 }
 
+function tableColumns(db: Database, table: string): Set<string> {
+  return new Set(
+    (
+      db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+    ).map((column) => column.name),
+  );
+}
+
+function renameColumnIfPresent(
+  db: Database,
+  table: string,
+  from: string,
+  to: string,
+): void {
+  const columns = tableColumns(db, table);
+  if (columns.has(from) && !columns.has(to)) {
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`);
+  }
+}
+
+/**
+ * v25 → v26: allocated blob ids and heat quota. Reconstructible cache from the
+ * previous object store is dropped; metadata such as media tracks is kept.
+ */
+function migrateV25ToV26(db: Database): void {
+  db.exec("DROP TABLE IF EXISTS storage_quota_items");
+  db.exec("DROP TABLE IF EXISTS storage_eviction_groups");
+  db.exec("DROP TABLE IF EXISTS storage_quota_pools");
+  db.exec(STORAGE_QUOTA_SCHEMA);
+
+  renameColumnIfPresent(db, "media_assets", "object_path", "blob_id");
+  db.prepare("DELETE FROM media_assets").run();
+
+  renameColumnIfPresent(db, "teach_documents", "object_key", "blob_id");
+  db.prepare("DELETE FROM teach_documents").run();
+
+  renameColumnIfPresent(db, "article_uploads", "source_key", "source_blob_id");
+  renameColumnIfPresent(db, "article_uploads", "archive_key", "archive_blob_id");
+  db.prepare("DELETE FROM article_uploads").run();
+  db.prepare(
+    `DELETE FROM articles
+      WHERE json_extract(provider_json, '$.type') = 'bundle'`,
+  ).run();
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_workspaces (
+      user_id          TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      blob_id          TEXT,
+      staging_blob_id  TEXT,
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  db.prepare("DELETE FROM ai_workspaces").run();
+
+  rmSync(path.join(DATA_ROOT, "storage"), { recursive: true, force: true });
+}
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, { nextVersion: 18, run: migrateV17ToV18 }],
-  [18, { nextVersion: CURRENT_SCHEMA_VERSION, run: consolidatePostV18Schema }],
+  [18, { nextVersion: 25, run: consolidatePostV18Schema }],
+  [25, { nextVersion: CURRENT_SCHEMA_VERSION, run: migrateV25ToV26 }],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -783,7 +848,7 @@ function installSchema(db: Database): void {
       application   TEXT NOT NULL,
       document_type TEXT NOT NULL CHECK (document_type IN ('word', 'powerpoint', 'excel')),
       name          TEXT NOT NULL,
-      object_key    TEXT NOT NULL UNIQUE,
+      blob_id       TEXT NOT NULL UNIQUE,
       file_size     INTEGER NOT NULL DEFAULT 0,
       status        TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('capturing', 'ready')),
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))

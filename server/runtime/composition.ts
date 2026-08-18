@@ -258,7 +258,7 @@ export class Composition {
           this.scope.getOrInit(articleService, () =>
             createArticleService(
               this.scope.db,
-              this.scope.runtime.storage.objects,
+              this.scope.runtime.storage.blobs,
             ),
           ),
           this.scope.getOrInit(wordsService, () =>
@@ -277,7 +277,7 @@ export class Composition {
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
-              this.scope.runtime.storage.objects,
+              this.scope.runtime.storage.blobs,
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -316,7 +316,7 @@ export class Composition {
           this.scope.getOrInit(articleService, () =>
             createArticleService(
               this.scope.db,
-              this.scope.runtime.storage.objects,
+              this.scope.runtime.storage.blobs,
             ),
           ),
           this.scope.getOrInit(articleImportService, () =>
@@ -358,7 +358,7 @@ export class Composition {
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
-              this.scope.runtime.storage.objects,
+              this.scope.runtime.storage.blobs,
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -475,7 +475,7 @@ export class Composition {
           this.scope.getOrInit(teachDocumentsService, () =>
             createTeachDocumentsService(
               this.scope.db,
-              this.scope.runtime.storage.objects,
+              this.scope.runtime.storage.blobs,
               this.scope.runtime.teachDocuments,
             ),
           ),

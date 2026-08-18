@@ -5,8 +5,8 @@ export interface ArticleUploadRecord {
   user_id: string;
   group_id: string;
   status: "staging" | "published" | "abandoned";
-  source_key: string;
-  archive_key: string;
+  source_blob_id: string;
+  archive_blob_id: string;
   source_bytes: number;
   archive_bytes: number;
 }
@@ -17,20 +17,20 @@ export function insertArticleUpload(
     id: string;
     userId: string;
     groupId: string;
-    sourceKey: string;
-    archiveKey: string;
+    sourceBlobId: string;
+    archiveBlobId: string;
   },
 ): void {
   db.prepare(
     `INSERT INTO article_uploads
-       (id, user_id, group_id, status, source_key, archive_key)
+       (id, user_id, group_id, status, source_blob_id, archive_blob_id)
      VALUES (?, ?, ?, 'staging', ?, ?)`,
   ).run(
     input.id,
     input.userId,
     input.groupId,
-    input.sourceKey,
-    input.archiveKey,
+    input.sourceBlobId,
+    input.archiveBlobId,
   );
 }
 
@@ -52,21 +52,21 @@ export function publishArticleUpload(db: Database, id: string): void {
   ).run(id);
 }
 
-/** Publish only while staging and while the stored keys still match the row. */
+/** Publish only while staging and while the stored blob ids still match the row. */
 export function claimArticleUpload(
   db: Database,
   id: string,
-  sourceKey: string,
-  archiveKey: string,
+  sourceBlobId: string,
+  archiveBlobId: string,
 ): boolean {
   const result = db
     .prepare(
       `UPDATE article_uploads SET status = 'published',
          updated_at = datetime('now')
        WHERE id = ? AND status = 'staging'
-         AND source_key = ? AND archive_key = ?`,
+         AND source_blob_id = ? AND archive_blob_id = ?`,
     )
-    .run(id, sourceKey, archiveKey);
+    .run(id, sourceBlobId, archiveBlobId);
   return result.changes > 0;
 }
 
@@ -83,7 +83,7 @@ export function listStaleArticleUploads(
 ): ArticleUploadRecord[] {
   return db
     .prepare(
-      `SELECT id, user_id, group_id, status, source_key, archive_key,
+      `SELECT id, user_id, group_id, status, source_blob_id, archive_blob_id,
               source_bytes, archive_bytes
          FROM article_uploads
         WHERE status = 'staging' AND created_at < ?

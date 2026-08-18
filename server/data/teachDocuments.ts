@@ -8,14 +8,14 @@ export interface TeachDocument {
   application: string;
   document_type: TeachDocumentType;
   name: string;
-  object_key: string;
+  blob_id: string;
   file_size: number;
   status: TeachDocumentStatus;
   created_at: string;
 }
 
 const TEACH_DOCUMENT_SELECT = `
-  SELECT id, application, document_type, name, object_key, file_size,
+  SELECT id, application, document_type, name, blob_id, file_size,
          status, created_at
     FROM teach_documents`;
 
@@ -25,14 +25,14 @@ export function insertTeachDocument(
 ): TeachDocument {
   db.prepare(
     `INSERT INTO teach_documents
-       (id, application, document_type, name, object_key, file_size, status)
+       (id, application, document_type, name, blob_id, file_size, status)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     document.id,
     document.application,
     document.document_type,
     document.name,
-    document.object_key,
+    document.blob_id,
     document.file_size,
     document.status,
   );
@@ -60,15 +60,13 @@ export function findTeachDocument(
     .get(id) as TeachDocument | undefined;
 }
 
-export function findTeachDocumentByObjectKey(
+export function findTeachDocumentById(
   db: BetterSqlite3.Database,
-  objectKey: string,
+  id: string,
 ): TeachDocument | undefined {
   return db
-    .prepare(
-      `${TEACH_DOCUMENT_SELECT} WHERE object_key = ? AND status = 'ready'`,
-    )
-    .get(objectKey) as TeachDocument | undefined;
+    .prepare(`${TEACH_DOCUMENT_SELECT} WHERE id = ?`)
+    .get(id) as TeachDocument | undefined;
 }
 
 export function listTeachDocuments(
@@ -82,7 +80,7 @@ export function listTeachDocuments(
     .all() as TeachDocument[];
 }
 
-/** Capturing rows whose copy was interrupted; compensation trashes objects. */
+/** Capturing rows whose copy was interrupted; compensation drops blobs. */
 export function listCapturingTeachDocuments(
   db: BetterSqlite3.Database,
 ): TeachDocument[] {
@@ -92,27 +90,21 @@ export function listCapturingTeachDocuments(
 }
 
 /**
- * Seed/refresh teaching-document quota rows directly in SQL; the capture
- * catalog may be large enough that Node-side iteration is unacceptable.
+ * Seed/refresh teaching-document cache weights. Heat and touched_at stay.
  */
 export function reconcileTeachDocumentQuotaItems(
   db: BetterSqlite3.Database,
+  now = Date.now(),
 ): void {
   db.prepare(
     `INSERT INTO storage_quota_items
-       (group_name, item_key, bytes, touch_time_ms, touch_freq, created_at_ms)
-     SELECT 'teach-documents', id, file_size,
-            CAST(strftime('%s', created_at) AS INTEGER) * 1000,
-            0,
-            CAST(strftime('%s', created_at) AS INTEGER) * 1000
+       (pool, item_id, class, weight, heat, touched_at_ms, pin_until_ms, created_at_ms)
+     SELECT 'teach-documents', id, 'cache', file_size, 1, ?, 0, ?
        FROM teach_documents
       WHERE status = 'ready'
-     ON CONFLICT(group_name, item_key) DO UPDATE SET
-       bytes = excluded.bytes,
-       touch_time_ms = excluded.touch_time_ms,
-       touch_freq = (storage_quota_items.touch_freq +
-         (excluded.touch_time_ms - storage_quota_items.touch_time_ms)) / 2.0`,
-  ).run();
+     ON CONFLICT(pool, item_id) DO UPDATE SET
+       weight = excluded.weight`,
+  ).run(now, now);
 }
 
 export function deleteTeachDocuments(

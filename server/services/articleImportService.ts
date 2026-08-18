@@ -4,7 +4,7 @@ import type { User } from "@/shared/types/api";
 import { ClientBusyError, createTomatoClientPool } from "@/lib/tomato";
 import type { SearchBook } from "@/lib/tomato";
 import { createArticleService } from "./articlesService";
-import type { ObjectStore } from "@/server/storage/objectStore";
+import type { BlobStore } from "@/server/storage/blobStore";
 import { BUILD_ID } from "@/server/infra/env";
 import { recordContainedServerIncident } from "./incidentService";
 
@@ -55,7 +55,7 @@ export class ArticleImportRuntime {
 
   constructor(
     private readonly db: Database,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
   ) {}
 
   async search(
@@ -146,7 +146,7 @@ export class ArticleImportRuntime {
         task.updated_at = Date.now();
       }
       const header = `${catalog.title}${catalog.author ? `\n作者：${catalog.author}` : ""}`;
-      const { article } = createArticleService(this.db, this.objects).createText(
+      const { article } = createArticleService(this.db, this.blobs).createText(
         user.id,
         {
           title: catalog.title,

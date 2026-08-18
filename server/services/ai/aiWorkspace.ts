@@ -1,17 +1,23 @@
 import path from "node:path";
+import crypto from "node:crypto";
 import type { Database } from "better-sqlite3";
-import type { ObjectStore } from "@/server/storage/objectStore";
+import type { BlobStore } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import {
   TreeStore,
   type TreeSnapshot,
 } from "@/server/storage/treeStore";
-import {
-  normalizeTreePath,
-  objectRef,
-} from "@/server/storage/paths";
+import { normalizeTreePath } from "@/server/storage/paths";
 import type { AiAttachment } from "@/shared/types/api";
 import { PublicError } from "@/server/services/incidentService";
+import {
+  beginAiWorkspaceStaging,
+  clearAiWorkspaceStaging,
+  deleteAiWorkspace,
+  findAiWorkspace,
+  listStaleAiWorkspaceStaging,
+  publishAiWorkspace,
+} from "@/server/data/aiWorkspaces";
 
 const MAX_STORE_BYTES = 10 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 12 * 1024 * 1024;
@@ -44,8 +50,8 @@ interface WorkspaceFile {
   updated_at: string;
 }
 
-function quotaGroup(userId: string): string {
-  return `ai-workspaces:${userId}`;
+function quotaPool(): string {
+  return "ai-workspaces";
 }
 
 function logicalTreePath(value: string): string {
@@ -160,36 +166,40 @@ function publicFile(entry: {
  * product rule for the model's file tools and image attachments.
  */
 export class AiWorkspace {
-  private readonly ref = objectRef("ai-workspaces", this.userId);
-  private readonly trees = new TreeStore(this.objects);
+  private readonly lockKey = `ai-workspace:${this.userId}`;
+  private readonly trees = new TreeStore(this.blobs);
   private readonly quota = new QuotaService(this.db);
 
   constructor(
     private readonly db: Database,
     private readonly userId: string,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
   ) {}
 
   async inspect() {
-    const snapshot = await this.trees.inspect(this.ref, LIMITS);
-    this.account(snapshot);
-    return {
-      revision: snapshot.revision,
-      totalBytes: snapshot.totalBytes,
-      files: snapshot.files.map(publicFile),
-    };
+    return this.blobs.withLock(this.lockKey, async () => {
+      const snapshot = await this.trees.inspect(this.readyBlobId(), LIMITS);
+      this.account(snapshot);
+      return {
+        revision: snapshot.revision,
+        totalBytes: snapshot.totalBytes,
+        files: snapshot.files.map(publicFile),
+      };
+    });
   }
 
   async read(requestedPath: string) {
     const filePath = textLogicalPath(requestedPath);
-    const snapshot = await this.trees.inspect(this.ref, LIMITS);
-    const found = snapshot.read(filePath);
-    if (!found) throw new PublicError("文件不存在");
-    return {
-      ...publicFile(found.entry),
-      content: Buffer.from(found.bytes).toString("utf8"),
-      revision: snapshot.revision,
-    };
+    return this.blobs.withLock(this.lockKey, async () => {
+      const snapshot = await this.trees.inspect(this.readyBlobId(), LIMITS);
+      const found = snapshot.read(filePath);
+      if (!found) throw new PublicError("文件不存在");
+      return {
+        ...publicFile(found.entry),
+        content: Buffer.from(found.bytes).toString("utf8"),
+        revision: snapshot.revision,
+      };
+    });
   }
 
   async mutate(
@@ -206,7 +216,7 @@ export class AiWorkspace {
   ) {
     const filePath = textLogicalPath(mutation.path);
     let result: { file: WorkspaceFile | null; deleted: string | null };
-    const snapshot = await this.trees.mutate(this.ref, LIMITS, (tree) => {
+    const snapshot = await this.publishMutation((tree) => {
       const existing = tree.has(filePath);
       let file: WorkspaceFile | null = null;
       let deleted: string | null = null;
@@ -242,7 +252,6 @@ export class AiWorkspace {
       }
       result = { file, deleted };
     });
-    this.account(snapshot);
     return {
       revision: snapshot.revision,
       totalBytes: snapshot.totalBytes,
@@ -259,7 +268,7 @@ export class AiWorkspace {
     }>,
   ): Promise<AiAttachment[]> {
     const attachments: AiAttachment[] = [];
-    const snapshot = await this.trees.mutate(this.ref, LIMITS, (tree) => {
+    await this.publishMutation((tree) => {
       const existing = new Set(tree.files.map((file) => file.path));
       for (const input of inputs) {
         if (!input.bytes.byteLength) throw new PublicError("图片内容为空");
@@ -286,44 +295,106 @@ export class AiWorkspace {
         });
       }
     });
-    this.account(snapshot);
     return attachments;
   }
 
   async readAttachmentDataUrl(attachment: AiAttachment): Promise<string> {
     const requestedPath = attachmentLogicalPath(attachment.path);
-    const snapshot = await this.trees.inspect(this.ref, LIMITS);
-    const found = snapshot.read(requestedPath);
-    if (!found || found.entry.mime !== attachment.mime) {
-      throw new PublicError("图片附件不存在");
-    }
-    return `data:${found.entry.mime};base64,${Buffer.from(found.bytes).toString("base64")}`;
+    return this.blobs.withLock(this.lockKey, async () => {
+      const snapshot = await this.trees.inspect(this.readyBlobId(), LIMITS);
+      const found = snapshot.read(requestedPath);
+      if (!found || found.entry.mime !== attachment.mime) {
+        throw new PublicError("图片附件不存在");
+      }
+      return `data:${found.entry.mime};base64,${Buffer.from(found.bytes).toString("base64")}`;
+    });
   }
 
   async deleteAttachments(requestedPaths: string[]): Promise<void> {
     if (!requestedPaths.length) return;
     const paths = new Set(requestedPaths.map(attachmentLogicalPath));
-    const before = await this.trees.inspect(this.ref, LIMITS);
-    if (!before.files.some((file) => paths.has(file.path))) return;
-    const snapshot = await this.trees.mutate(this.ref, LIMITS, (tree) => {
-      for (const filePath of paths) tree.delete(filePath);
+    await this.blobs.withLock(this.lockKey, async () => {
+      const before = await this.trees.inspect(this.readyBlobId(), LIMITS);
+      if (!before.files.some((file) => paths.has(file.path))) return;
+      await this.publishMutationLocked((tree) => {
+        for (const filePath of paths) tree.delete(filePath);
+      });
     });
-    this.account(snapshot);
   }
 
   async remove(): Promise<void> {
-    await this.trees.remove(this.ref);
-    this.quota.remove(quotaGroup(this.userId), this.userId);
-    this.quota.removeGroup(quotaGroup(this.userId));
+    await this.blobs.withLock(this.lockKey, async () => {
+      const previous = deleteAiWorkspace(this.db, this.userId);
+      this.quota.release(quotaPool(), this.userId);
+      for (const blobId of [previous?.blob_id, previous?.staging_blob_id]) {
+        if (blobId) await this.blobs.drop(blobId);
+      }
+    });
+  }
+
+  private readyBlobId(): string | null {
+    return findAiWorkspace(this.db, this.userId)?.blob_id ?? null;
+  }
+
+  private async publishMutation(
+    mutation: Parameters<TreeStore["mutateInto"]>[3],
+  ): Promise<TreeSnapshot> {
+    return this.blobs.withLock(this.lockKey, () =>
+      this.publishMutationLocked(mutation),
+    );
+  }
+
+  private async publishMutationLocked(
+    mutation: Parameters<TreeStore["mutateInto"]>[3],
+  ): Promise<TreeSnapshot> {
+    const current = findAiWorkspace(this.db, this.userId);
+    const blobId = crypto.randomUUID();
+    beginAiWorkspaceStaging(this.db, this.userId, blobId);
+    const slot = await this.blobs.create(blobId);
+    try {
+      const snapshot = await this.trees.mutateInto(
+        current?.blob_id ?? null,
+        slot,
+        LIMITS,
+        mutation,
+      );
+      const old = publishAiWorkspace(this.db, this.userId, slot.id);
+      if (old && old !== slot.id) await this.blobs.drop(old);
+      this.account(snapshot);
+      return snapshot;
+    } catch (error) {
+      await slot.discard().catch(() => undefined);
+      await this.blobs.drop(slot.id).catch(() => undefined);
+      clearAiWorkspaceStaging(this.db, this.userId);
+      throw error;
+    }
   }
 
   private account(snapshot: TreeSnapshot): void {
     this.quota.configure({
-      name: quotaGroup(this.userId),
-      maxBytes: MAX_STORE_BYTES,
+      name: quotaPool(),
+      maxWeight: MAX_STORE_BYTES,
       targetRatio: 0.8,
-      minAgeMs: 0,
+      halfLifeMs: 7 * 24 * 60 * 60_000,
     });
-    this.quota.upsert(quotaGroup(this.userId), this.userId, snapshot.totalBytes);
+    this.quota.account(quotaPool(), this.userId, {
+      weight: snapshot.totalBytes,
+      class: "durable",
+    });
   }
+}
+
+/** Drop interrupted replace slots that never published. */
+export async function reconcileStaleAiWorkspaces(
+  db: Database,
+  blobs: BlobStore,
+): Promise<number> {
+  let reclaimed = 0;
+  for (const row of listStaleAiWorkspaceStaging(db)) {
+    if (!row.staging_blob_id) continue;
+    await blobs.drop(row.staging_blob_id).catch(() => undefined);
+    clearAiWorkspaceStaging(db, row.user_id);
+    reclaimed += 1;
+  }
+  return reclaimed;
 }

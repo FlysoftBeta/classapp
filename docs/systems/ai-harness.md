@@ -73,8 +73,9 @@ for this application.
 
 ## Workspace
 
-Each user owns one bounded manifest-tree object in the shared
-`server/storage/` ObjectStore (`ai-workspaces` namespace). Its single
+Each user owns one bounded manifest-tree blob in the shared
+`server/storage/` BlobStore. Domain row `ai_workspaces` stores the ready
+`blob_id` and an in-flight `staging_blob_id`. Its single
 `manifest.json` maps semantic relative paths to opaque object IDs, sizes, MIME,
 hashes, timestamps, and archive revision; there is no per-file sidecar. Logical
 paths:
@@ -85,12 +86,12 @@ paths:
 - may retain supported image attachments as non-agent-authored inputs;
 - total at most 10 MiB and 256 files.
 
-Mutation is serialized per object by the TreeStore, validates exact replacement
-count, validates text/SVG safety, rebuilds the manifest ZIP, fsyncs, and
-atomically publishes. File-tool calls have durable call IDs and before/after
-revisions so retry is idempotent. Quota accounting for the workspace is a
-dynamically created per-user eviction group; purging the user removes the
-object and the group together.
+Mutation is serialized per user by a BlobStore lock, validates exact replacement
+count, validates text/SVG safety, rebuilds the manifest ZIP into a new blob,
+fsyncs, and publishes the new id. File-tool calls have durable call IDs and
+before/after revisions so retry is idempotent. Quota accounting is one durable
+item in the `ai-workspaces` pool keyed by user id; purging the user drops the
+blobs and releases the item.
 
 File content is untrusted user data, never instructions that override the agent
 system prompt. SVG forbids scripts, event handlers, external references,

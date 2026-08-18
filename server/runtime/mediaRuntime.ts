@@ -31,12 +31,13 @@ import {
   markAssetDownloading,
   markAssetFailed,
   mediaConfig,
+  mediaQuotaPolicy,
   publishAsset,
   readyAssetBytesForTrack,
   reconcileReadyAssetQuotaItems,
   touchTrack,
 } from "@/server/data/media";
-import { ObjectStore, type StagedWrite } from "@/server/storage/objectStore";
+import { BlobStore, type StagingSlot } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import { publishSystem } from "@/server/services/eventBus";
 import { recordContainedServerIncident } from "@/server/services/incidentService";
@@ -44,6 +45,7 @@ import { BUILD_ID } from "@/server/infra/env";
 
 const MAX_CONCURRENT_AUDIO_STREAMS = 4;
 const STREAM_SLOT_WAIT_MS = 30_000;
+const ADMISSION_PIN_MS = 20 * 60_000;
 
 interface MaterializationJob {
   trackId: string;
@@ -92,7 +94,7 @@ export class MediaRuntime {
     MAX_CONCURRENT_AUDIO_STREAMS,
     STREAM_SLOT_WAIT_MS,
   );
-  readonly objects: ObjectStore;
+  readonly blobs: BlobStore;
   private readonly coverJobs = new Map<string, MaterializationJob>();
   private readonly audioSessions = new Map<string, AudioStreamSession>();
   private readonly leases = new Map<string, number>();
@@ -102,9 +104,9 @@ export class MediaRuntime {
   constructor(
     private readonly db: Database,
     private readonly config: MediaRuntimeConfig,
-    objects: ObjectStore,
+    blobs: BlobStore,
   ) {
-    this.objects = objects;
+    this.blobs = blobs;
     const configured =
       config.ytDlpPath !== null &&
       config.ytDlpPath !== "" &&
@@ -279,23 +281,22 @@ export class MediaRuntime {
     track: MediaTrack,
     subscription: StreamSubscription,
   ): Promise<void> {
-    const generation = crypto.randomUUID();
-    const ref = this.objects.ref("media", `${track.id}/audio/${generation}`);
-    let staged: StagedWrite | null = null;
+    const blobId = crypto.randomUUID();
+    let staged: StagingSlot | null = null;
     let committed = false;
     try {
       if (findReadyAsset(this.db, track.id, "audio")) return;
-      markAssetDownloading(this.db, track.id, "audio");
-      staged = await this.objects.stage(ref);
+      markAssetDownloading(this.db, track.id, "audio", blobId);
+      staged = await this.blobs.create(blobId);
       const materialized = await writeChunks(subscription.read(), staged.path);
       const object = await staged.commit({
-        bytes: materialized.bytes,
+        expectedBytes: materialized.bytes,
         sha256: materialized.sha256,
       });
       staged = null;
       committed = true;
       publishAsset(this.db, track.id, "audio", {
-        objectPath: object.ref.key,
+        blobId: object.id,
         mime: "audio/webm",
         bytes: materialized.bytes,
         sha256: materialized.sha256,
@@ -314,7 +315,7 @@ export class MediaRuntime {
     } catch (error) {
       await staged?.discard();
       if (committed && !findReadyAsset(this.db, track.id, "audio")) {
-        await this.objects.trash(ref).catch(() => undefined);
+        await this.blobs.drop(blobId).catch(() => undefined);
       }
       if (error instanceof MediaError && error.kind === "cancelled") return;
       const code =
@@ -339,15 +340,14 @@ export class MediaRuntime {
 
   private async runCoverMaterialization(track: MediaTrack): Promise<void> {
     const kind = "cover";
-    const generation = crypto.randomUUID();
-    const ref = this.objects.ref("media", `${track.id}/${kind}/${generation}`);
-    let staged: StagedWrite | null = null;
+    const blobId = crypto.randomUUID();
+    let staged: StagingSlot | null = null;
     let committed = false;
     try {
       const ready = findReadyAsset(this.db, track.id, kind);
       if (ready) return;
-      markAssetDownloading(this.db, track.id, kind);
-      staged = await this.objects.stage(ref);
+      markAssetDownloading(this.db, track.id, kind, blobId);
+      staged = await this.blobs.create(blobId);
       const outputPath = staged.path;
       const materialized = await this.materializeThrottle.run(async () => {
         const stream = await this.provider.streamCover(trackToProvider(track), {
@@ -359,13 +359,13 @@ export class MediaRuntime {
         };
       });
       const object = await staged.commit({
-        bytes: materialized.bytes,
+        expectedBytes: materialized.bytes,
         sha256: materialized.sha256,
       });
       staged = null;
       committed = true;
       publishAsset(this.db, track.id, kind, {
-        objectPath: object.ref.key,
+        blobId: object.id,
         mime: materialized.stream.contentType,
         bytes: materialized.bytes,
         sha256: materialized.sha256,
@@ -384,7 +384,7 @@ export class MediaRuntime {
     } catch (error) {
       await staged?.discard();
       if (committed && !findReadyAsset(this.db, track.id, kind)) {
-        await this.objects.trash(ref).catch(() => undefined);
+        await this.blobs.drop(blobId).catch(() => undefined);
       }
       if (error instanceof MediaError && error.kind === "cancelled") return;
       const code =
@@ -433,17 +433,11 @@ export class MediaRuntime {
 
   private touchOnStreamStart(trackId: string): void {
     touchTrack(this.db, trackId);
-    new QuotaService(this.db).touch("media", trackId);
+    new QuotaService(this.db).touch("media", trackId, 1);
   }
 
   quotaPolicy() {
-    const config = mediaConfig(this.db);
-    return {
-      name: "media",
-      maxBytes: config.storage_limit_bytes,
-      targetRatio: 0.8,
-      minAgeMs: config.eviction_days * 24 * 60 * 60_000,
-    };
+    return mediaQuotaPolicy(this.db);
   }
 
   private reconcileQuotaItems(): void {
@@ -457,7 +451,13 @@ export class MediaRuntime {
 
   private accountReadyTrack(trackId: string): void {
     const bytes = readyAssetBytesForTrack(this.db, trackId);
-    if (bytes > 0) new QuotaService(this.db).upsert("media", trackId, bytes);
+    if (bytes > 0) {
+      new QuotaService(this.db).account("media", trackId, {
+        weight: bytes,
+        class: "cache",
+        pinUntilMs: Date.now() + ADMISSION_PIN_MS,
+      });
+    }
   }
 
   acquireLease(trackId: string): () => void {
@@ -532,13 +532,14 @@ export class MediaRuntime {
   /** Owner evictor registered with the shared quota service. */
   async evictTrack(trackId: string): Promise<boolean> {
     if (this.hasLease(trackId)) return false;
-    const objectKeys = this.db.transaction(() =>
+    const blobIds = this.db.transaction(() =>
       deleteAssetsIfUnreferenced(this.db, trackId),
     )();
-    if (objectKeys === null || objectKeys.length === 0) return false;
-    for (const objectKey of objectKeys) {
-      await this.objects.trash(this.objects.ref("media", objectKey));
+    if (blobIds === null || blobIds.length === 0) return false;
+    for (const blobId of blobIds) {
+      await this.blobs.drop(blobId);
     }
+    new QuotaService(this.db).release("media", trackId);
     publishSystem({
       kind: "media.materialization.changed",
       data: {

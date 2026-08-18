@@ -30,8 +30,8 @@ export class Runtime {
     this.aiExecution = new AiExecutionRuntime(db);
     const config = runtimeConfig();
     this.storage = new StorageRuntime(db, config.dataRoot);
-    this.articleImports = new ArticleImportRuntime(db, this.storage.objects);
-    this.articleUploads = new ArticleUploadRuntime(db, this.storage.objects);
+    this.articleImports = new ArticleImportRuntime(db, this.storage.blobs);
+    this.articleUploads = new ArticleUploadRuntime(db, this.storage.blobs);
     this.events = new EventBusRuntime(db, buildId);
     bindEventBusRuntime(this.events);
     this.media = new MediaRuntime(
@@ -41,16 +41,16 @@ export class Runtime {
         potServerEntry: null,
         pluginDirs: [],
       },
-      this.storage.objects,
+      this.storage.blobs,
     );
     this.storage.registerEvictor("media", this.media.quotaPolicy(), (item) =>
-      this.media.evictTrack(item.itemKey),
+      this.media.evictTrack(item.itemId),
     );
-    this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.objects);
+    this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.blobs);
     this.storage.registerEvictor(
       "teach-documents",
       this.teachDocuments.quotaPolicy(),
-      (item) => this.teachDocuments.evict(item.itemKey),
+      (item) => this.teachDocuments.evict(item.itemId),
     );
   }
 

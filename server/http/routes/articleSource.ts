@@ -1,7 +1,7 @@
 import {
   RangeNotSatisfiableError,
-  type ObjectReadRange,
-} from "@/server/storage/objectStore";
+  type BlobReadRange,
+} from "@/server/storage/blobStore";
 import { handleHttpError } from "@/server/http/errorResponse";
 import { currentScope } from "@/server/runtime/scope";
 
@@ -52,12 +52,12 @@ export async function GET(
 
 /**
  * Parse a single bytes range without a known size. End-exclusive ranges and
- * suffix ranges are resolved by ObjectStore against the opened file descriptor,
+ * suffix ranges are resolved by BlobStore against the opened file descriptor,
  * so the response body and Content-Length always describe the same bytes.
  */
 function parseRange(
   value: string | null,
-): ObjectReadRange | "unsatisfiable" | null {
+): BlobReadRange | "unsatisfiable" | null {
   if (!value) return null;
   const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
   if (!match || (!match[1] && !match[2])) return "unsatisfiable";
@@ -76,7 +76,7 @@ function parseRange(
   return { start, end };
 }
 
-function rangeStart(range: ObjectReadRange | null, size: number): number {
+function rangeStart(range: BlobReadRange | null, size: number): number {
   if (!range) return 0;
   if (range.suffixLength !== undefined) {
     return Math.max(0, size - range.suffixLength);
@@ -84,13 +84,13 @@ function rangeStart(range: ObjectReadRange | null, size: number): number {
   return range.start ?? 0;
 }
 
-function rangeEnd(range: ObjectReadRange | null, size: number): number {
+function rangeEnd(range: BlobReadRange | null, size: number): number {
   if (!range) return size - 1;
   if (range.suffixLength !== undefined) return size - 1;
   return Math.min(range.end ?? size - 1, size - 1);
 }
 
-function rangeLength(range: ObjectReadRange | null, size: number): number {
+function rangeLength(range: BlobReadRange | null, size: number): number {
   if (!range) return size;
   return rangeEnd(range, size) - rangeStart(range, size) + 1;
 }

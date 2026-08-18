@@ -10,11 +10,11 @@ items and dependencies needed by the reader.
 ```text
 multipart PDF upload
   → Facade authorizes target Group before render-slot use
-  → source streamed into the shared ObjectStore (article-bundles namespace)
+  → source streamed into a BlobStore slot
   → bundled platform pdfrender process
   → temporary render archive
   → strict archive inspection
-  → atomic publish into the shared ObjectStore
+  → atomic publish of a second BlobStore slot
   → Article metadata transaction
   → post-commit list events
 
@@ -28,10 +28,10 @@ reader
   → Infini virtualizes fixed-layout items
 ```
 
-The source and render archive are ordinary objects in `server/storage/`, so
-range streaming, path containment, trash, and accounting come from one owner.
+The source and render archive are ordinary blobs in `server/storage/`, so
+range streaming, drop, and accounting come from one owner.
 `server/storage/renderArchive.ts` only adds the document-specific manifest
-validation and STORED-entry offset index on top of that ObjectStore.
+validation and STORED-entry offset index on top of that BlobStore.
 
 ## Render archive
 

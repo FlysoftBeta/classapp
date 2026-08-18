@@ -17,6 +17,7 @@ import { createClientService } from "@/server/services/clientsService";
 import { recordContainedServerIncident } from "./incidentService";
 import { BUILD_ID } from "@/server/infra/env";
 import type { Runtime } from "@/server/runtime/runtime";
+import { reconcileStaleAiWorkspaces } from "@/server/services/ai/aiWorkspace";
 
 /** Temporary client records with no recent activity are removed after this many days. */
 const CLIENT_TTL_DAYS = 1;
@@ -66,6 +67,7 @@ async function runMaintenance(
   runtime.media.reconcileTransient();
   await runtime.storage.reconcileStorage();
   await runtime.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
 }
 
 export function startMaintenance(

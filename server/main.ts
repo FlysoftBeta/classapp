@@ -12,6 +12,7 @@ import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
 import { setUpdateManager, UpdateManager } from "./infra/update/manager";
 import { Runtime } from "@/server/runtime/runtime";
+import { reconcileStaleAiWorkspaces } from "@/server/services/ai/aiWorkspace";
 
 export async function bootstrap(
   config: RuntimeConfig,
@@ -31,6 +32,7 @@ export async function bootstrap(
   const runtime = new Runtime(db, config.buildId);
   await runtime.storage.start();
   await runtime.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
   await runtime.media.start();
   runtime.teachDocuments.start();
   if (config.update) setUpdateManager(new UpdateManager(db, config.update));

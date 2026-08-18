@@ -3,9 +3,9 @@ import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
 import {
   RangeNotSatisfiableError,
-  type ObjectReadRange,
-  type ObjectStore,
-} from "@/server/storage/objectStore";
+  type BlobReadRange,
+  type BlobStore,
+} from "@/server/storage/blobStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
 /** Audio is a raw HTTP concern: grants replace headers the audio tag cannot send. */
@@ -33,10 +33,10 @@ export async function GET(
 
     try {
       const ready = findReadyAsset(scope.db, id, "audio");
-      if (ready?.object_path) {
+      if (ready?.blob_id) {
         return await storedResponse(
-          scope.runtime.media.objects,
-          ready.object_path,
+          scope.runtime.media.blobs,
+          ready.blob_id,
           req,
           releaseLease,
         );
@@ -62,10 +62,10 @@ export async function GET(
           throw new PublicError("曲目尚未就绪，请稍后重试");
         }
         const nowReady = findReadyAsset(scope.db, id, "audio");
-        if (!nowReady?.object_path) throw new PublicError("曲目尚未就绪");
+        if (!nowReady?.blob_id) throw new PublicError("曲目尚未就绪");
         return await storedResponse(
-          scope.runtime.media.objects,
-          nowReady.object_path,
+          scope.runtime.media.blobs,
+          nowReady.blob_id,
           req,
           releaseLease,
         );
@@ -125,12 +125,11 @@ export async function GET(
 }
 
 async function storedResponse(
-  objects: ObjectStore,
-  objectKey: string,
+  blobs: BlobStore,
+  blobId: string,
   req: Request,
   releaseLease: () => void,
 ): Promise<Response> {
-  const ref = objects.ref("media", objectKey);
   const requested = parseRequestedRange(req.headers.get("range"));
   if (requested === "unsatisfiable") {
     releaseLease();
@@ -139,7 +138,7 @@ async function storedResponse(
       headers: { "Content-Range": "bytes */0" },
     });
   }
-  const selected = await objects.open(ref, requested ?? undefined);
+  const selected = await blobs.open(blobId, requested ?? undefined);
   const size = selected.size;
   const range =
     requested === null
@@ -187,12 +186,12 @@ async function storedResponse(
 }
 
 /**
- * Parse a single bytes range without knowing the asset size yet; ObjectStore
+ * Parse a single bytes range without knowing the asset size yet; BlobStore
  * resolves end/suffix against the same opened file descriptor used for the body.
  */
 function parseRequestedRange(
   value: string | null,
-): ObjectReadRange | "unsatisfiable" | null {
+): BlobReadRange | "unsatisfiable" | null {
   if (!value) return null;
   const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
   if (!match || (!match[1] && !match[2])) return "unsatisfiable";
@@ -211,14 +210,14 @@ function parseRequestedRange(
   return { start, end };
 }
 
-function requestedStart(range: ObjectReadRange, size: number): number {
+function requestedStart(range: BlobReadRange, size: number): number {
   if (range.suffixLength !== undefined) {
     return Math.max(0, size - range.suffixLength);
   }
   return range.start ?? 0;
 }
 
-function requestedEnd(range: ObjectReadRange, size: number): number {
+function requestedEnd(range: BlobReadRange, size: number): number {
   if (range.suffixLength !== undefined) return size - 1;
   return Math.min(range.end ?? size - 1, size - 1);
 }

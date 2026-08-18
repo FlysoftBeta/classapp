@@ -1,17 +1,17 @@
 import crypto from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { copyFile, open, stat } from "node:fs/promises";
 import type BetterSqlite3 from "better-sqlite3";
 import {
   deleteTeachDocuments,
-  findTeachDocumentByObjectKey,
+  findTeachDocument,
   insertTeachDocument,
   listCapturingTeachDocuments,
   publishTeachDocument,
   reconcileTeachDocumentQuotaItems,
   type TeachDocumentType,
 } from "@/server/data/teachDocuments";
-import { ObjectStore } from "@/server/storage/objectStore";
+import { BlobStore } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import {
   PublicError,
@@ -103,7 +103,7 @@ export class TeachDocumentsRuntime {
 
   constructor(
     private readonly db: BetterSqlite3.Database,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
   ) {}
 
   get monitorAvailable(): boolean {
@@ -113,9 +113,9 @@ export class TeachDocumentsRuntime {
   quotaPolicy() {
     return {
       name: TEACH_DOCUMENTS_QUOTA_GROUP,
-      maxBytes: 0,
+      maxWeight: 0,
       targetRatio: TARGET_RATIO,
-      minAgeMs: RETENTION_DAYS * 24 * 60 * 60_000,
+      halfLifeMs: RETENTION_DAYS * 24 * 60 * 60_000,
     };
   }
 
@@ -143,7 +143,7 @@ export class TeachDocumentsRuntime {
     const source = await stat(document.path);
     if (!source.isFile()) throw new PublicError("源文档不是文件");
     const id = crypto.randomUUID();
-    const ref = this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, id);
+    const blobId = crypto.randomUUID();
     // Durable intent first: a crash between the row and the object is
     // compensated on the next start by reconcileCapturing.
     insertTeachDocument(this.db, {
@@ -151,14 +151,20 @@ export class TeachDocumentsRuntime {
       application: document.application,
       document_type: document.documentType,
       name: document.name,
-      object_key: id,
+      blob_id: blobId,
       file_size: source.size,
       status: "capturing",
     });
+    const slot = await this.blobs.create(blobId);
     try {
-      const stored = await this.objects.copyBlob(ref, document.path, {
-        expectedBytes: source.size,
-      });
+      await copyFile(document.path, slot.path);
+      const handle = await open(slot.path, "r+");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      const stored = await slot.commit({ expectedBytes: source.size });
       const after = await stat(document.path);
       if (
         !after.isFile() ||
@@ -168,12 +174,16 @@ export class TeachDocumentsRuntime {
         throw new PublicError("源文档在复制期间发生变化，请稍后重试");
       }
       publishTeachDocument(this.db, id, stored.bytes);
-      this.quota.upsert(TEACH_DOCUMENTS_QUOTA_GROUP, id, stored.bytes);
+      this.quota.account(TEACH_DOCUMENTS_QUOTA_GROUP, id, {
+        weight: stored.bytes,
+        class: "cache",
+      });
     } catch (error) {
       deleteTeachDocuments(this.db, [id]);
-      this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, id);
+      this.quota.release(TEACH_DOCUMENTS_QUOTA_GROUP, id);
       try {
-        await this.objects.trash(ref);
+        await slot.discard();
+        await this.blobs.drop(blobId);
       } catch (cleanupError) {
         recordContainedServerIncident(this.db, BUILD_ID, cleanupError, {
           component: "teach-documents",
@@ -187,29 +197,26 @@ export class TeachDocumentsRuntime {
   }
 
   /** Owner evictor registered with the shared storage quota service. */
-  async evict(objectKey: string): Promise<boolean> {
-    const document = findTeachDocumentByObjectKey(this.db, objectKey);
+  async evict(itemId: string): Promise<boolean> {
+    const document = findTeachDocument(this.db, itemId);
     if (!document) return false;
     return this.removeOne(document);
   }
 
   private async removeOne(document: {
     id: string;
-    object_key: string;
+    blob_id: string;
   }): Promise<boolean> {
-    // The SQLite row is authority; delete it before the materialized bytes.
     deleteTeachDocuments(this.db, [document.id]);
-    this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+    this.quota.release(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
     try {
-      await this.objects.trash(
-        this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
-      );
+      await this.blobs.drop(document.blob_id);
       return true;
     } catch (error) {
       recordContainedServerIncident(this.db, BUILD_ID, error, {
         component: "teach-documents",
         phase: "cleanup",
-        object_key: document.object_key,
+        blob_id: document.blob_id,
       });
       return false;
     }
@@ -224,18 +231,16 @@ export class TeachDocumentsRuntime {
   private async reconcileCapturing(): Promise<void> {
     for (const document of listCapturingTeachDocuments(this.db)) {
       try {
-        await this.objects.trash(
-          this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
-        );
+        await this.blobs.drop(document.blob_id);
       } catch (error) {
         recordContainedServerIncident(this.db, BUILD_ID, error, {
           component: "teach-documents",
           phase: "reconcile-capturing",
-          object_key: document.object_key,
+          blob_id: document.blob_id,
         });
       }
       deleteTeachDocuments(this.db, [document.id]);
-      this.quota.remove(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+      this.quota.release(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
     }
   }
 

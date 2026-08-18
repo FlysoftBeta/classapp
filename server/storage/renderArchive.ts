@@ -8,8 +8,7 @@ import type {
   BundleItem,
   BundleResource,
 } from "@/shared/bundles/protocol";
-import type { ObjectStore } from "./objectStore";
-import type { ObjectRef } from "./paths";
+import type { BlobStore } from "./blobStore";
 import { PublicError } from "@/server/services/incidentService";
 
 const MANIFEST_NAME = "manifest.json";
@@ -355,7 +354,7 @@ function validateManifest(
 
 /**
  * Validate a renderer-produced archive on a local temporary path before it is
- * published through the ObjectStore.
+ * published through BlobStore.
  */
 export async function inspectRenderArchiveFile(
   absolutePath: string,
@@ -372,18 +371,17 @@ export async function inspectRenderArchiveFile(
 }
 
 /**
- * Index a published archive through the ObjectStore. The immutable offset
- * index keeps the hot path streaming selected STORED payloads only.
+ * Index a published archive through BlobStore. The immutable offset index
+ * keeps the hot path streaming selected STORED payloads only.
  */
 export function loadRenderArchive(
-  objects: ObjectStore,
-  ref: ObjectRef,
+  blobs: BlobStore,
+  blobId: string,
 ): Promise<StoredRenderArchive> {
-  const cacheKey = `${ref.namespace}:${ref.key}`;
-  let pending = indexCache.get(cacheKey);
+  let pending = indexCache.get(blobId);
   if (!pending) {
     pending = (async () => {
-      const open = await objects.open(ref);
+      const open = await blobs.open(blobId);
       const { manifestBytes, entries } = await extractManifest(
         Readable.fromWeb(open.body as never) as AsyncIterable<Uint8Array>,
       );
@@ -392,19 +390,19 @@ export function loadRenderArchive(
         archiveSize: open.size,
         ...validateManifest(manifest, entries, open.size),
         stream: (range: { start: number; end: number } | undefined) =>
-          objects.open(ref, range).then((value) => value.body),
+          blobs.open(blobId, range).then((value) => value.body),
       };
     })().catch((error) => {
-      indexCache.delete(cacheKey);
+      indexCache.delete(blobId);
       throw error;
     });
-    indexCache.set(cacheKey, pending);
+    indexCache.set(blobId, pending);
   }
   return pending;
 }
 
-export function forgetRenderArchive(ref: ObjectRef): void {
-  indexCache.delete(`${ref.namespace}:${ref.key}`);
+export function forgetRenderArchive(blobId: string): void {
+  indexCache.delete(blobId);
 }
 
 export function streamArchiveResource(

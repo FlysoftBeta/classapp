@@ -33,7 +33,7 @@ server/services/mediaPlaylistService.ts  queue + playlist mechanics
 server/data/media.ts               SQL and row mapping
 server/http/routes/mediaAudio.ts   grant, Range, seek-await, live relay
 server/http/routes/mediaCover.ts   session-authenticated cover
-server/storage/                    ObjectStore, tree store, QuotaService
+server/storage/                    BlobStore, tree store, QuotaService
 client/interact/media.ts           remote/local orchestration
 client/data/media.ts               IndexedDB media projection
 client/components/media/           search, queue, playlists, now-playing bar
@@ -68,7 +68,7 @@ hidden locator and otherwise performs one bounded `--dump-single-json` parse.
 Rate limiting, staging, hashing, and quota belong to `MediaRuntime`, so the
 provider itself has no download, storage, or throttle API.
 
-## Data model (server schema v25)
+## Data model (server schema v26)
 
 `media_tracks` keeps identity and basic metadata. `media_assets` has one row per
 `(track_id, kind)` with states `queued | downloading | ready | failed`; the
@@ -101,16 +101,16 @@ integers; inserts and deletes renumber in the same Service transaction.
   `503 Retry-After`.
 - Cover: `/api/media/tracks/:id/cover?token=...` uses the normal session token
   and waits for the cover job on first access. The cover job consumes
-  `streamCover` into the staged ObjectStore file.
+  `streamCover` into a staged BlobStore slot.
 
 A background materialization starts when a track is queued or played, so
 listening normally populates the shared cache. Every attempt publishes under a
-fresh generation key (`track/kind/<uuid>`), so eviction of a deleted asset row
-can never reclaim a newer attempt's file. Audio materialization and all
+fresh allocated `blob_id`, so eviction of a deleted asset row can never reclaim
+a newer attempt's file. Audio materialization and all
 live relays for the same track share one yt-dlp invocation through
 `AudioStreamSession`: the session owns the provider stream, fans chunks out to
 each relay subscriber with a bounded queue, and feeds the materialization
-subscription that writes the staged ObjectStore file. Relay consumers that fall
+subscription that writes the staged BlobStore slot. Relay consumers that fall
 more than 64 MiB behind are dropped so a stalled client cannot block the shared
 stream; materialization applies backpressure instead. `ConcurrencyLimiter`
 bounds distinct provider-backed audio streams to a small fixed number, so many
@@ -122,19 +122,17 @@ different tracks cannot spawn unbounded yt-dlp processes at once.
   playback grant both update it. Naming avoids pretending download activity was
   a play.
 - Ready bytes are accounted in the shared `storage_quota_items` ledger under
-  the dynamically configured `media` eviction group. One item per track carries
-  `bytes`, `touch_time_ms`, and `touch_freq`; touching computes
-  `touch_freq = (old_freq + (touch_time - old_touch_time)) / 2`.
-- Every maintenance minute the QuotaService sweeps aged items first
-  (`touch_time` older than `media_eviction_days`, default 7), then evicts by a
-  normalized score while `SUM(ready bytes) > media_storage_limit_bytes`
-  (default 4 GiB), targeting 80% of the limit. The score weights size,
-  recency, and touch frequency; covers and tracks are no longer two hardcoded
-  sweeps.
+  the `media` pool. One cache item per track carries `weight`, `heat`, and
+  `touched_at_ms`. A touch decays existing heat by half-life, then adds
+  intensity: `heat = heat_now + intensity`.
+- Every maintenance minute the QuotaService emits cache candidates ranked by
+  `weight / (heat_now + ε)` while cache weight exceeds `media_storage_limit_bytes`
+  (default 4 GiB), targeting 80% of the limit. `max_weight = 0` disables size
+  eviction. Durable items never enter the candidate set.
 - `ref_count = 0` remains a per-track compare-and-delete requirement inside the
   owner evictor, and a stream lease must be acquired before reading a ready
   asset row. Eviction deletes the DB rows only while no lease exists, commits,
-  then trashes the shared ObjectStore files. A later stream request sees no
+  then `drop`s the BlobStore files. A later stream request sees no
   ready row and uses the relay, so no request can open a file an eviction is
   reclaiming.
 - Queue membership protects the track through `ref_count`. Direct grant

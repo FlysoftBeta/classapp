@@ -1,56 +1,39 @@
 import path from "node:path";
 import type { Database } from "better-sqlite3";
-import { ObjectStore } from "./objectStore";
-import type { ObjectRef } from "./paths";
-import {
-  QuotaService,
-  type QuotaEvictor,
-  type QuotaGroupPolicy,
-} from "./quotaService";
-import {
-  liveAiWorkspaceObjectKeys,
-  liveArticleBundleObjectKeys,
-  liveMediaObjectKeys,
-  liveTeachDocumentObjectKeys,
-} from "@/server/data/storageReferences";
+import { BlobStore } from "./blobStore";
+import { QuotaService, type QuotaEvictor, type QuotaPoolPolicy } from "./quotaService";
 
 /**
- * Process-bound storage mechanisms. The ObjectStore is shared by request
- * Services; quota groups and their evictors are passed in dynamically by the
- * owning mechanism, so quota never reaches into unrelated tables.
+ * Process-bound storage mechanisms. BlobStore is shared by request Services;
+ * quota pools and their evictors are passed in by the owning mechanism.
  */
 export class StorageRuntime {
-  readonly objects: ObjectStore;
+  readonly blobs: BlobStore;
   readonly quota: QuotaService;
   private readonly evictors = new Map<string, QuotaEvictor>();
-  private readonly liveKeys: ReadonlyMap<
-    ObjectRef["namespace"],
-    () => string[]
-  >;
 
   constructor(db: Database, dataRoot: string) {
-    this.objects = new ObjectStore(path.join(dataRoot, "storage"));
+    this.blobs = new BlobStore(path.join(dataRoot, "storage"));
     this.quota = new QuotaService(db);
-    this.liveKeys = new Map<ObjectRef["namespace"], () => string[]>([
-      ["media", () => liveMediaObjectKeys(db)],
-      ["teach-documents", () => liveTeachDocumentObjectKeys(db)],
-      ["article-bundles", () => liveArticleBundleObjectKeys(db)],
-      ["ai-workspaces", () => liveAiWorkspaceObjectKeys(db)],
-    ]);
+  }
+
+  /** @deprecated Use `blobs`. */
+  get objects(): BlobStore {
+    return this.blobs;
   }
 
   registerEvictor(
-    group: string,
-    policy: QuotaGroupPolicy,
+    pool: string,
+    policy: QuotaPoolPolicy,
     evictor: QuotaEvictor,
   ): void {
-    if (policy.name !== group) {
+    if (policy.name !== pool) {
       throw new Error(
-        `Quota policy ${policy.name} does not match group ${group}`,
+        `Quota policy ${policy.name} does not match pool ${pool}`,
       );
     }
     this.quota.configure(policy);
-    this.evictors.set(group, evictor);
+    this.evictors.set(pool, evictor);
   }
 
   async start(): Promise<void> {
@@ -58,10 +41,7 @@ export class StorageRuntime {
   }
 
   async reconcileStorage(): Promise<void> {
-    await this.objects.reconcile();
-    for (const [namespace, liveKeys] of this.liveKeys) {
-      await this.objects.reconcileOrphans(namespace, liveKeys());
-    }
+    await this.blobs.gc();
     await this.quota.reconcile(this.evictors);
   }
 }

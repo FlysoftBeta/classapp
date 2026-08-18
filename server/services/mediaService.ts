@@ -93,7 +93,7 @@ export class MediaService {
     const track = getTrack(this.db, trackId);
     if (!track) throw new PublicError("曲目不存在");
     touchTrack(this.db, trackId);
-    new QuotaService(this.db).touch("media", trackId);
+    new QuotaService(this.db).touch("media", trackId, 1);
     void this.runtime.ensureMaterialized(track, "audio").catch(() => undefined);
     void this.runtime.ensureMaterialized(track, "cover").catch(() => undefined);
     const grant = issueStreamGrant(this.db, trackId, userId);

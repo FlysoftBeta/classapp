@@ -32,7 +32,7 @@ import {
   type AiModelPlaceholder,
   type AiModelsConfig,
 } from "@/server/infra/aiModels";
-import type { ObjectStore } from "@/server/storage/objectStore";
+import type { BlobStore } from "@/server/storage/blobStore";
 import { AiWorkspace } from "@/server/services/ai/aiWorkspace";
 import { BUILD_ID } from "@/server/infra/env";
 import { publishUser } from "@/server/services/eventBus";
@@ -278,7 +278,7 @@ export class AiService {
     private readonly db: Database,
     private readonly executions: AiExecutionRuntime,
     private readonly billing: AiBillingService,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
   ) {}
 
   status() {
@@ -305,7 +305,7 @@ export class AiService {
   async purgeUser(userId: string): Promise<void> {
     this.executions.abortUser(userId);
     purgeAiConversationData(this.db, userId);
-    await new AiWorkspace(this.db, userId, this.objects).remove();
+    await new AiWorkspace(this.db, userId, this.blobs).remove();
   }
 
   async search(user: User, query: string) {
@@ -462,7 +462,7 @@ export class AiService {
       }
       return { name: image.name, mime: image.mime, bytes };
     });
-    const workspace = new AiWorkspace(this.db, user.id, this.objects);
+    const workspace = new AiWorkspace(this.db, user.id, this.blobs);
     const attachments = decodedImages.length
       ? await workspace.storeAttachments(decodedImages)
       : [];
@@ -759,7 +759,7 @@ export class AiService {
         compacted = { summary: null, recent, charged: 0 };
       }
       charged += compacted.charged;
-      const workspace = new AiWorkspace(this.db, input.user.id, this.objects);
+      const workspace = new AiWorkspace(this.db, input.user.id, this.blobs);
       const workspaceCatalog = await workspace.inspect();
       let instructions = AGENT_SYSTEM_PROMPT;
       if (compacted.summary) {
@@ -934,7 +934,7 @@ export function createAiService(
   db: Database,
   executions: AiExecutionRuntime,
   billing: AiBillingService,
-  objects: ObjectStore,
+  blobs: BlobStore,
 ): AiService {
-  return new AiService(db, executions, billing, objects);
+  return new AiService(db, executions, billing, blobs);
 }

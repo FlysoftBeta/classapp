@@ -7,7 +7,7 @@ import {
   TEACH_DOCUMENTS_QUOTA_GROUP,
   type TeachDocumentsRuntime,
 } from "@/server/runtime/teachDocumentsRuntime";
-import { ObjectStore, type BlobRead } from "@/server/storage/objectStore";
+import { BlobStore, type BlobRead } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import { PublicError } from "@/server/services/incidentService";
 
@@ -24,7 +24,7 @@ export interface TeachDocumentDownload {
 export class TeachDocumentsService {
   constructor(
     private readonly db: BetterSqlite3.Database,
-    private readonly objects: ObjectStore,
+    private readonly blobs: BlobStore,
     private readonly runtime: TeachDocumentsRuntime,
   ) {}
 
@@ -39,23 +39,21 @@ export class TeachDocumentsService {
   async download(id: string): Promise<TeachDocumentDownload> {
     const document = findTeachDocument(this.db, id);
     if (!document) throw new PublicError("文档不存在");
-    new QuotaService(this.db).touch(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+    new QuotaService(this.db).touch(TEACH_DOCUMENTS_QUOTA_GROUP, document.id, 1);
     return {
       document: {
         id: document.id,
         name: document.name,
         file_size: document.file_size,
       },
-      stream: await this.objects.open(
-        this.objects.ref(TEACH_DOCUMENTS_QUOTA_GROUP, document.object_key),
-      ),
+      stream: await this.blobs.open(document.blob_id),
     };
   }
 
   async cleanupAll(): Promise<number> {
     let removed = 0;
     for (const document of listTeachDocuments(this.db)) {
-      if (await this.runtime.evict(document.object_key)) removed += 1;
+      if (await this.runtime.evict(document.id)) removed += 1;
     }
     return removed;
   }
@@ -63,8 +61,8 @@ export class TeachDocumentsService {
 
 export function createTeachDocumentsService(
   db: BetterSqlite3.Database,
-  objects: ObjectStore,
+  blobs: BlobStore,
   runtime: TeachDocumentsRuntime,
 ): TeachDocumentsService {
-  return new TeachDocumentsService(db, objects, runtime);
+  return new TeachDocumentsService(db, blobs, runtime);
 }

@@ -1,161 +1,149 @@
 import type { Database } from "better-sqlite3";
 import {
-  deleteOrphanQuotaItems,
-  deleteQuotaGroup,
   deleteQuotaItem,
+  deleteQuotaPool,
   findQuotaItem,
-  listEvictionCandidates,
-  quotaGroupBytes,
-  quotaGroupPolicy,
+  listCacheEvictionCandidates,
+  quotaPoolPolicy,
+  quotaPoolWeight,
   touchQuotaItem,
-  upsertQuotaGroup,
   upsertQuotaItem,
-  type EvictionWeights,
-  type QuotaGroupPolicy,
+  upsertQuotaPool,
+  type QuotaClass,
   type QuotaItem,
+  type QuotaPoolPolicy,
 } from "@/server/data/quota";
 
-export type { QuotaGroupPolicy, QuotaItem };
+export type { QuotaClass, QuotaItem, QuotaPoolPolicy };
 
 export interface QuotaEvictionResult {
-  group: string;
+  pool: string;
   evicted: number;
-  reclaimedBytes: number;
+  reclaimedWeight: number;
 }
 
 export type QuotaEvictor = (item: QuotaItem) => Promise<boolean>;
 
-export const DEFAULT_EVICTION_WEIGHTS: EvictionWeights = {
-  bytes: 0.5,
-  recency: 0.3,
-  frequency: 0.2,
-};
-
 const CANDIDATE_BATCH = 50;
-const MAX_SIZE_SWEEPS_PER_GROUP = 20;
+const MAX_SIZE_SWEEPS_PER_POOL = 20;
 
 /**
- * DB-backed quota accounting and eviction. It is intentionally stateless over
- * one database handle: request owners construct it on demand, and process
- * maintenance constructs its own instance. No Scope or Actor is involved.
- *
- * Candidate min/max normalization and ranking happen in SQL in
- * `server/data/quota`; this loop only receives bounded ranked batches and
- * never materializes a whole group in Node.js.
+ * DB-backed quota accounting. It never opens or deletes files. Request owners
+ * construct it on demand; process maintenance constructs its own instance.
  */
 export class QuotaService {
   constructor(private readonly db: Database) {}
 
-  configure(policy: QuotaGroupPolicy): void {
-    upsertQuotaGroup(this.db, policy);
+  configure(policy: QuotaPoolPolicy): void {
+    upsertQuotaPool(this.db, policy);
   }
 
-  removeGroup(group: string): void {
-    deleteQuotaGroup(this.db, group);
+  removePool(pool: string): void {
+    deleteQuotaPool(this.db, pool);
   }
 
-  upsert(group: string, itemKey: string, bytes: number, now = Date.now()): void {
-    if (bytes < 0) throw new Error("Quota item bytes must be non-negative");
-    upsertQuotaItem(this.db, { groupName: group, itemKey, bytes, now });
+  account(
+    pool: string,
+    itemId: string,
+    input: {
+      weight: number;
+      class: QuotaClass;
+      now?: number;
+      pinUntilMs?: number;
+      heat?: number;
+    },
+  ): void {
+    upsertQuotaItem(this.db, {
+      pool,
+      itemId,
+      class: input.class,
+      weight: input.weight,
+      now: input.now ?? Date.now(),
+      pinUntilMs: input.pinUntilMs,
+      heat: input.heat,
+    });
   }
 
-  touch(group: string, itemKey: string, now = Date.now()): void {
-    touchQuotaItem(this.db, group, itemKey, now);
+  touch(
+    pool: string,
+    itemId: string,
+    intensity = 1,
+    now = Date.now(),
+  ): void {
+    const policy = quotaPoolPolicy(this.db, pool);
+    if (!policy) return;
+    touchQuotaItem(this.db, pool, itemId, intensity, now, policy.halfLifeMs);
   }
 
-  remove(group: string, itemKey: string): void {
-    deleteQuotaItem(this.db, group, itemKey);
+  release(pool: string, itemId: string): void {
+    deleteQuotaItem(this.db, pool, itemId);
   }
 
-  usage(group: string): number {
-    return quotaGroupBytes(this.db, group);
+  cacheUsage(pool: string): number {
+    return quotaPoolWeight(this.db, pool, "cache");
   }
 
   /**
-   * Age sweep first, then high-watermark sweep. Only registered evictor groups
-   * are visited, because groups are dynamic and unregistered groups are pure
-   * accounting. Orphan accounting rows are swept before policy work.
+   * Size sweep of cache items for registered evictor pools. Durable rows are
+   * never candidates. The evictor must compare-and-delete domain state and
+   * call release itself; this loop only counts successes.
    */
   async reconcile(
     evictors: ReadonlyMap<string, QuotaEvictor>,
-    input: {
-      now?: number;
-      limitPerGroup?: number;
-      weights?: EvictionWeights;
-    } = {},
+    input: { now?: number; limitPerPool?: number } = {},
   ): Promise<QuotaEvictionResult[]> {
     const now = input.now ?? Date.now();
-    const limitPerGroup = input.limitPerGroup ?? 200;
-    const weights = input.weights ?? DEFAULT_EVICTION_WEIGHTS;
-    deleteOrphanQuotaItems(this.db);
+    const limitPerPool = input.limitPerPool ?? 200;
     const results: QuotaEvictionResult[] = [];
 
-    for (const [groupName, evictor] of evictors) {
-      const group = quotaGroupPolicy(this.db, groupName);
-      if (!group) continue;
+    for (const [poolName, evictor] of evictors) {
+      const pool = quotaPoolPolicy(this.db, poolName);
+      if (!pool || pool.maxWeight <= 0) continue;
       let evicted = 0;
       let reclaimed = 0;
-      const tryEvict = async (item: QuotaItem): Promise<boolean> => {
-        if (evicted >= limitPerGroup) return false;
-        const current = findQuotaItem(this.db, groupName, item.itemKey);
-        if (
-          !current ||
-          current.bytes !== item.bytes ||
-          current.touchTimeMs !== item.touchTimeMs
-        ) {
-          return false;
-        }
-        if (!(await evictor(current))) return false;
-        // A successful owner eviction invalidates the accounting row even if
-        // the owner forgot to unregister it; object bytes are gone either way.
-        deleteQuotaItem(this.db, groupName, item.itemKey);
-        evicted += 1;
-        reclaimed += current.bytes;
-        return true;
-      };
+      const target = Math.floor(pool.maxWeight * pool.targetRatio);
 
-      if (group.minAgeMs > 0) {
-        const candidates = listEvictionCandidates(
+      for (
+        let sweep = 0;
+        sweep < MAX_SIZE_SWEEPS_PER_POOL &&
+        this.cacheUsage(poolName) > pool.maxWeight &&
+        evicted < limitPerPool;
+        sweep += 1
+      ) {
+        const candidates = listCacheEvictionCandidates(
           this.db,
-          groupName,
-          weights,
-          {
-            olderThanMs: now - group.minAgeMs,
-            limit: limitPerGroup,
-          },
+          poolName,
+          pool.halfLifeMs,
+          { now, limit: CANDIDATE_BATCH },
         );
-        for (const candidate of candidates) await tryEvict(candidate);
-      }
-
-      if (group.maxBytes > 0) {
-        const target = Math.floor(group.maxBytes * group.targetRatio);
-        for (
-          let sweep = 0;
-          sweep < MAX_SIZE_SWEEPS_PER_GROUP &&
-          this.usage(groupName) > group.maxBytes &&
-          evicted < limitPerGroup;
-          sweep += 1
-        ) {
-          const candidates = listEvictionCandidates(
-            this.db,
-            groupName,
-            weights,
-            { limit: CANDIDATE_BATCH },
-          );
-          let progress = false;
-          for (const candidate of candidates) {
-            if (this.usage(groupName) <= target) break;
-            if (await tryEvict(candidate)) progress = true;
+        let progress = false;
+        for (const candidate of candidates) {
+          if (this.cacheUsage(poolName) <= target) break;
+          if (evicted >= limitPerPool) break;
+          const current = findQuotaItem(this.db, poolName, candidate.itemId);
+          if (
+            !current ||
+            current.class !== "cache" ||
+            current.weight !== candidate.weight ||
+            current.touchedAtMs !== candidate.touchedAtMs ||
+            current.heat !== candidate.heat ||
+            current.pinUntilMs > now
+          ) {
+            continue;
           }
-          if (!progress) break;
+          if (!(await evictor(current))) continue;
+          evicted += 1;
+          reclaimed += current.weight;
+          progress = true;
         }
+        if (!progress) break;
       }
 
       if (evicted > 0) {
         results.push({
-          group: groupName,
+          pool: poolName,
           evicted,
-          reclaimedBytes: reclaimed,
+          reclaimedWeight: reclaimed,
         });
       }
     }

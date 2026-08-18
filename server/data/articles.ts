@@ -155,16 +155,17 @@ export function rowToArticle(row: Record<string, unknown>): ArticleWithMeta {
 export function purgeArticlesForUser(
   db: Database,
   userId: string,
-): Array<{ sourcePath: string; archivePath: string }> {
+): Array<{ articleId: string; sourcePath: string; archivePath: string }> {
   const artifacts = (
     db
       .prepare(
-        `SELECT provider_json FROM articles WHERE user_id = ? AND json_extract(provider_json, '$.type') = 'bundle'`,
+        `SELECT id, provider_json FROM articles WHERE user_id = ? AND json_extract(provider_json, '$.type') = 'bundle'`,
       )
-      .all(userId) as Array<{ provider_json: string }>
+      .all(userId) as Array<{ id: string; provider_json: string }>
   ).map((row) => {
     const provider = parseProvider(row.provider_json) as BundleProvider;
     return {
+      articleId: row.id,
       sourcePath: provider.source_file,
       archivePath: provider.archive_file,
     };

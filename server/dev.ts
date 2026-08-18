@@ -30,17 +30,20 @@ async function main(): Promise<void> {
     { WebSocketProtocol },
     { Runtime },
     { startMaintenance },
+    { reconcileStaleAiWorkspaces },
   ] = await Promise.all([
     import("@/server/http/handler"),
     import("@/server/infra/db"),
     import("@/server/protocol/WebSocketProtocol"),
     import("@/server/runtime/runtime"),
     import("@/server/services/maintenance"),
+    import("@/server/services/ai/aiWorkspace"),
   ]);
   const db = getDb();
   const runtime = new Runtime(db, config.buildId);
   await runtime.storage.start();
   await runtime.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
   await runtime.media.start();
   runtime.teachDocuments.start();
   const backend = createServer(createHttpHandler(config, runtime));

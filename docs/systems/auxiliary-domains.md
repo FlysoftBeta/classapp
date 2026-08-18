@@ -76,13 +76,13 @@ Security and lifecycle rules:
 - the PowerShell program is fixed code; browser input never becomes command text;
 - validate parsed child output and bound buffers/line handling;
 - monitor child restart has cooldown and stop ownership;
-- capture streams into a shared ObjectStore object (`teach-documents` namespace)
+- capture streams into a staged BlobStore slot
   before inserting metadata, with compensation if DB insertion fails;
-- the dynamically configured `teach-documents` quota group ages items out after
-  seven days through the shared QuotaService evictor; downloads touch the item;
+- the `teach-documents` quota pool ages cache items by heat (seven-day
+  half-life) through the shared QuotaService evictor; downloads touch the item;
 - cleanup records per-file failures and deletes metadata only for objects
   actually removed;
-- download resolves a stored object key through the ObjectStore, not an
+- download resolves a stored `blob_id` through BlobStore, not an
   arbitrary path;
 - audit downloads/destructive cleanup according to operations policy;
 - Incident context should avoid leaking full sensitive host paths when not

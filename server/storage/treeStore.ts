@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { unzipSync, zipSync } from "fflate";
 import { z } from "zod";
-import type { ObjectStore } from "./objectStore";
-import { normalizeTreePath, type ObjectRef } from "./paths";
+import { writeFile } from "node:fs/promises";
+import type { BlobStore, StagingSlot } from "./blobStore";
+import { normalizeTreePath } from "./paths";
 
 const MANIFEST_NAME = "manifest.json";
 const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
@@ -288,64 +289,62 @@ export class EditableTree {
  * raw files with no metadata at all.
  */
 export class TreeStore {
-  constructor(private readonly store: ObjectStore) {}
+  constructor(private readonly store: BlobStore) {}
 
-  async inspect(ref: ObjectRef, limits: TreeLimits): Promise<TreeSnapshot> {
-    return this.store.withLock(ref, () => this.load(ref, limits));
+  async inspect(blobId: string | null, limits: TreeLimits): Promise<TreeSnapshot> {
+    return this.load(blobId, limits);
   }
 
   async read(
-    ref: ObjectRef,
+    blobId: string | null,
     limits: TreeLimits,
     path: string,
   ): Promise<{ entry: TreeFile; bytes: Uint8Array } | null> {
-    return this.store.withLock(ref, async () => {
-      const tree = await this.load(ref, limits);
-      return tree.read(path);
-    });
+    const tree = await this.load(blobId, limits);
+    return tree.read(path);
   }
 
   /**
-   * Load, mutate, validate, and atomically republish in one per-object lock.
-   * Mutators never see another request's intermediate state. The archive is
-   * fully re-parsed and checksummed before any bytes are published.
+   * Load, mutate, validate, and publish into a caller-owned staging slot.
+   * The domain must already have recorded `slot.id` as in-flight intent.
    */
-  async mutate(
-    ref: ObjectRef,
+  async mutateInto(
+    blobId: string | null,
+    slot: StagingSlot,
     limits: TreeLimits,
     mutation: TreeMutation,
   ): Promise<TreeSnapshot> {
-    return this.store.withLock(ref, async () => {
-      const loaded = await this.load(ref, limits);
-      const editable = loaded.toEditable();
-      await mutation(editable);
-      editable.validate(limits);
-      const revision = editable.revision + 1;
-      const archive = editable.toArchiveBytes(revision);
-      const parsed = loadFromArchive(archive);
-      if (parsed.revision !== revision)
-        throw new Error("Tree revision mismatch");
-      await this.store.putBlobLocked(ref, archive, {
-        expectedBytes: archive.byteLength,
-      });
-      const publishedBytes = new Uint8Array(
-        await this.store.read(ref, limits.maxArchiveBytes),
-      );
-      const published = loadFromArchive(publishedBytes);
-      if (published.revision !== revision) {
-        throw new Error("Published tree revision mismatch");
-      }
-      return published;
-    });
+    const loaded = await this.load(blobId, limits);
+    const editable = loaded.toEditable();
+    await mutation(editable);
+    editable.validate(limits);
+    const revision = editable.revision + 1;
+    const archive = editable.toArchiveBytes(revision);
+    const parsed = loadFromArchive(archive);
+    if (parsed.revision !== revision) throw new Error("Tree revision mismatch");
+    await writeFile(slot.path, archive);
+    await slot.commit({ expectedBytes: archive.byteLength });
+    const publishedBytes = new Uint8Array(
+      await this.store.read(slot.id, limits.maxArchiveBytes),
+    );
+    const published = loadFromArchive(publishedBytes);
+    if (published.revision !== revision) {
+      throw new Error("Published tree revision mismatch");
+    }
+    return published;
   }
 
-  async remove(ref: ObjectRef): Promise<void> {
-    return this.store.withLock(ref, () => this.store.trashLocked(ref));
+  async remove(blobId: string): Promise<void> {
+    await this.store.drop(blobId);
   }
 
-  private async load(ref: ObjectRef, limits: TreeLimits): Promise<LoadedTree> {
+  private async load(
+    blobId: string | null,
+    limits: TreeLimits,
+  ): Promise<LoadedTree> {
+    if (!blobId) return new LoadedTree(0, new Map(), {});
     try {
-      const bytes = await this.store.read(ref, limits.maxArchiveBytes);
+      const bytes = await this.store.read(blobId, limits.maxArchiveBytes);
       const tree = loadFromArchive(new Uint8Array(bytes));
       tree.toEditable().validate(limits);
       return tree;
