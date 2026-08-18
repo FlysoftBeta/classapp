@@ -120,8 +120,9 @@ change, state it as a known issue or handoff risk.
 - Prefer direct prose and domain terms over generic slogans such as “best
   practice,” “clean,” “scalable,” or “robust.” Name the actual constraint or
   failure.
-- Preserve established terms and capitalization: Actor, Runtime, Scope, Facts,
-  Facade, Service, Data, Interact, Shell, Launcher, Incident, UnitOfWork.
+- Preserve established terms and capitalization: Actor, Coordinator, Scope,
+  StickyRuntime, Executor, Facade, Service, Data, Interact, Shell, Launcher,
+  Incident, UnitOfWork.
 - Distinguish server truth, Actor projection, local user decision, and
   reconstructible materialization consistently.
 - Use examples to expose a boundary or counterexample, not to turn one current

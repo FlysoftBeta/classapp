@@ -70,7 +70,6 @@ Use these as prompts, not a substitute for the design ledger.
 - owned Data/files/external clients;
 - public operations and objective invariants;
 - collaborators injected through Composition/Runtime;
-- Facts and read-your-writes invalidation;
 - transaction/idempotency/event semantics;
 - startup reconciliation/cancellation/shutdown if process-bound;
 - purge/deactivation/audit/Incident responsibilities.

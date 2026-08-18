@@ -1,26 +1,13 @@
 import type { IncomingMessage, Server } from "node:http";
-import type { Database } from "better-sqlite3";
 import { WebSocketServer, type WebSocket } from "ws";
-import { getClientIdFromToken, getOrCreateClient } from "@/server/data/clients";
-import { findUserBySessionToken } from "@/server/data/auth";
-import { getUserBanStatus } from "@/server/data/users";
-import {
-  listEventDmPartnerIds,
-  listEventGroupIds,
-} from "@/server/data/eventSubscriptions";
+import { getOrCreateClient } from "@/server/data/clients";
 import {
   clientChannel,
-  dmPostChannel,
-  groupArticleChannel,
-  groupPostChannel,
   subscribe,
   systemChannel,
-  userChannel,
-  userConvChannel,
   type BusEvent,
 } from "@/server/services/eventBus";
-import { withScope } from "@/server/runtime/scope";
-import type { Runtime } from "@/server/runtime/runtime";
+import type { Coordinator } from "@/server/runtime/coordinator";
 import {
   authenticateFrameSchema,
   actionNameSchema,
@@ -34,28 +21,17 @@ import {
   PublicError,
   createIncidentService,
 } from "@/server/services/incidentService";
-import { dispatchAction } from "./registry";
 import { ServerResultCodec } from "./errorCodec";
 import {
   identifyClientRequest,
   type ClientIdentity,
 } from "@/server/infra/clientIdentity";
-import type { User } from "@/shared/types/api";
 import { BUILD_ID } from "@/server/infra/env";
+import type { AuthenticateJobResult } from "@/server/runtime/executorIpc";
+import type { ActionResult } from "@/shared/protocol/result";
 
 function send(socket: WebSocket, frame: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
-}
-
-function userChannels(db: Database, userId: string): string[] {
-  const channels = [userChannel(userId), userConvChannel(userId)];
-  for (const groupId of listEventGroupIds(db, userId)) {
-    channels.push(groupPostChannel(groupId), groupArticleChannel(groupId));
-  }
-  for (const partnerId of listEventDmPartnerIds(db, userId)) {
-    channels.push(dmPostChannel(userId, partnerId));
-  }
-  return channels;
 }
 
 interface AuthenticatedBinding {
@@ -74,9 +50,9 @@ class ProtocolSession {
   constructor(
     private readonly socket: WebSocket,
     private readonly identity: ClientIdentity,
-    private readonly runtime: Runtime,
+    private readonly coordinator: Coordinator,
   ) {
-    this.anonymousClientId = getOrCreateClient(runtime.db, identity);
+    this.anonymousClientId = getOrCreateClient(coordinator.db, identity);
     this.unsubscribeBase = subscribe(
       [systemChannel(), clientChannel(this.anonymousClientId)],
       (event) => this.sendEvent(null, event),
@@ -84,69 +60,74 @@ class ProtocolSession {
   }
 
   async authenticate(claimedUserId: string, token: string): Promise<void> {
-    const result = await ServerResultCodec.capture(
-      async () => {
-        const normalized = token.trim();
-        const user = normalized
-          ? findUserBySessionToken(this.runtime.db, normalized)
-          : null;
-        if (!user) throw new PublicError("会话认证失败");
-        if (user.id !== claimedUserId) {
-          throw new ContractViolationError("认证用户与 token 不匹配");
-        }
-        if (getUserBanStatus(this.runtime.db, user.id).banned) {
-          throw new PublicError("当前用户已被封禁");
-        }
-        this.bind(user, normalized);
-        return undefined;
-      },
-      {
-        action: "remote.authenticate",
-        userId: claimedUserId,
-      },
-      this.runtime.db,
-    );
+    const job = await this.coordinator.execute({
+      kind: "authenticate",
+      claimedUserId,
+      token,
+      identity: this.identity,
+    });
+    if (job.outcome.ok) {
+      const bound = job.outcome.data as AuthenticateJobResult;
+      this.bind(bound.userId, token, bound.clientId, bound.channels);
+    }
     send(this.socket, {
       v: PROTOCOL_VERSION,
       kind: "authenticated",
       user: claimedUserId,
-      result: result.ok ? { ok: true } : { ok: false, error: result.error },
+      result: job.outcome.ok
+        ? { ok: true }
+        : { ok: false, error: job.outcome.error },
     });
   }
 
   async dispatch(frame: RequestFrame): Promise<void> {
     const binding = frame.user === null ? null : this.bindings.get(frame.user);
-    let dispatchedAction: string | null = null;
-    const succeeded = await this.respond(
-      frame.id,
-      frame.user,
-      async () => {
-        if (frame.user !== null && !binding) {
-          throw new PublicError("用户会话尚未完成认证");
-        }
-        const action = actionNameSchema.safeParse(frame.action);
-        if (!action.success) {
-          throw new ContractViolationError("未知 Action", action.error.issues);
-        }
-        dispatchedAction = action.data;
-        return withScope(
-          this.runtime.scope({
-            token: binding?.token ?? null,
-            userId: binding?.userId ?? null,
-            clientId: binding?.clientId ?? this.anonymousClientId,
-            ...this.identity,
-            requestId: frame.id,
-          }),
-          () => dispatchAction(action.data, frame.args),
-        );
+    const action = actionNameSchema.safeParse(frame.action);
+    if (frame.user !== null && !binding) {
+      await this.sendResult(
+        frame.id,
+        frame.user,
+        await this.captureLocal(
+          async () => {
+            throw new PublicError("用户会话尚未完成认证");
+          },
+          frame.action,
+          frame.id,
+          frame.user,
+        ),
+      );
+      return;
+    }
+    if (!action.success) {
+      await this.sendResult(
+        frame.id,
+        frame.user,
+        await this.captureLocal(
+          async () => {
+            throw new ContractViolationError("未知 Action", action.error.issues);
+          },
+          frame.action,
+          frame.id,
+          frame.user,
+        ),
+      );
+      return;
+    }
+    const job = await this.coordinator.execute({
+      kind: "action",
+      action: action.data,
+      args: frame.args,
+      requestId: frame.id,
+      identity: {
+        token: binding?.token ?? null,
+        userId: binding?.userId ?? null,
+        clientId: binding?.clientId ?? this.anonymousClientId,
+        ...this.identity,
+        requestId: frame.id,
       },
-      frame.action,
-    );
-    if (
-      succeeded &&
-      dispatchedAction === "logoutAction" &&
-      frame.user !== null
-    ) {
+    });
+    await this.sendResult(frame.id, frame.user, job.outcome);
+    if (job.outcome.ok && action.data === "logoutAction" && frame.user !== null) {
       this.unbind(frame.user);
     }
   }
@@ -167,7 +148,7 @@ class ProtocolSession {
   }
 
   recordProtocolViolation(error: unknown): string {
-    return createIncidentService(this.runtime.db, BUILD_ID).capture({
+    return createIncidentService(this.coordinator.db, BUILD_ID).capture({
       environment: "server",
       error,
       context: { transport: "websocket", phase: "frame" },
@@ -180,15 +161,18 @@ class ProtocolSession {
     this.bindings.clear();
   }
 
-  private bind(user: User, token: string): void {
-    this.bindings.get(user.id)?.unsubscribe();
-    const clientId = getClientIdFromToken(this.runtime.db, token) ?? null;
-    const unsubscribe = subscribe(
-      userChannels(this.runtime.db, user.id),
-      (event) => this.sendEvent(user.id, event),
+  private bind(
+    userId: string,
+    token: string,
+    clientId: string | null,
+    channels: string[],
+  ): void {
+    this.bindings.get(userId)?.unsubscribe();
+    const unsubscribe = subscribe(channels, (event) =>
+      this.sendEvent(userId, event),
     );
-    this.bindings.set(user.id, {
-      userId: user.id,
+    this.bindings.set(userId, {
+      userId,
       token,
       clientId,
       unsubscribe,
@@ -200,21 +184,24 @@ class ProtocolSession {
     this.bindings.delete(userId);
   }
 
-  private async respond(
+  private async captureLocal(
+    operation: () => Promise<unknown>,
+    action: string | undefined,
+    requestId: string,
+    userId: string | null,
+  ): Promise<ActionResult<unknown>> {
+    return ServerResultCodec.capture(
+      operation,
+      { action, requestId, userId },
+      this.coordinator.db,
+    );
+  }
+
+  private async sendResult(
     id: string,
     user: string | null,
-    operation: () => Promise<unknown>,
-    action?: string,
-  ): Promise<boolean> {
-    const result = await ServerResultCodec.capture(
-      operation,
-      {
-        action,
-        requestId: id,
-        userId: user,
-      },
-      this.runtime.db,
-    );
+    result: ActionResult<unknown>,
+  ): Promise<void> {
     send(this.socket, {
       v: PROTOCOL_VERSION,
       kind: "response",
@@ -222,6 +209,16 @@ class ProtocolSession {
       user,
       result,
     } satisfies ResponseFrame);
+  }
+
+  private async respond(
+    id: string,
+    user: string | null,
+    operation: () => Promise<unknown>,
+    action?: string,
+  ): Promise<boolean> {
+    const result = await this.captureLocal(operation, action, id, user);
+    await this.sendResult(id, user, result);
     return result.ok;
   }
 
@@ -241,7 +238,7 @@ export class WebSocketProtocol {
 
   constructor(
     private readonly buildId: string,
-    private readonly runtime: Runtime,
+    private readonly coordinator: Coordinator,
   ) {
     this.wss.on("connection", (socket, request) =>
       this.connected(socket, request),
@@ -268,7 +265,7 @@ export class WebSocketProtocol {
     const session = new ProtocolSession(
       socket,
       identifyClientRequest(request),
-      this.runtime,
+      this.coordinator,
     );
     send(socket, { v: PROTOCOL_VERSION, kind: "hello", buildId: this.buildId });
 

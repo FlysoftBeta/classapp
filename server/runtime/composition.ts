@@ -42,6 +42,7 @@ import {
 } from "@/server/services/conversationsService";
 import {
   createAiService,
+  aiControllersFromSticky,
   type AiService,
 } from "@/server/services/ai/aiService";
 import {
@@ -256,10 +257,7 @@ export class Composition {
             createPostService(this.scope.db),
           ),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(
-              this.scope.db,
-              this.scope.runtime.storage.blobs,
-            ),
+            createArticleService(this.scope.db, this.scope.blobs),
           ),
           this.scope.getOrInit(wordsService, () =>
             createWordsService(this.scope.db),
@@ -273,11 +271,12 @@ export class Composition {
           this.scope.getOrInit(aiService, () =>
             createAiService(
               this.scope.db,
-              this.scope.runtime.aiExecution,
+              aiControllersFromSticky(this.scope.sticky.ai),
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
-              this.scope.runtime.storage.blobs,
+              this.scope.blobs,
+              (input) => this.scope.queueCommand({ type: "ai.execute", input }),
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -314,13 +313,10 @@ export class Composition {
         new ArticleActorFacade(
           this.scope.actor(),
           this.scope.getOrInit(articleService, () =>
-            createArticleService(
-              this.scope.db,
-              this.scope.runtime.storage.blobs,
-            ),
+            createArticleService(this.scope.db, this.scope.blobs),
           ),
           this.scope.getOrInit(articleImportService, () =>
-            createArticleImportService(this.scope.runtime.articleImports),
+            createArticleImportService(this.scope.sticky.articleImports),
           ),
           this.scope.getOrInit(groupService, () =>
             createGroupService(this.scope.db),
@@ -354,11 +350,12 @@ export class Composition {
           this.scope.getOrInit(aiService, () =>
             createAiService(
               this.scope.db,
-              this.scope.runtime.aiExecution,
+              aiControllersFromSticky(this.scope.sticky.ai),
               this.scope.getOrInit(aiBillingService, () =>
                 createAiBillingService(this.scope.db),
               ),
-              this.scope.runtime.storage.blobs,
+              this.scope.blobs,
+              (input) => this.scope.queueCommand({ type: "ai.execute", input }),
             ),
           ),
           this.scope.getOrInit(aiBillingService, () =>
@@ -475,8 +472,8 @@ export class Composition {
           this.scope.getOrInit(teachDocumentsService, () =>
             createTeachDocumentsService(
               this.scope.db,
-              this.scope.runtime.storage.blobs,
-              this.scope.runtime.teachDocuments,
+              this.scope.blobs,
+              this.scope.sticky.teachDocuments,
             ),
           ),
           this.scope.getOrInit(auditService, () =>
@@ -545,7 +542,7 @@ export class Composition {
           this.scope.actor(),
           this.scope.getOrInit(
             mediaService,
-            () => new MediaService(this.scope.db, this.scope.runtime.media),
+            () => new MediaService(this.scope.db, this.scope.sticky.media),
           ),
           this.scope.getOrInit(
             mediaPlaylistService,

@@ -59,10 +59,10 @@ For a nontrivial change, capture these before code:
 | Question        | Required answer                                                |
 | --------------- | -------------------------------------------------------------- |
 | Domain meaning  | What user/community outcome exists independent of code?        |
-| Facts           | Objective, actor projection, or user decision?                 |
+| Isolation       | Snapshot, write-lock re-read, or local variable?               |
 | Identity/order  | Stable key, mutable labels, cursor/tie-breaker, revision?      |
 | Authority       | Which Facade paths are legitimate and why?                     |
-| Owner/lifetime  | Runtime, Scope/Service Facts, operation, local projection, UI? |
+| Owner/lifetime  | Coordinator/Sticky, Executor Scope, operation, local projection, UI? |
 | Transaction     | What must commit atomically? What external work is outside?    |
 | Publication     | Pointer/generation/event; what becomes visible when?           |
 | Failure windows | Crash, abort, disconnect, actor switch, concurrent writer?     |

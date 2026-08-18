@@ -1,9 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Runtime } from "@/server/runtime/runtime";
+import type { Database } from "better-sqlite3";
 import { UnitOfWork } from "@/server/runtime/unitOfWork";
 import { Actor } from "@/server/runtime/actor";
 import { AuthorityService } from "@/server/services/authorityService";
 import { Composition } from "@/server/runtime/composition";
+import type { BlobStore } from "@/server/storage/blobStore";
+import type { StickyCommand, StickyHost } from "@/server/runtime/sticky";
 
 export interface RequestIdentity {
   token: string | null;
@@ -28,20 +30,43 @@ const authorityEntry = scopeEntry<AuthorityService>("AuthorityService");
 const actorEntry = scopeEntry<Actor>("Actor");
 const compositionEntry = scopeEntry<Composition>("Composition");
 
-/** One request's lazily initialized Services and facts. */
+export interface ScopeResources {
+  db: Database;
+  blobs: BlobStore;
+  sticky: StickyHost;
+  commands: StickyCommand[];
+}
+
+/** One Action or short HTTP request. Lives on one Executor (or Coordinator HTTP) thread. */
 export class Scope {
   private readonly entries = new Map<symbol, unknown>();
   readonly unitOfWork: UnitOfWork;
 
   constructor(
-    readonly runtime: Runtime,
+    readonly resources: ScopeResources,
     readonly identity: RequestIdentity,
   ) {
-    this.unitOfWork = new UnitOfWork(runtime.db);
+    this.unitOfWork = new UnitOfWork(resources.db);
   }
 
   get db() {
-    return this.runtime.db;
+    return this.resources.db;
+  }
+
+  get blobs() {
+    return this.resources.blobs;
+  }
+
+  get sticky() {
+    return this.resources.sticky;
+  }
+
+  get commands(): StickyCommand[] {
+    return this.resources.commands;
+  }
+
+  queueCommand(command: StickyCommand): void {
+    this.resources.commands.push(command);
   }
 
   getOrInit<T>(entry: ScopeEntry<T>, initialize: () => T): T {

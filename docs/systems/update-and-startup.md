@@ -45,7 +45,8 @@ launcher.js
   → forks current/server.js
   → sends immutable RuntimeConfig over IPC
   → server.js installs config and imports server/main.mjs
-  → main creates DB, Runtime, update manager, maintenance, listeners
+  → main creates Coordinator, Executor pool (workers load sibling executor.mjs),
+    update manager, maintenance, listeners
   → graceful shutdown closes protocol/listeners/tasks
 ```
 

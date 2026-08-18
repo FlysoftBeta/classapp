@@ -116,7 +116,6 @@ export class UserActorFacade {
       );
       if (hasProfileUpdate) {
         const user = this.users.update(input.userId, profileBody);
-        if (input.userId === actor.id) this.actor.invalidateFacts();
         this.audit.record({
           actorId: actor.id,
           action: "user.update",
@@ -131,7 +130,6 @@ export class UserActorFacade {
         return user;
       }
       const user = this.users.get(input.userId);
-      if (input.userId === actor.id) this.actor.invalidateFacts();
       this.audit.record({
         actorId: actor.id,
         action: "user.update",
@@ -184,9 +182,7 @@ export class UserActorFacade {
 
   async updateSelf(input: UpdateSelfProfileParams) {
     const user = await this.actor.requireUser();
-    const updated = this.users.updateSelfProfile(user.id, input);
-    this.actor.invalidateFacts();
-    return updated;
+    return this.users.updateSelfProfile(user.id, input);
   }
 
   async resetSelfPin(input: ResetPinParams): Promise<void> {

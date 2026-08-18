@@ -1,6 +1,7 @@
 import { consumeStreamGrant } from "@/server/data/media";
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
+import { currentCoordinator } from "@/server/runtime/coordinator";
 import {
   RangeNotSatisfiableError,
   type BlobReadRange,
@@ -29,13 +30,14 @@ export async function GET(
     // Acquire before reading the asset row. Eviction commits a row deletion
     // only while no lease exists, and a later acquisition sees no ready row,
     // so no stream can ever open a file that eviction is about to reclaim.
-    const releaseLease = scope.runtime.media.acquireLease(id);
+    const media = currentCoordinator().media;
+    const releaseLease = media.acquireLease(id);
 
     try {
       const ready = findReadyAsset(scope.db, id, "audio");
       if (ready?.blob_id) {
         return await storedResponse(
-          scope.runtime.media.blobs,
+          media.blobs,
           ready.blob_id,
           req,
           releaseLease,
@@ -53,7 +55,7 @@ export async function GET(
           range.start > 0 ||
           range.end !== Number.POSITIVE_INFINITY);
       if (seekLike) {
-        const becameReady = await scope.runtime.media.waitUntilReady(
+        const becameReady = await media.waitUntilReady(
           track,
           "audio",
           120_000,
@@ -64,7 +66,7 @@ export async function GET(
         const nowReady = findReadyAsset(scope.db, id, "audio");
         if (!nowReady?.blob_id) throw new PublicError("曲目尚未就绪");
         return await storedResponse(
-          scope.runtime.media.blobs,
+          media.blobs,
           nowReady.blob_id,
           req,
           releaseLease,
@@ -73,7 +75,7 @@ export async function GET(
 
       // Open-ended start: relay yt-dlp stdout as a chunked WebM stream while a
       // background materialization job fills the shared cache.
-      const handle = await scope.runtime.media.streamTrack(track, req.signal);
+      const handle = await media.streamTrack(track, req.signal);
       const iterator = handle.read()[Symbol.asyncIterator]();
       let pulling = false;
       const body = new ReadableStream<Uint8Array>({

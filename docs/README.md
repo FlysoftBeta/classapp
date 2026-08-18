@@ -93,6 +93,7 @@ For any product change, start with:
 - [Cross-stack change checklists](./reference/change-checklists.md)
 - [Service and ownership catalog](./reference/ownership-catalog.md)
 - [Architecture decision governance](./reference/architecture-decisions.md)
+- [0001: Coordinator, Executor pool, and StickyRuntimes](./decisions/0001-coordinator-executor.md)
 
 ## Recurring design principles
 

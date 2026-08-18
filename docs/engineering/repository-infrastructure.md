@@ -79,7 +79,7 @@ The Vite configurations have separate ownership:
 | Configuration              | Output responsibility                      |
 | -------------------------- | ------------------------------------------ |
 | `vite.config.ts`           | browser application and development server |
-| `vite.server.config.ts`    | bundled Node application runtime           |
+| `vite.server.config.ts`    | Coordinator `main.mjs` and Executor `executor.mjs` |
 | `vite.bootstrap.config.ts` | stable bootstrap/server entry artifacts    |
 | `vite.launcher.config.ts`  | launcher runtime                           |
 

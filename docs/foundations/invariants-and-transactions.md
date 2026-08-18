@@ -60,7 +60,9 @@ legitimate path.
 Single-Service row atomicity may be implemented in Data or the owning Service.
 Cross-Service business atomicity belongs at the Facade through the Scope
 `UnitOfWork`. Network calls, rendering, archive creation, and AI provider calls
-must not execute while SQLite is locked.
+must not execute while SQLite is locked. Executor connections use WAL snapshots
+for short read transactions and `BEGIN IMMEDIATE` for writes; they do not hold
+a snapshot across `await`.
 
 The pattern for external work is:
 

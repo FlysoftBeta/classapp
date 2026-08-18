@@ -33,8 +33,4 @@ export class Actor {
   clientId(): string | null {
     return this.authenticatedClientId;
   }
-
-  invalidateFacts(): void {
-    this.authority.invalidate();
-  }
 }

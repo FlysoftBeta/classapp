@@ -3,10 +3,8 @@ import {
   findTeachDocument,
   listTeachDocuments,
 } from "@/server/data/teachDocuments";
-import {
-  TEACH_DOCUMENTS_QUOTA_GROUP,
-  type TeachDocumentsRuntime,
-} from "@/server/runtime/teachDocumentsRuntime";
+import { TEACH_DOCUMENTS_QUOTA_GROUP } from "@/server/runtime/teachDocumentsRuntime";
+import type { TeachSticky } from "@/server/runtime/sticky";
 import { BlobStore, type BlobRead } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
 import { PublicError } from "@/server/services/incidentService";
@@ -25,7 +23,7 @@ export class TeachDocumentsService {
   constructor(
     private readonly db: BetterSqlite3.Database,
     private readonly blobs: BlobStore,
-    private readonly runtime: TeachDocumentsRuntime,
+    private readonly teach: TeachSticky,
   ) {}
 
   list() {
@@ -33,7 +31,7 @@ export class TeachDocumentsService {
   }
 
   monitorAvailable() {
-    return this.runtime.monitorAvailable;
+    return this.teach.monitorAvailable;
   }
 
   async download(id: string): Promise<TeachDocumentDownload> {
@@ -53,7 +51,7 @@ export class TeachDocumentsService {
   async cleanupAll(): Promise<number> {
     let removed = 0;
     for (const document of listTeachDocuments(this.db)) {
-      if (await this.runtime.evict(document.id)) removed += 1;
+      if (await this.teach.evict(document.id)) removed += 1;
     }
     return removed;
   }
@@ -62,7 +60,7 @@ export class TeachDocumentsService {
 export function createTeachDocumentsService(
   db: BetterSqlite3.Database,
   blobs: BlobStore,
-  runtime: TeachDocumentsRuntime,
+  teach: TeachSticky,
 ): TeachDocumentsService {
-  return new TeachDocumentsService(db, blobs, runtime);
+  return new TeachDocumentsService(db, blobs, teach);
 }

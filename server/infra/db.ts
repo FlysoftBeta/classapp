@@ -10,16 +10,27 @@ import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
 import { ADMIN_ROLES } from "@/shared/authority";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
+const BUSY_TIMEOUT_MS = 5_000;
 
-let _db: Database | null = null;
+function configureConnection(db: Database): void {
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+}
 
-export function getDb(): Database {
-  if (_db) return _db;
-  _db = new BetterSQLite3(DB_PATH);
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
-  initializeDatabase(_db);
-  return _db;
+/** Coordinator thread: migrate, then keep this connection for protocol-adjacent SQL and Sticky short transactions. */
+export function openCoordinatorDatabase(): Database {
+  const db = new BetterSQLite3(DB_PATH);
+  configureConnection(db);
+  initializeDatabase(db);
+  return db;
+}
+
+/** Executor worker: the schema must already exist. Never share this handle across threads. */
+export function openExecutorDatabase(): Database {
+  const db = new BetterSQLite3(DB_PATH);
+  configureConnection(db);
+  return db;
 }
 
 const BASELINE_SCHEMA_VERSION = 17;

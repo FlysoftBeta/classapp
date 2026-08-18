@@ -7,11 +7,12 @@ Cross-stack system documents remain authoritative for behavior.
 
 | Owner                   | Lifetime and responsibility                                                                     |
 | ----------------------- | ----------------------------------------------------------------------------------------------- |
-| `Runtime`               | process composition: database, event bus, AI execution, article import                          |
-| `EventBusRuntime`       | process channel fan-out; events are repair hints, not durable log                               |
-| `AiExecutionRuntime`    | active run cancellation and restart reconciliation                                              |
-| `ArticleImportRuntime`  | external import pool, queue, long-running task ownership                                        |
-| `TeachDocumentsRuntime` | Office/WPS monitor child, capture, quota policy/ledger, owner eviction                          |
+| `Coordinator`            | process composition: protocol, EventBus, StickyRuntimes, Executor pool |
+| `EventBusRuntime`        | Coordinator channel fan-out; events are repair hints, not durable log  |
+| `AiExecutionRuntime`     | sticky AI run cancellation and restart reconciliation                  |
+| `ArticleImportRuntime`   | sticky external import pool, queue, long-running task ownership        |
+| `TeachDocumentsRuntime`  | sticky Office/WPS monitor child, capture, quota policy/ledger          |
+| `ExecutorPool`           | worker_threads; one SQLite connection per worker                       |
 | launcher                | version directories, child restart, pending metadata, rollback watchdog                         |
 | `UpdateManager`         | server-side validation/staging/cloud status; should be Runtime-owned rather than global locator |
 | `BundleManager`         | browser post-bootstrap manifest check, stage, activation coordination                           |
@@ -23,8 +24,7 @@ Cross-stack system documents remain authoritative for behavior.
 | ---------------------------- | ----------------------------------------------------------------- |
 | `Scope`                      | immutable request identity, get-or-init request graph, UnitOfWork |
 | `Composition`                | typed construction of Facades/Services                            |
-| `Actor` / `AuthorityService` | request principal, user/role/feature Facts                        |
-| `Facts`                      | Service-owned request-local lazy knowledge                        |
+| `Actor` / `AuthorityService` | request principal; SQL re-read, no Fact cache                     |
 | `UnitOfWork`                 | nested transaction and post-commit effect publication             |
 
 ## Identity, authority, and administration
@@ -44,7 +44,7 @@ Cross-stack system documents remain authoritative for behavior.
 
 | Service                | Mechanism and exclusions                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `GroupService`         | aggregation, discovery routes, membership, Group policy, membership Facts                        |
+| `GroupService`         | aggregation, discovery routes, membership, Group policy                                  |
 | `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications                                 |
 | `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles                       |
 | `ArticleService`       | objective text/bundle metadata, object publication, list/progress/bookmark mechanisms and events |

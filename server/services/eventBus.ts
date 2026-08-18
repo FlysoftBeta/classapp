@@ -1,13 +1,18 @@
 /**
- * Process-local event bus for WebSocket fan-out.
+ * Coordinator-owned event bus for WebSocket fan-out.
  *
- * The process Runtime owns the subscriber registry. Module-level helpers are
- * retained as the domain-event API used by request Services.
+ * Executor jobs record events into a request-local queue and return them.
+ * StickyRuntimes on the Coordinator publish directly after their own commits.
+ * Events are repair hints, not a durable log.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EventData, ServerEventName } from "@/shared/protocol/events";
 import { eventContracts } from "@/shared/protocol/events";
+import {
+  listEventDmPartnerIds,
+  listEventGroupIds,
+} from "@/server/data/eventSubscriptions";
 import type { Database } from "better-sqlite3";
 import {
   ContractViolationError,
@@ -26,6 +31,7 @@ export type BusEvent = {
 type Subscriber = (e: BusEvent) => void;
 
 const deferredEvents = new AsyncLocalStorage<BusEvent[]>();
+const jobEvents = new AsyncLocalStorage<BusEvent[]>();
 
 /**
  * While a UnitOfWork transaction is open, `publish` records events instead of
@@ -121,19 +127,34 @@ export class EventBusRuntime {
   }
 }
 
-let activeRuntime: EventBusRuntime | null = null;
+let coordinatorBus: EventBusRuntime | null = null;
 
-export function bindEventBusRuntime(runtime: EventBusRuntime): void {
-  activeRuntime = runtime;
+export function bindCoordinatorEventBus(runtime: EventBusRuntime | null): void {
+  coordinatorBus = runtime;
 }
 
-function runtime(): EventBusRuntime {
-  if (!activeRuntime) throw new Error("EventBus Runtime is unavailable");
-  return activeRuntime;
+function coordinator(): EventBusRuntime {
+  if (!coordinatorBus) throw new Error("EventBus Coordinator is unavailable");
+  return coordinatorBus;
+}
+
+/** Collect events for one Executor job. Nested UnitOfWork still defers until commit. */
+export function withJobEvents<T>(
+  operation: () => Promise<T>,
+  collect: (events: BusEvent[]) => void,
+): Promise<T> {
+  const queue: BusEvent[] = [];
+  return jobEvents.run(queue, async () => {
+    try {
+      return await operation();
+    } finally {
+      collect(queue);
+    }
+  });
 }
 
 export function subscribe(channels: string[], fn: Subscriber): () => void {
-  return runtime().subscribe(channels, fn);
+  return coordinator().subscribe(channels, fn);
 }
 
 export function publish<K extends ServerEventName>(
@@ -150,11 +171,24 @@ export function publish<K extends ServerEventName>(
   }
   const evt = { kind, channel, data: parsed.data } as BusEvent;
   if (deferEvent(evt)) return;
-  runtime().deliver(evt);
+  const jobQueue = jobEvents.getStore();
+  if (jobQueue) {
+    jobQueue.push(evt);
+    return;
+  }
+  coordinator().deliver(evt);
 }
 
 export function deliverDeferredEvents(events: BusEvent[]): void {
-  const active = runtime();
+  const active = coordinatorBus;
+  if (!active) {
+    const jobQueue = jobEvents.getStore();
+    if (jobQueue) {
+      jobQueue.push(...events);
+      return;
+    }
+    throw new Error("EventBus Coordinator is unavailable");
+  }
   for (const event of events) active.deliver(event);
 }
 
@@ -236,4 +270,15 @@ export function publishGroupArticle<K extends ServerEventName>(
 /** Ask the client to refresh its WebSocket channel subscriptions. */
 export function publishRemoteResubscribe(userId: string, reason: string): void {
   publishUser(userId, { kind: "remote.resubscribe", data: { reason } });
+}
+
+export function eventChannelsForUser(db: Database, userId: string): string[] {
+  const channels = [userChannel(userId), userConvChannel(userId)];
+  for (const groupId of listEventGroupIds(db, userId)) {
+    channels.push(groupPostChannel(groupId), groupArticleChannel(groupId));
+  }
+  for (const partnerId of listEventDmPartnerIds(db, userId)) {
+    channels.push(dmPostChannel(userId, partnerId));
+  }
+  return channels;
 }

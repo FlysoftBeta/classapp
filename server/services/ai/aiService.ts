@@ -24,7 +24,7 @@ import {
   updateAiRunRouting,
   updateAiRunStream,
 } from "@/server/data/ai";
-import type { AiExecutionRuntime } from "@/server/runtime/aiExecutionRuntime";
+import type { AiExecuteInput, AiSticky } from "@/server/runtime/sticky";
 import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import {
   aiModelsStatus,
@@ -273,12 +273,20 @@ async function messageItems(
   );
 }
 
+export type AiRunControllers = {
+  begin(runId: string): AbortController;
+  finish(runId: string): void;
+  abort(runId: string): void;
+  abortUser(userId: string): void;
+};
+
 export class AiService {
   constructor(
     private readonly db: Database,
-    private readonly executions: AiExecutionRuntime,
+    private readonly executions: AiRunControllers,
     private readonly billing: AiBillingService,
     private readonly blobs: BlobStore,
+    private readonly scheduleExecute: (input: AiExecuteInput) => void,
   ) {}
 
   status() {
@@ -511,7 +519,7 @@ export class AiService {
       kind: "ai.sidebar.updated",
       data: { refresh: true },
     });
-    void this.run({
+    this.scheduleExecute({
       user,
       runId,
       conversationId,
@@ -657,16 +665,7 @@ export class AiService {
     };
   }
 
-  private async run(input: {
-    user: User;
-    runId: string;
-    conversationId: string;
-    originalLeaf: string | null;
-    content: string;
-    forkFromMessageId: string | null;
-    hasImages: boolean;
-    config: AiModelsConfig;
-  }): Promise<void> {
+  async execute(input: AiExecuteInput): Promise<void> {
     const controller = this.executions.begin(input.runId);
     const usage: Usage = {
       inputTokens: 0,
@@ -932,9 +931,21 @@ export class AiService {
 
 export function createAiService(
   db: Database,
-  executions: AiExecutionRuntime,
+  executions: AiRunControllers,
   billing: AiBillingService,
   blobs: BlobStore,
+  scheduleExecute: (input: AiExecuteInput) => void,
 ): AiService {
-  return new AiService(db, executions, billing, blobs);
+  return new AiService(db, executions, billing, blobs, scheduleExecute);
+}
+
+export function aiControllersFromSticky(ai: AiSticky): AiRunControllers {
+  return {
+    abort: (runId) => ai.abort(runId),
+    abortUser: (userId) => ai.abortUser(userId),
+    begin: () => {
+      throw new Error("AI execution belongs on the Coordinator");
+    },
+    finish: () => undefined,
+  };
 }

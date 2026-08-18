@@ -92,7 +92,8 @@ Extract by ownership while preserving atomic transaction APIs.
 
 - Names state semantic role and units: `chargedCreditMicros`, `protectedUntil`,
   `knownRevision`, `credentialEpoch`.
-- `Runtime` suffix is for process-bound mechanisms.
+- `Coordinator` is the process composition root. `Runtime` suffix is for
+  StickyRuntimes (process-bound domain jobs), not for the composition root.
 - `Facade` is a public business surface, not a pass-through wrapper.
 - `Service` is a coherent mechanism, not a lifetime marker.
 - `Context` is immutable captured operation identity, not a bag of global tools.

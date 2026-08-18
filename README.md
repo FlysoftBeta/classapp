@@ -57,10 +57,9 @@ WebSocket / HTTP transport
 - Services own objective mechanisms, invariants, events, and side effects;
 - `server/data` exclusively owns SQL and row mapping.
 
-The process `Runtime` owns long-lived resources. Each request gets a cheap
-`Scope` through `AsyncLocalStorage`; it lazily reuses Actor, Facades, Services,
-and request-local `Facts`. A Service that writes a fact must update or
-invalidate its own request-local cache.
+The process `Coordinator` owns protocol sessions, StickyRuntimes, and the
+Executor pool. Each Action runs on a worker with its own SQLite connection.
+Isolation is a WAL snapshot, not a request-local `Facts` cache.
 
 Client dependencies flow from React through Interact:
 
@@ -104,7 +103,7 @@ server/          Node.js application runtime
   http/routes/   uploads, downloads, rendering, discovery
   infra/         DB, files, configuration, update plumbing
   protocol/      WebSocket connection/protocol implementation
-  runtime/       Runtime, Scope, Actor, Facts, UnitOfWork
+  runtime/       Coordinator, Executor pool, StickyRuntimes, Scope, UnitOfWork
   services/      domain mechanisms and side effects
   validation/    semantic validation
 shared/          wire schemas, shared types, pure cross-runtime logic

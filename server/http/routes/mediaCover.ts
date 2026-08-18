@@ -1,5 +1,6 @@
 import { findReadyAsset, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
+import { currentCoordinator } from "@/server/runtime/coordinator";
 import type { BlobStore } from "@/server/storage/blobStore";
 import { handleHttpError, PublicError } from "@/server/http/errorResponse";
 
@@ -16,31 +17,26 @@ export async function GET(
     if (!track) throw new PublicError("曲目不存在");
     // Same acquire-before-read rule as audio: eviction never reclaims a file
     // while a stream holds its lease, and Windows rename is therefore safe.
-    const releaseLease = scope.runtime.media.acquireLease(id);
+    const media = currentCoordinator().media;
+    const releaseLease = media.acquireLease(id);
     try {
       const ready = findReadyAsset(scope.db, id, "cover");
       if (ready?.blob_id) {
         return await storedCoverResponse(
-          scope.runtime.media.blobs,
+          media.blobs,
           ready.blob_id,
           ready.mime ?? "image/jpeg",
           ready.bytes,
           releaseLease,
         );
       }
-      void scope.runtime.media
-        .ensureMaterialized(track, "cover")
-        .catch(() => undefined);
-      const becameReady = await scope.runtime.media.waitUntilReady(
-        track,
-        "cover",
-        60_000,
-      );
+      void media.ensureMaterialized(track, "cover").catch(() => undefined);
+      const becameReady = await media.waitUntilReady(track, "cover", 60_000);
       if (!becameReady) throw new PublicError("封面尚未就绪");
       const nowReady = findReadyAsset(scope.db, id, "cover");
       if (!nowReady?.blob_id) throw new PublicError("封面尚未就绪");
       return await storedCoverResponse(
-        scope.runtime.media.blobs,
+        media.blobs,
         nowReady.blob_id,
         nowReady.mime ?? "image/jpeg",
         nowReady.bytes,

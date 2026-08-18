@@ -43,7 +43,7 @@ Use real SQLite/IndexedDB/filesystem behavior for:
 
 - migration and constraints;
 - UnitOfWork rollback/post-commit;
-- Facts read-your-writes;
+- WAL snapshot / write-lock re-read;
 - IDB schema owner race and transaction abort;
 - extent publication and orphan GC;
 - render archive range validation;

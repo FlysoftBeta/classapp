@@ -10,7 +10,12 @@ import type { IncidentEnvironment } from "@/server/data/incidents";
 interface SourceMapManifest {
   format: "classapp-source-maps-v1";
   buildId: string;
-  maps: Record<IncidentEnvironment, string>;
+  maps: Record<IncidentEnvironment, string | string[]>;
+}
+
+interface LoadedSourceMap {
+  generatedName: string;
+  map: TraceMap;
 }
 
 export interface IncidentStackSymbolicator {
@@ -38,21 +43,45 @@ function safeSourceName(source: string): string {
   return path.posix.basename(normalized);
 }
 
-function belongsToBundle(
+function mapFiles(value: string | string[] | undefined): string[] {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function generatedBundleName(mapFile: string): string {
+  const base = path.posix.basename(mapFile.replace(/\\/g, "/"));
+  if (base.startsWith("server-") && base.endsWith(".map")) {
+    return base.slice("server-".length, -".map".length);
+  }
+  if (base === "client-app.js.map") return "app.js";
+  return base.replace(/\.map$/, "");
+}
+
+function selectMap(
   environment: IncidentEnvironment,
+  maps: LoadedSourceMap[],
   generatedFile: string,
-): boolean {
+): TraceMap | undefined {
   if (environment === "client") {
-    return (
+    if (
       generatedFile.startsWith("blob:") ||
       /\/app\/app\.js(?:\?|$)/.test(generatedFile)
-    );
+    ) {
+      return maps[0]?.map;
+    }
+    return undefined;
   }
-  return /(?:^|[/\\])main\.mjs$/.test(generatedFile);
+  return maps.find((loaded) => {
+    const escaped = loaded.generatedName.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
+    return new RegExp(`(?:^|[/\\\\])${escaped}$`).test(generatedFile);
+  })?.map;
 }
 
 export class FileIncidentSourceMaps implements IncidentStackSymbolicator {
-  private readonly maps = new Map<IncidentEnvironment, TraceMap>();
+  private readonly maps = new Map<IncidentEnvironment, LoadedSourceMap[]>();
   private readonly buildId: string | null;
 
   constructor(appDir: string) {
@@ -65,16 +94,25 @@ export class FileIncidentSourceMaps implements IncidentStackSymbolicator {
         throw new Error("unsupported source map manifest");
       }
       this.buildId = manifest.buildId;
+      const root = path.resolve(directory);
       for (const environment of ["client", "server"] as const) {
-        const file = manifest.maps[environment];
-        const resolved = path.resolve(directory, file);
-        if (!resolved.startsWith(`${path.resolve(directory)}${path.sep}`)) {
-          throw new Error("source map path escapes its private directory");
+        const loaded: LoadedSourceMap[] = [];
+        for (const file of mapFiles(manifest.maps[environment])) {
+          const resolved = path.resolve(directory, file);
+          if (
+            resolved !== root &&
+            !resolved.startsWith(`${root}${path.sep}`)
+          ) {
+            throw new Error("source map path escapes its private directory");
+          }
+          loaded.push({
+            generatedName: generatedBundleName(file),
+            map: new TraceMap(
+              fs.readFileSync(resolved, "utf8") as SourceMapInput,
+            ),
+          });
         }
-        this.maps.set(
-          environment,
-          new TraceMap(fs.readFileSync(resolved, "utf8") as SourceMapInput),
-        );
+        this.maps.set(environment, loaded);
       }
     } catch (error) {
       this.buildId = null;
@@ -91,8 +129,8 @@ export class FileIncidentSourceMaps implements IncidentStackSymbolicator {
     stack: string,
   ): string {
     if (buildId !== this.buildId) return stack;
-    const map = this.maps.get(environment);
-    if (!map) return stack;
+    const maps = this.maps.get(environment);
+    if (!maps?.length) return stack;
     return stack
       .split("\n")
       .map((stackLine) => {
@@ -105,7 +143,8 @@ export class FileIncidentSourceMaps implements IncidentStackSymbolicator {
             lineText: string,
             columnText: string,
           ) => {
-            if (!belongsToBundle(environment, generatedFile)) return location;
+            const map = selectMap(environment, maps, generatedFile);
+            if (!map) return location;
             const original = originalPositionFor(map, {
               line: Number(lineText),
               column: Math.max(0, Number(columnText) - 1),

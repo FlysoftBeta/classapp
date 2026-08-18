@@ -10,15 +10,17 @@ Production host
   launcher.js
     └─ current/server.js
          └─ server/main.mjs
-              ├─ SQLite database and process Runtime
-              ├─ HTTP/HTTPS listeners on configured LAN ports
-              │    ├─ stable Shell and application artifacts
-              │    ├─ Service Worker
-              │    └─ raw streaming/multipart routes
-              └─ WebSocket /ws
-                   ├─ versioned frames and Action registry
-                   ├─ multiple authenticated actor bindings
-                   └─ domain events
+              Coordinator thread
+                ├─ Coordinator SQLite connection
+                ├─ HTTP/HTTPS listeners
+                │    ├─ stable Shell and application artifacts
+                │    ├─ Service Worker
+                │    └─ raw streaming/multipart routes (leases)
+                ├─ WebSocket /ws ProtocolSession (socket + bindings)
+                ├─ EventBus
+                ├─ StickyRuntimes (AI, media, import, teach, upload, storage)
+                └─ ExecutorPool (worker_threads → sibling executor.mjs)
+                     └─ per worker: SQLite connection + Action Scope
 
 Browser
   Service Worker navigation cache
@@ -29,6 +31,9 @@ Browser
               ├─ client/data IndexedDB mechanisms
               └─ one WebSocket transport
 ```
+
+The occupancy model is recorded in
+[0001: Coordinator, Executor pool, and StickyRuntimes](./decisions/0001-coordinator-executor.md).
 
 Development starts `server/dev.ts` and Vite separately. It deliberately bypasses
 the production Shell and IndexedDB bundle loader to preserve fast refresh. A
@@ -52,7 +57,7 @@ server/
   domain/facade public business entry points and actor-dependent path selection
   services/     coherent domain/operational mechanisms
   data/         SQL and database row mapping
-  runtime/      process/request lifetimes, Actor, Facts, UnitOfWork, composition
+  runtime/      Coordinator, Executor pool, StickyRuntimes, Scope, UnitOfWork
   storage/      object blobs, manifest trees, path containment, quota service
   infra/        database bootstrap, render process, config/update mechanisms
   validation/   semantic validation shared by server entry paths
@@ -70,20 +75,21 @@ The default business path is:
 
 ```text
 WebSocket frame
-  → frame schema
-  → Action name + argument schema
+  → ProtocolSession (binding / socket)
+  → Executor job
   → Action adapter
   → public Facade
   → one or more Services
-  → Data
-  → output schema
-  → result/incident envelope
+  → Data on the worker SQLite connection
+  → outcome + deferred events + sticky commands
+  → Coordinator delivers events and runs sticky commands
 ```
 
 Raw HTTP is reserved for semantics that WebSocket Actions cannot express well:
 multipart uploads, byte/range streams, large framed resource streams, and
-downloads. An HTTP route still enters a request `Scope` and calls a Facade for
-authorization/business selection. HTTP status codes are transport outcomes,
+downloads. An HTTP route still enters a Coordinator-thread `Scope` and calls a Facade for
+authorization/business selection. Byte streams then use StickyRuntime leases
+and `BlobStore`; they do not occupy an Executor worker for the transfer. HTTP status codes are transport outcomes,
 not the domain error model.
 
 ### Directional dependency rule
@@ -156,10 +162,10 @@ boundary while Shell stores remain bootable.
 
 ## Event model
 
-Server events share the WebSocket transport. A process-bound event bus maps
-domain channels to protocol sessions. Services publish complete authoritative
-rows or invalidation hints; clients persist global data before presentation
-subscribers consume it.
+Server events share the WebSocket transport. The Coordinator EventBus maps
+domain channels to protocol sessions. Executor jobs return events with the
+job result; StickyRuntimes publish after their own short commits. Services
+must not call a process-global bus from a worker.
 
 Events are neither a database nor a guaranteed queue. Re-authentication refreshes
 the server-side channel set. Reconnect recovery must complete access refresh,

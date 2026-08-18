@@ -110,6 +110,11 @@ function assemblePrivateSourceMaps(dist, buildId) {
       source: path.join(dist, "server", "main.mjs.map"),
       file: "server-main.mjs.map",
     },
+    {
+      environment: "server",
+      source: path.join(dist, "server", "executor.mjs.map"),
+      file: "server-executor.mjs.map",
+    },
   ];
   for (const artifact of artifacts) {
     if (!fs.existsSync(artifact.source)) {
@@ -131,14 +136,19 @@ function assemblePrivateSourceMaps(dist, buildId) {
     );
     fs.unlinkSync(artifact.source);
   }
+  const maps = {};
+  for (const artifact of artifacts) {
+    const current = maps[artifact.environment];
+    maps[artifact.environment] = current
+      ? [...(Array.isArray(current) ? current : [current]), artifact.file]
+      : artifact.file;
+  }
   fs.writeFileSync(
     path.join(directory, "manifest.json"),
     JSON.stringify({
       format: "classapp-source-maps-v1",
       buildId,
-      maps: Object.fromEntries(
-        artifacts.map(({ environment, file }) => [environment, file]),
-      ),
+      maps,
     }),
   );
 }
@@ -189,14 +199,20 @@ function build(targetName) {
 
   const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
   run(process.execPath, [vite, "build", "--outDir", path.join(dist, "client")]);
-  run(process.execPath, [
-    vite,
-    "build",
-    "--config",
-    "vite.server.config.ts",
-    "--outDir",
-    path.join(dist, "server"),
-  ]);
+  for (const bundle of ["main", "executor"]) {
+    run(
+      process.execPath,
+      [
+        vite,
+        "build",
+        "--config",
+        "vite.server.config.ts",
+        "--outDir",
+        path.join(dist, "server"),
+      ],
+      { env: { ...process.env, CLASSAPP_SERVER_BUNDLE: bundle } },
+    );
+  }
   assemblePrivateSourceMaps(dist, buildId);
   copy(rendererSource, rendererDestination);
   run(process.execPath, [

@@ -26,37 +26,38 @@ async function main(): Promise<void> {
 
   const [
     { createHttpHandler },
-    { getDb },
+    { openCoordinatorDatabase },
     { WebSocketProtocol },
-    { Runtime },
+    { Coordinator },
     { startMaintenance },
     { reconcileStaleAiWorkspaces },
   ] = await Promise.all([
     import("@/server/http/handler"),
     import("@/server/infra/db"),
     import("@/server/protocol/WebSocketProtocol"),
-    import("@/server/runtime/runtime"),
+    import("@/server/runtime/coordinator"),
     import("@/server/services/maintenance"),
     import("@/server/services/ai/aiWorkspace"),
   ]);
-  const db = getDb();
-  const runtime = new Runtime(db, config.buildId);
-  await runtime.storage.start();
-  await runtime.articleUploads.reconcile();
-  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
-  await runtime.media.start();
-  runtime.teachDocuments.start();
-  const backend = createServer(createHttpHandler(config, runtime));
-  new WebSocketProtocol("dev", runtime).attach(backend);
-  const stopMaintenance = startMaintenance(db, runtime);
+  const db = openCoordinatorDatabase();
+  const coordinator = new Coordinator(db, config.buildId);
+  await coordinator.storage.start();
+  await coordinator.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
+  await coordinator.media.start();
+  coordinator.teachDocuments.start();
+  const backend = createServer(createHttpHandler(config, coordinator));
+  new WebSocketProtocol("dev", coordinator).attach(backend);
+  const stopMaintenance = startMaintenance(db, coordinator);
   backend.listen(port, "127.0.0.1", () =>
     console.log(`[Server] backend on http://127.0.0.1:${port}`),
   );
 
   const shutdown = async () => {
     stopMaintenance();
-    runtime.teachDocuments.stop();
-    await runtime.media.stop();
+    coordinator.teachDocuments.stop();
+    await coordinator.media.stop();
+    coordinator.closePool();
     backend.close(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);

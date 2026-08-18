@@ -1,6 +1,22 @@
 import { defineConfig } from "vite";
 import path from "node:path";
 
+const SERVER_BUNDLES = {
+  main: { input: "server/main.ts", fileName: "main.mjs" },
+  executor: {
+    input: "server/runtime/executorWorker.ts",
+    fileName: "executor.mjs",
+  },
+} as const;
+
+const bundleName = process.env.CLASSAPP_SERVER_BUNDLE;
+if (bundleName !== "main" && bundleName !== "executor") {
+  throw new Error(
+    "CLASSAPP_SERVER_BUNDLE must be 'main' or 'executor'. The release script builds each as its own monolithic SSR bundle because Rolldown forbids codeSplitting:false with multiple inputs.",
+  );
+}
+const bundle = SERVER_BUNDLES[bundleName];
+
 export default defineConfig({
   publicDir: false,
   resolve: {
@@ -30,7 +46,7 @@ export default defineConfig({
   build: {
     // Packaged beside the server bundle for private Incident symbolication.
     sourcemap: "hidden",
-    ssr: path.resolve(__dirname, "server/main.ts"),
+    ssr: path.resolve(__dirname, bundle.input),
     outDir: "dist/server",
     emptyOutDir: false,
     target: "node22",
@@ -38,7 +54,7 @@ export default defineConfig({
     chunkSizeWarningLimit: Infinity,
     rolldownOptions: {
       output: {
-        entryFileNames: "main.mjs",
+        entryFileNames: bundle.fileName,
         codeSplitting: false,
         minify: true,
       },

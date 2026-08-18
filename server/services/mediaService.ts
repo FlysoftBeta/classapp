@@ -1,5 +1,5 @@
 import type { Database } from "better-sqlite3";
-import type { MediaRuntime } from "@/server/runtime/mediaRuntime";
+import type { MediaSticky } from "@/server/runtime/sticky";
 import {
   ensureTrack,
   getTrack,
@@ -36,7 +36,7 @@ export function mapMediaError(error: unknown): PublicError {
 export class MediaService {
   constructor(
     private readonly db: Database,
-    private readonly runtime: MediaRuntime,
+    private readonly media: MediaSticky,
   ) {}
 
   async search(query: string, limit: number) {
@@ -44,7 +44,7 @@ export class MediaService {
     const timeout = setTimeout(() => controller.abort(), 40_000);
     timeout.unref();
     try {
-      const hits = await this.runtime.search(query, limit, controller.signal);
+      const hits = await this.media.search(query, limit);
       const tracks = hits.map(({ track, coverUrl }) =>
         ensureTrack(this.db, {
           source: track.source,
@@ -94,8 +94,8 @@ export class MediaService {
     if (!track) throw new PublicError("曲目不存在");
     touchTrack(this.db, trackId);
     new QuotaService(this.db).touch("media", trackId, 1);
-    void this.runtime.ensureMaterialized(track, "audio").catch(() => undefined);
-    void this.runtime.ensureMaterialized(track, "cover").catch(() => undefined);
+    this.media.prepare(track, "audio");
+    this.media.prepare(track, "cover");
     const grant = issueStreamGrant(this.db, trackId, userId);
     publishUser(userId, {
       kind: "media.track.changed",
@@ -112,8 +112,8 @@ export class MediaService {
   prepare(trackId: string): void {
     const track = getTrack(this.db, trackId);
     if (!track) throw new PublicError("曲目不存在");
-    void this.runtime.ensureMaterialized(track, "audio").catch(() => undefined);
-    void this.runtime.ensureMaterialized(track, "cover").catch(() => undefined);
+    this.media.prepare(track, "audio");
+    this.media.prepare(track, "cover");
   }
 
   updateConfig(input: {
@@ -123,7 +123,7 @@ export class MediaService {
   }) {
     const config = {
       ...updateMediaConfig(this.db, input),
-      enabled: this.runtime.available,
+      enabled: this.media.available,
     };
     publishSystem({
       kind: "media.config.changed",
@@ -133,6 +133,6 @@ export class MediaService {
   }
 
   config() {
-    return { ...mediaConfig(this.db), enabled: this.runtime.available };
+    return { ...mediaConfig(this.db), enabled: this.media.available };
   }
 }

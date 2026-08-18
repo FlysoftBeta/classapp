@@ -85,9 +85,9 @@ authorization bypass.
 
 Every stateful concern needs one authoritative owner:
 
-- process resources: `Runtime`;
+- process resources: `Coordinator` and StickyRuntimes;
 - one request's reusable graph: `Scope`;
-- request-local knowledge: the owning Service's `Facts`;
+- SQL isolation: WAL snapshot / IMMEDIATE write, not a Fact cache;
 - transaction nesting and post-commit effects: `UnitOfWork`;
 - actor authorization: public Facade entry points;
 - SQL and row representation: Data;

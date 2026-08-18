@@ -7,11 +7,11 @@ import {
   type RuntimeConfig,
 } from "@/server/infra/runtimeConfig";
 import { createHttpHandler } from "@/server/http/handler";
-import { getDb } from "@/server/infra/db";
+import { openCoordinatorDatabase } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
 import { setUpdateManager, UpdateManager } from "./infra/update/manager";
-import { Runtime } from "@/server/runtime/runtime";
+import { Coordinator } from "@/server/runtime/coordinator";
 import { reconcileStaleAiWorkspaces } from "@/server/services/ai/aiWorkspace";
 
 export async function bootstrap(
@@ -28,16 +28,16 @@ export async function bootstrap(
       setTimeout(() => process.exit(exitCode), delayMs);
     },
   });
-  const db = getDb();
-  const runtime = new Runtime(db, config.buildId);
-  await runtime.storage.start();
-  await runtime.articleUploads.reconcile();
-  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
-  await runtime.media.start();
-  runtime.teachDocuments.start();
+  const db = openCoordinatorDatabase();
+  const coordinator = new Coordinator(db, config.buildId);
+  await coordinator.storage.start();
+  await coordinator.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
+  await coordinator.media.start();
+  coordinator.teachDocuments.start();
   if (config.update) setUpdateManager(new UpdateManager(db, config.update));
-  const protocol = new WebSocketProtocol(config.buildId, runtime);
-  const stopMaintenance = startMaintenance(db, runtime);
+  const protocol = new WebSocketProtocol(config.buildId, coordinator);
+  const stopMaintenance = startMaintenance(db, coordinator);
   const servers: Server[] = [];
   const listen = async (
     server: Server,
@@ -57,7 +57,7 @@ export async function bootstrap(
   };
   for (const port of config.ports) {
     await listen(
-      createServer(createHttpHandler(config, runtime, { secure: false })),
+      createServer(createHttpHandler(config, coordinator, { secure: false })),
       "http",
       port,
     );
@@ -74,7 +74,7 @@ export async function bootstrap(
       await listen(
         createSecureServer(
           tls,
-          createHttpHandler(config, runtime, { secure: true }),
+          createHttpHandler(config, coordinator, { secure: true }),
         ),
         "https",
         port,
@@ -91,7 +91,8 @@ export async function bootstrap(
           new Promise<void>((resolve) => server.close(() => resolve())),
       ),
     );
-    runtime.teachDocuments.stop();
-    await runtime.media.stop();
+    coordinator.teachDocuments.stop();
+    await coordinator.media.stop();
+    coordinator.closePool();
   };
 }

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { Database } from "better-sqlite3";
 import type { User } from "@/shared/types/api";
+import type { ArticleImportSticky } from "@/server/runtime/sticky";
 import { ClientBusyError, createTomatoClientPool } from "@/lib/tomato";
 import type { SearchBook } from "@/lib/tomato";
 import { createArticleService } from "./articlesService";
@@ -187,23 +188,23 @@ export class ArticleImportRuntime {
 
 /** Request-bound business view of the process import runtime. */
 export class ArticleImportService {
-  constructor(private readonly runtime: ArticleImportRuntime) {}
+  constructor(private readonly imports: ArticleImportSticky) {}
 
   search(userId: string, query: string) {
-    return this.runtime.search(userId, query);
+    return this.imports.search(userId, query);
   }
 
   start(user: User, bookId: string, groupId: string, titleHint = "") {
-    return this.runtime.start(user, bookId, groupId, titleHint);
+    return this.imports.start(user, bookId, groupId, titleHint);
   }
 
   list(userId: string) {
-    return this.runtime.list(userId);
+    return this.imports.list(userId);
   }
 }
 
 export function createArticleImportService(
-  runtime: ArticleImportRuntime,
+  imports: ArticleImportSticky,
 ): ArticleImportService {
-  return new ArticleImportService(runtime);
+  return new ArticleImportService(imports);
 }

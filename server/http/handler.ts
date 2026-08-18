@@ -19,8 +19,8 @@ import {
   createRuntimeManifest,
   runtimeAssets,
 } from "@/server/infra/runtimeAssets";
-import type { Runtime } from "@/server/runtime/runtime";
-import { currentScope, withScope } from "@/server/runtime/scope";
+import type { Coordinator } from "@/server/runtime/coordinator";
+import { currentScope } from "@/server/runtime/scope";
 import { identifyClientRequest } from "@/server/infra/clientIdentity";
 import { findSessionIdentityByToken } from "@/server/data/auth";
 
@@ -129,7 +129,7 @@ function safePublicPath(root: string, pathname: string): string | null {
 
 export function createHttpHandler(
   config: RuntimeConfig,
-  runtime: Runtime,
+  coordinator: Coordinator,
   options: { secure?: boolean } = {},
 ) {
   const secure = options.secure === true;
@@ -144,16 +144,16 @@ export function createHttpHandler(
       : null;
     const token = bearer || url.searchParams.get("token");
     const session = token
-      ? findSessionIdentityByToken(runtime.db, token)
+      ? findSessionIdentityByToken(coordinator.db, token)
       : null;
     const identity = identifyClientRequest(req);
-    return withScope(
-      runtime.scope({
+    return coordinator.withHttpScope(
+      {
         token: session ? token : null,
         userId: session?.userId ?? null,
         clientId: session?.clientId ?? null,
         ...identity,
-      }),
+      },
       async () => {
         try {
           const origin = req.headers.origin;

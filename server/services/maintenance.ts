@@ -16,7 +16,7 @@ import {
 import { createClientService } from "@/server/services/clientsService";
 import { recordContainedServerIncident } from "./incidentService";
 import { BUILD_ID } from "@/server/infra/env";
-import type { Runtime } from "@/server/runtime/runtime";
+import type { Coordinator } from "@/server/runtime/coordinator";
 import { reconcileStaleAiWorkspaces } from "@/server/services/ai/aiWorkspace";
 
 /** Temporary client records with no recent activity are removed after this many days. */
@@ -59,23 +59,23 @@ const MAINTENANCE_INTERVAL_MS = 60_000;
 
 async function runMaintenance(
   db: BetterSqlite3.Database,
-  runtime: Runtime,
+  coordinator: Coordinator,
 ): Promise<void> {
   cleanupExpiredSessions(db);
   cleanupInactiveClients(db);
   notifyIdleLockedClients(db);
-  runtime.media.reconcileTransient();
-  await runtime.storage.reconcileStorage();
-  await runtime.articleUploads.reconcile();
-  await reconcileStaleAiWorkspaces(db, runtime.storage.blobs);
+  coordinator.media.reconcileTransient();
+  await coordinator.storage.reconcileStorage();
+  await coordinator.articleUploads.reconcile();
+  await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
 }
 
 export function startMaintenance(
   db: BetterSqlite3.Database,
-  runtime: Runtime,
+  coordinator: Coordinator,
 ): () => void {
   const run = () =>
-    void runMaintenance(db, runtime).catch((error) => {
+    void runMaintenance(db, coordinator).catch((error) => {
       recordContainedServerIncident(db, BUILD_ID, error, {
         component: "maintenance",
       });

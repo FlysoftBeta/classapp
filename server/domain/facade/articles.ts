@@ -236,11 +236,11 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("article_download");
     await this.actor.requireFeature("article_reader");
     this.requireCanPublish(user, groupId);
-    return { task: this.imports.start(user, bookId, groupId, title) };
+    return { task: await this.imports.start(user, bookId, groupId, title) };
   }
 
   async listNetworkDownloads() {
     const user = await this.actor.requireFeature("article_download");
-    return { tasks: this.imports.list(user.id) };
+    return { tasks: await this.imports.list(user.id) };
   }
 }
