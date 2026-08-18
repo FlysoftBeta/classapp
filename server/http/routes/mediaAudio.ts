@@ -1,5 +1,4 @@
-import { consumeStreamGrant } from "@/server/data/media";
-import { findReadyAsset, getTrack } from "@/server/data/media";
+import { findReadyAsset, findStreamGrant, getTrack } from "@/server/data/media";
 import { currentScope } from "@/server/runtime/scope";
 import { currentCoordinator } from "@/server/runtime/coordinator";
 import {
@@ -19,7 +18,7 @@ export async function GET(
     const url = new URL(req.url);
     const token = url.searchParams.get("grant");
     if (!token) throw new PublicError("缺少播放授权");
-    const grant = consumeStreamGrant(currentScope().db, token);
+    const grant = findStreamGrant(currentScope().db, token);
     if (!grant || grant.trackId !== id)
       throw new PublicError("播放授权无效或已过期");
 
@@ -34,27 +33,30 @@ export async function GET(
     const releaseLease = media.acquireLease(id);
 
     try {
+      const requested = parseRequestedRange(req.headers.get("range"));
+      if (requested === "unsatisfiable") {
+        releaseLease();
+        return new Response(null, {
+          status: 416,
+          headers: { "Content-Range": "bytes */0" },
+        });
+      }
+
       const ready = findReadyAsset(scope.db, id, "audio");
       if (ready?.blob_id) {
         return await storedResponse(
           media.blobs,
           ready.blob_id,
-          req,
+          requested,
           releaseLease,
         );
       }
 
-      const range = parseRange(req.headers.get("range"));
-      if (range === "unsatisfiable") {
-        releaseLease();
-        return new Response(null, { status: 416 });
-      }
-      const seekLike =
-        range !== null &&
-        (range.suffix === true ||
-          range.start > 0 ||
-          range.end !== Number.POSITIVE_INFINITY);
-      if (seekLike) {
+      // Chrome probes with `bytes=0-1` / `bytes=0-N`. That is a prefix, not a
+      // mid-file seek; answering 200 live-relay lets the element play while
+      // materialization continues. Only a start past 0 or a suffix needs the
+      // finished file.
+      if (isMidFileSeek(requested)) {
         const becameReady = await media.waitUntilReady(
           track,
           "audio",
@@ -68,7 +70,7 @@ export async function GET(
         return await storedResponse(
           media.blobs,
           nowReady.blob_id,
-          req,
+          requested,
           releaseLease,
         );
       }
@@ -129,17 +131,9 @@ export async function GET(
 async function storedResponse(
   blobs: BlobStore,
   blobId: string,
-  req: Request,
+  requested: BlobReadRange | null,
   releaseLease: () => void,
 ): Promise<Response> {
-  const requested = parseRequestedRange(req.headers.get("range"));
-  if (requested === "unsatisfiable") {
-    releaseLease();
-    return new Response(null, {
-      status: 416,
-      headers: { "Content-Range": "bytes */0" },
-    });
-  }
   const selected = await blobs.open(blobId, requested ?? undefined);
   const size = selected.size;
   const range =
@@ -224,53 +218,9 @@ function requestedEnd(range: BlobReadRange, size: number): number {
   return Math.min(range.end ?? size - 1, size - 1);
 }
 
-interface ByteRange {
-  start: number;
-  end: number;
-  /** Set only for a suffix range whose size is not known yet. */
-  suffix?: boolean;
-}
-
-function parseRange(
-  value: string | null,
-  size = Number.POSITIVE_INFINITY,
-): ByteRange | "unsatisfiable" | null {
-  if (!value) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
-  if (!match || (!match[1] && !match[2])) return "unsatisfiable";
-  let start: number;
-  let end: number;
-  if (!match[1]) {
-    const suffix = Number(match[2]);
-    if (!Number.isSafeInteger(suffix) || suffix <= 0) return "unsatisfiable";
-    // `bytes=-N` means "last N bytes"; that needs the eventual asset size,
-    // so mark it as a seek and let the caller wait for materialization.
-    if (size === Number.POSITIVE_INFINITY) {
-      return { start: 0, end: size, suffix: true };
-    }
-    start = Math.max(0, size - suffix);
-    end = size - 1;
-  } else {
-    start = Number(match[1]);
-    // With an unknown size, `bytes=N-` stays open-ended instead of becoming
-    // `N - Infinity`, which would make an ordinary audio probe unsatisfiable.
-    end = match[2]
-      ? Number(match[2])
-      : size === Number.POSITIVE_INFINITY
-        ? size
-        : size - 1;
-  }
-  const openEnded = !match[2] && size === Number.POSITIVE_INFINITY;
-  if (
-    !Number.isSafeInteger(start) ||
-    (!Number.isSafeInteger(end) && !openEnded) ||
-    start < 0 ||
-    end < start
-  ) {
-    return "unsatisfiable";
-  }
-  return {
-    start,
-    end: size === Number.POSITIVE_INFINITY ? end : Math.min(end, size - 1),
-  };
+/** True only for a range that cannot be answered from the live prefix stream. */
+function isMidFileSeek(range: BlobReadRange | null): boolean {
+  if (!range) return false;
+  if (range.suffixLength !== undefined) return true;
+  return (range.start ?? 0) > 0;
 }

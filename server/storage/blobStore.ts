@@ -7,6 +7,7 @@ import {
   rename,
   rm,
   stat,
+  type FileHandle,
 } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
@@ -169,13 +170,18 @@ async function writeSourceToFile(
 }
 
 function webReadable(
-  fd: number,
-  range?: { start: number; end: number },
+  handle: FileHandle,
+  range: { start: number; end: number },
 ): ReadableStream<Uint8Array> {
-  const options =
-    range === undefined ? {} : { start: range.start, end: range.end };
+  // FileHandle.createReadStream keeps this handle alive until the stream
+  // closes. Passing handle.fd to fs.createReadStream lets GC close the
+  // descriptor; a closed fd reads as EOF, so Range bodies were truncated.
   return Readable.toWeb(
-    createReadStream("", { fd, autoClose: true, ...options }),
+    handle.createReadStream({
+      start: range.start,
+      end: range.end,
+      autoClose: true,
+    }),
   ) as ReadableStream<Uint8Array>;
 }
 
@@ -293,10 +299,10 @@ export class BlobStore {
       }
       return {
         size: info.size,
-        body: webReadable(handle.fd, resolved),
+        body: webReadable(handle, resolved),
       };
     } catch (error) {
-      await handle.close();
+      await handle.close().catch(() => undefined);
       throw error;
     }
   }

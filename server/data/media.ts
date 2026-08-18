@@ -747,35 +747,39 @@ export function issueStreamGrant(
   return { token, expiresAt };
 }
 
-export function consumeStreamGrant(
+/**
+ * Look up a playback grant without consuming it. Chrome issues several Range
+ * GETs against the same `<audio>` URL, so the row must last until expires_at.
+ */
+export function findStreamGrant(
   db: Database,
   token: string,
   now = Date.now(),
 ): StreamGrant | null {
-  return db.transaction(() => {
-    const row = db
-      .prepare(
-        `SELECT token, track_id, user_id, expires_at
-           FROM media_stream_grants WHERE token = ?`,
-      )
-      .get(token) as
-      | {
-          token: string;
-          track_id: string;
-          user_id: string | null;
-          expires_at: number;
-        }
-      | undefined;
-    if (!row) return null;
+  const row = db
+    .prepare(
+      `SELECT token, track_id, user_id, expires_at
+         FROM media_stream_grants WHERE token = ?`,
+    )
+    .get(token) as
+    | {
+        token: string;
+        track_id: string;
+        user_id: string | null;
+        expires_at: number;
+      }
+    | undefined;
+  if (!row) return null;
+  if (row.expires_at <= now) {
     db.prepare("DELETE FROM media_stream_grants WHERE token = ?").run(token);
-    if (row.expires_at <= now) return null;
-    return {
-      token: row.token,
-      trackId: row.track_id,
-      userId: row.user_id,
-      expiresAt: row.expires_at,
-    };
-  })();
+    return null;
+  }
+  return {
+    token: row.token,
+    trackId: row.track_id,
+    userId: row.user_id,
+    expiresAt: row.expires_at,
+  };
 }
 
 export function deleteExpiredStreamGrants(db: Database): number {

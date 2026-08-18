@@ -166,7 +166,11 @@ export function createHttpHandler(
                 res.setHeader("Access-Control-Allow-Origin", origin);
                 res.setHeader(
                   "Access-Control-Allow-Headers",
-                  "authorization, content-type",
+                  "authorization, content-type, range",
+                );
+                res.setHeader(
+                  "Access-Control-Expose-Headers",
+                  "accept-ranges, content-range, content-length",
                 );
                 res.setHeader(
                   "Access-Control-Allow-Methods",

@@ -40,7 +40,11 @@ Lifecycle:
 3. `commit(id)` fsyncs and renames into `objects/`. The domain row becomes
    `ready`.
 4. `open` / `read` / `stat` use one file descriptor for size and Range, so a
-   response cannot mix one file's length with another file's body.
+   response cannot mix one file's length with another file's body. `open`
+   streams through `FileHandle.createReadStream` so the handle owns the
+   descriptor until the body ends; extracting `handle.fd` for
+   `fs.createReadStream` lets GC close it, which Node reports as EOF and
+   silently truncates Range bodies.
 5. Replacement allocates a **new** id. After the domain row points at the new
    id, the owner `drop`s the previous id into `trash/`.
 6. Physical deletion is mtime GC of `staging/` and `trash/` only. There is one

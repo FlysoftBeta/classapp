@@ -88,15 +88,21 @@ integers; inserts and deletes renumber in the same Service transaction.
 
 ## Streaming protocol
 
-`GET /api/media/tracks/:id/audio?grant=...` consumes a short-lived
-`media_stream_grants` row created by `media.play`.
+`GET /api/media/tracks/:id/audio?grant=...` looks up a short-lived
+`media_stream_grants` row created by `media.play`. The row is not deleted on
+the first GET: Chrome 70's `<audio>` issues several Range requests against the
+same URL (a `bytes=0-1` probe, then `bytes=0-` / later windows), so the grant
+remains valid until `expires_at`. Expired rows are deleted on lookup and by
+maintenance GC.
 
-- Ready asset: single-range `206` with `Accept-Ranges`.
-- Open-ended start (`Range: bytes=0-` or no Range):
+- Ready asset: single-range `206` with `Accept-Ranges`. The grant URL can be
+  reused for every Range GET until expiry.
+- Prefix or no Range (`bytes=0-`, `bytes=0-N`, or omitted):
   `MediaRuntime.streamTrack` opens the provider's `streamTrack`
-  (`yt-dlp --output -`) and relays chunked `audio/webm`; seek is unavailable
-  until materialization finishes.
-- Real seek (`bytes=N-`, N>0, or a closed range): the request awaits
+  (`yt-dlp --output -`) and relays chunked `audio/webm` as `200`. A prefix
+  probe is not a seek; answering `200` lets the element play while
+  materialization continues. Seek is unavailable until the file is ready.
+- Mid-file seek (`bytes=N-` with N>0, or `bytes=-N`): the request awaits
   materialization readiness (bounded waiters), then answers `206`; timeout is
   `503 Retry-After`.
 - Cover: `/api/media/tracks/:id/cover?token=...` uses the normal session token
