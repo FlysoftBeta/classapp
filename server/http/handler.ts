@@ -211,6 +211,7 @@ export function createHttpHandler(
             (req.method === "GET" || req.method === "HEAD") &&
             url.pathname === "/client-lzysso/h5-sso"
           ) {
+            res.statusCode = 301;
             res.setHeader("Location", `/`);
             res.setHeader(
               "Cache-Control",
