@@ -58,6 +58,6 @@ test("tree paths reject traversal, Windows prefixes, empty segments, and over-lo
   assert.throws(() => normalizeTreePath("notes/../secret"), /Invalid tree path/);
   assert.throws(() => normalizeTreePath("/abs/path"), /Invalid tree path/);
   assert.throws(() => normalizeTreePath("C:/windows"), /Invalid tree path/);
-  assert.throws(() => normalizeTreePath("notes//today.md"), /Invalid tree path segment/);
-  assert.throws(() => normalizeTreePath("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q"), /Invalid tree path/);
+  assert.throws(() => normalizeTreePath("notes//today.md"), /Invalid tree path/);
+  assert.throws(() => normalizeTreePath("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q"), /Invalid tree path segment/);
 });

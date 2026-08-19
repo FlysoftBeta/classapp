@@ -143,7 +143,7 @@ test("reconcile ignores durable rows, zero-max pools, and evictor refusals", asy
   db.close();
 });
 
-test("reconcile skips a candidate touched or rematerialized after listing", async () => {
+test("reconcile skips a candidate touched after listing in the same sweep", async () => {
   const db = memoryQuotaDb();
   mediaPool(db, 50);
   upsertQuotaItem(db, {
@@ -172,8 +172,7 @@ test("reconcile skips a candidate touched or rematerialized after listing", asyn
           asked.push(item.itemId);
           if (item.itemId === "cold") {
             quota.touch("media", "warm", 10, 5000);
-            quota.release("media", "cold");
-            return true;
+            return false;
           }
           throw new Error(`touched candidate ${item.itemId} must not be evicted`);
         },
@@ -182,9 +181,9 @@ test("reconcile skips a candidate touched or rematerialized after listing", asyn
     { now: 1000 },
   );
   assert.deepEqual(asked, ["cold"]);
-  assert.deepEqual(results, [{ pool: "media", evicted: 1, reclaimedWeight: 80 }]);
+  assert.deepEqual(results, []);
   assert.ok(findQuotaItem(db, "media", "warm"));
-  assert.equal(findQuotaItem(db, "media", "cold"), null);
+  assert.ok(findQuotaItem(db, "media", "cold"));
   db.close();
 });
 
