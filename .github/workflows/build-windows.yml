@@ -1,0 +1,99 @@
+# Assemble the Windows release on Linux x64 (the only supported assembler host)
+# and publish the bootstrap/deploy zip archives as Actions artifacts.
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: windows-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Checkout Infini submodule
+        run: git submodule update --init --recursive lib/infini
+
+      - name: Cache reconstructible build intermediates
+        uses: actions/cache@v6
+        with:
+          path: |
+            .cache/media
+            .cache/wasm-pack
+            .cache/cargo-home
+            .cache/native-runtime
+          key: windows-build-${{ runner.os }}-${{ hashFiles('package-lock.json', 'lib/media/artifacts-manifest.json', 'lib/zstd-web/Cargo.lock', 'lib/infini/Cargo.lock', 'scripts/builds/runtime-deps.mjs', 'scripts/builds/build-wasm.mjs') }}
+          restore-keys: |
+            windows-build-${{ runner.os }}-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust nightly and wasm target
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: nightly-2026-05-10
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
+      - name: Install wasm-pack
+        run: curl --proto '=https' --tlsv1.2 -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Prepare Windows media cache from committed pins
+        run: npm run media:update -- --prepare-cache --platform windows
+
+      - name: Assemble Windows release
+        run: npm run build -- windows
+
+      - name: Check Windows archives
+        run: |
+          set -euo pipefail
+          ls -lh build/bootstrap-windows.zip build/deploy-windows.zip
+          bootstrap="$(unzip -Z1 build/bootstrap-windows.zip)"
+          deploy="$(unzip -Z1 build/deploy-windows.zip)"
+          for name in launcher.js start.bat current/server.js current/build-id.txt; do
+            printf '%s\n' "$bootstrap" | grep -qx "$name"
+          done
+          for name in server.js build-id.txt server/media/yt-dlp.exe server/media/pot-server/main.js node_modules/better-sqlite3/prebuilds/win32-x64.node; do
+            printf '%s\n' "$deploy" | grep -qx "$name"
+          done
+
+      - name: Upload bootstrap archive
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/bootstrap-windows.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload deploy archive
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/deploy-windows.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14

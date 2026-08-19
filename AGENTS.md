@@ -129,6 +129,7 @@ production Shell and bundle-installation path.
 npm run lint                 TypeScript and ESLint after prerequisite builds
 npm run build -- <target>   Build linux-redhat, linux-debian, or windows
 npm run media:update        Refresh pinned media artifacts and POT cache
+npm run media:update -- --prepare-cache  Fill `.cache/media` from committed pins
 npm run test                Unit tests then fresh-database Action smoke
 npm run test:unit           Classified pure-logic and in-process SQLite tests
 npm run test:smoke          Live server Action smoke on a fresh database
@@ -139,8 +140,9 @@ npm run test:manual-legacy  Legacy-browser manual harness
 ```
 
 Run `npm run media:update` once after cloning (and again when bumping yt-dlp
-or the POT provider); dev and release builds then resolve verified media
-artifacts from `.cache/media`.
+or the POT provider); `npm run media:update -- --prepare-cache` fills the same
+`.cache/media` tree from committed pins without rewriting the manifest. Dev
+and release builds then resolve verified media artifacts from that cache.
 
 There is a classified unit/smoke runner under `scripts/tests/`. Co-located
 `*.test.ts` files next to production modules are not executed. Use a bounded
@@ -150,6 +152,7 @@ There is a classified unit/smoke runner under `scripts/tests/`. Co-located
 Infrastructure ownership:
 
 - `scripts/builds/` — prerequisite and release assembly;
+- `.github/workflows/` — hosted Windows release assembly and artifact upload;
 - `scripts/dev/` — development orchestration and reset/update tools;
 - `scripts/operation/` — narrow operator/build-host workflows;
 - `scripts/tests/` — unit, smoke, and production Chrome 70 harnesses;

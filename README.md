@@ -176,6 +176,11 @@ Artifacts are written to `build/bootstrap-<target>.zip` and
 `worktree/secrets/` are ignored by Git; AI configuration is optional, while a
 build with `CLASSAPP_REQUIRE_HTTPS=1` requires valid HTTPS material.
 
+The Windows target is also assembled on GitHub Actions from Linux x64
+(`.github/workflows/build-windows.yml`). That workflow prepares media cache
+from the committed pins and uploads the two zip archives as Actions artifacts.
+Those archives do not include local HTTPS or AI secrets.
+
 The fixed-browser E2E path additionally expects the controlled Chrome package
 and certificates described by the test harness. A successful Vite session in a
 modern browser does not validate the production Shell, Service Worker,
