@@ -75,11 +75,19 @@ jobs:
           ls -lh build/bootstrap-windows.zip build/deploy-windows.zip
           bootstrap="$(unzip -Z1 build/bootstrap-windows.zip)"
           deploy="$(unzip -Z1 build/deploy-windows.zip)"
+          require() {
+            local -n listing=$1
+            local name=$2
+            if ! grep -qxF -- "$name" <<<"$listing"; then
+              echo "missing $name" >&2
+              exit 1
+            fi
+          }
           for name in launcher.js start.bat current/server.js current/build-id.txt; do
-            printf '%s\n' "$bootstrap" | grep -qx "$name"
+            require bootstrap "$name"
           done
           for name in server.js build-id.txt server/media/yt-dlp.exe server/media/pot-server/main.js node_modules/better-sqlite3/prebuilds/win32-x64.node; do
-            printf '%s\n' "$deploy" | grep -qx "$name"
+            require deploy "$name"
           done
 
       - name: Upload bootstrap archive
