@@ -34,7 +34,9 @@ development backend, connect to `/ws`, login, and check returned state. They
 do not go through the React client, IndexedDB, or Vite.
 
 The smoke harness sets `CLASSAPP_EXECUTORS=1` so a single worker handles
-Actions. Executor workers must not inherit the parent `--test` flags; see
+Actions. Development workers load TypeScript through `executorWorker.mjs`
+(`tsx/esm/api`) because Node cannot use a `.ts` Worker entry point. Executor
+workers must not inherit the parent `--test` flags; see
 `executorWorkerExecArgv`.
 
 Smoke isolation:

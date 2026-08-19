@@ -17,7 +17,7 @@ function executorWorkerUrl(): URL {
   if (here.endsWith("/main.mjs") || here.endsWith("\\main.mjs")) {
     return new URL("./executor.mjs", here);
   }
-  return new URL("./executorWorker.ts", here);
+  return new URL("./executorWorker.mjs", here);
 }
 
 /**

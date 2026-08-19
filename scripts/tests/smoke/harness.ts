@@ -1,13 +1,31 @@
 import crypto from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { worktreePath } from "@/scripts/paths.mjs";
 import { startDevelopmentServer } from "@/server/runtime/developmentServer";
-import { freePort } from "../prod-runtime.mts";
 import { SmokeProtocolClient } from "./protocolClient";
+
+async function freePort(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to allocate a TCP port");
+  }
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return port;
+}
 
 export type SmokeDataMode = "fresh" | "seeded";
 
