@@ -43,16 +43,22 @@ export interface UpdateStatus {
   cloud_last_error: string | null;
 }
 
-let singleton: UpdateManager | null = null;
+export type UpdateStatusView = UpdateStatus & { disabled: boolean };
 
-export function updateManager(): UpdateManager | null {
-  return singleton;
-}
-
-export function setUpdateManager(manager: UpdateManager | null): void {
-  singleton?.stop();
-  singleton = manager;
-  singleton?.start();
+export function disabledUpdateStatus(): UpdateStatusView {
+  return {
+    pending: false,
+    applied_at: null,
+    seconds_remaining: 0,
+    timeout_seconds: 0,
+    cloud_checking: false,
+    cloud_installing: false,
+    cloud_latest_build_id: null,
+    cloud_update_available: false,
+    cloud_last_checked_at: null,
+    cloud_last_error: null,
+    disabled: true,
+  };
 }
 
 function errorMessage(error: unknown): string {

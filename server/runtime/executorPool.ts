@@ -1,13 +1,14 @@
 import { Worker } from "node:worker_threads";
 import os from "node:os";
 import type { RuntimeConfig } from "@/server/infra/runtimeConfig";
-import type {
-  ExecutorJob,
-  ExecutorJobResult,
-  ExecutorWorkerData,
-  ParentMessage,
-  StickyRpcMethod,
-  WorkerMessage,
+import {
+  serializeStickyError,
+  type ExecutorJob,
+  type ExecutorJobResult,
+  type ExecutorWorkerData,
+  type ParentMessage,
+  type StickyRpcMethod,
+  type WorkerMessage,
 } from "@/server/runtime/executorIpc";
 import type { StickyHost } from "@/server/runtime/sticky";
 
@@ -83,14 +84,18 @@ class ExecutorWorkerSlot {
     if (message.type === "rpc") {
       try {
         const value = await this.dispatchRpc(message.method, message.args);
-        this.post({ type: "rpc-result", rpcId: message.rpcId, ok: true, value });
+        this.post({
+          type: "rpc-result",
+          rpcId: message.rpcId,
+          ok: true,
+          value,
+        });
       } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
         this.post({
           type: "rpc-result",
           rpcId: message.rpcId,
           ok: false,
-          error: { message: err.message, name: err.name },
+          error: serializeStickyError(error),
         });
       }
       return;
@@ -139,6 +144,22 @@ class ExecutorWorkerSlot {
         case "ai.abortUser":
           this.sticky.ai.abortUser(args[0] as string);
           return undefined;
+        case "update.status":
+          return await this.sticky.update.status();
+        case "update.cloudConfigChanged":
+          this.sticky.update.cloudConfigChanged();
+          return undefined;
+        case "update.checkCloud":
+          return await this.sticky.update.checkCloud();
+        case "update.installCloud":
+          await this.sticky.update.installCloud();
+          return undefined;
+        case "update.confirm":
+          await this.sticky.update.confirm();
+          return undefined;
+        case "update.rollback":
+          await this.sticky.update.rollback();
+          return undefined;
         default:
           throw new Error(`Unknown sticky RPC ${method}`);
       }
@@ -158,8 +179,10 @@ export class ExecutorPool {
     mediaAvailable: boolean,
     teachMonitorAvailable: boolean,
   ) {
+    const workerConfig = { ...config };
+    delete workerConfig.update;
     const workerData: ExecutorWorkerData = {
-      config,
+      config: workerConfig,
       mediaAvailable,
       teachMonitorAvailable,
     };

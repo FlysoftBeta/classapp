@@ -37,6 +37,7 @@ The process composition root is `Coordinator`. It owns:
 - HTTP/WebSocket protocol sessions and the in-memory EventBus;
 - StickyRuntimes (AI execution, media jobs, article import, teach-document
   capture, upload reconcile, storage eviction);
+- `UpdateManager` (staging, cloud poll, launcher confirm/rollback IPC);
 - a Coordinator SQLite connection for protocol-adjacent SQL and Sticky
   short transactions;
 - an `ExecutorPool` of `worker_threads`, each with its own SQLite
@@ -92,3 +93,5 @@ Rolldown build.
 - `Facts` and `getDb()` are absent from `server/`.
 - Worker entry sets `RuntimeConfig` before importing `env.ts`.
 - Release assembly emits both `main.mjs` and `executor.mjs`.
+- `UpdateManager` is constructed only on the Coordinator when boot `update`
+  directories are present; Executor jobs use sticky RPC, not a worker singleton.

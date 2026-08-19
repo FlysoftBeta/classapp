@@ -10,7 +10,6 @@ import { createHttpHandler } from "@/server/http/handler";
 import { openCoordinatorDatabase } from "@/server/infra/db";
 import { WebSocketProtocol } from "@/server/protocol/WebSocketProtocol";
 import { startMaintenance } from "@/server/services/maintenance";
-import { setUpdateManager, UpdateManager } from "./infra/update/manager";
 import { Coordinator } from "@/server/runtime/coordinator";
 import { reconcileStaleAiWorkspaces } from "@/server/services/ai/aiWorkspace";
 
@@ -35,7 +34,6 @@ export async function bootstrap(
   await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
   await coordinator.media.start();
   coordinator.teachDocuments.start();
-  if (config.update) setUpdateManager(new UpdateManager(db, config.update));
   const protocol = new WebSocketProtocol(config.buildId, coordinator);
   const stopMaintenance = startMaintenance(db, coordinator);
   const servers: Server[] = [];
@@ -82,7 +80,6 @@ export async function bootstrap(
     }
   }
   return async () => {
-    setUpdateManager(null);
     stopMaintenance();
     protocol.close();
     await Promise.all(

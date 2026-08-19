@@ -10,6 +10,7 @@ long an object lives.
 Coordinator
   ├─ protocol sessions, EventBus
   ├─ StickyRuntimes (AI, media, import, teach, upload, storage)
+  ├─ UpdateManager (staging, cloud poll, launcher IPC)
   ├─ Coordinator SQLite connection
   └─ ExecutorPool
        └─ worker: SQLite connection, request Scope
@@ -35,7 +36,9 @@ view/component
 `Coordinator` is the process composition root. StickyRuntimes own identity-bearing
 in-flight work (AI abort controllers, media download slots, import tasks). Each
 has an explicit start/reconcile/stop story and must not capture a request `Scope`
-or Actor. None of them own a client socket.
+or Actor. None of them own a client socket. `UpdateManager` is the same kind of
+Coordinator-owned mechanism: cloud timers, staging directories, and launcher IPC
+live on this thread. Executor Actions reach it through the `update` sticky port.
 
 The Executor pool runs domain Actions. A worker's leftover after a job is only
 SQLite rows plus returned events and sticky commands.

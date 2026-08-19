@@ -14,7 +14,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `TeachDocumentsRuntime`  | sticky Office/WPS monitor child, capture, quota policy/ledger          |
 | `ExecutorPool`           | worker_threads; one SQLite connection per worker                       |
 | launcher                | version directories, child restart, pending metadata, rollback watchdog                         |
-| `UpdateManager`         | server-side validation/staging/cloud status; should be Runtime-owned rather than global locator |
+| `UpdateManager`         | Coordinator-owned staging/cloud status and launcher IPC; Executor jobs use the update sticky port |
 | `BundleManager`         | browser post-bootstrap manifest check, stage, activation coordination                           |
 | Service Worker          | selected Shell cache/pointer and navigation fallback only                                       |
 

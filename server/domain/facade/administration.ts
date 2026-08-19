@@ -239,16 +239,16 @@ export class AdministrationActorFacade {
     return result;
   }
 
-  confirmUpdate() {
+  async confirmUpdate() {
     const admin = this.actor.requireRole("operations");
-    this.system.confirmUpdate();
+    await this.system.confirmUpdate();
     this.record(admin.id, "runtime.update.confirm", "runtime");
     return { ok: true as const };
   }
 
-  rollback() {
+  async rollback() {
     const admin = this.actor.requireRole("operations");
-    const result = this.system.rollback();
+    const result = await this.system.rollback();
     this.record(admin.id, "runtime.rollback", "runtime");
     return result;
   }

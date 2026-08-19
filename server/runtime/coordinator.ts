@@ -14,9 +14,13 @@ import { ArticleUploadRuntime } from "@/server/runtime/articleUploadRuntime";
 import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { BUILD_ID } from "@/server/infra/env";
+import { UpdateManager } from "@/server/infra/update/manager";
 import { createLiveStickyHost } from "@/server/runtime/liveSticky";
 import { ExecutorPool } from "@/server/runtime/executorPool";
-import type { ExecutorJobBody, ExecutorJobResult } from "@/server/runtime/executorIpc";
+import type {
+  ExecutorJobBody,
+  ExecutorJobResult,
+} from "@/server/runtime/executorIpc";
 import type { StickyCommand } from "@/server/runtime/sticky";
 import {
   createAiService,
@@ -43,6 +47,7 @@ export class Coordinator {
   private readonly aiRunner: AiService;
   private readonly pool: ExecutorPool;
   private readonly liveSticky;
+  private readonly updateManager: UpdateManager | null;
 
   constructor(
     readonly db: Database,
@@ -73,11 +78,23 @@ export class Coordinator {
       this.teachDocuments.quotaPolicy(),
       (item) => this.teachDocuments.evict(item.itemId),
     );
+    this.updateManager = config.update
+      ? new UpdateManager(db, config.update)
+      : null;
+    this.updateManager?.start();
+    if (this.updateManager) {
+      console.log("[UpdateManager] 已启用");
+    } else if (config.nodeEnv === "production") {
+      console.warn(
+        "[UpdateManager] 生产 boot 配置缺少 update，在线更新保持禁用",
+      );
+    }
     this.liveSticky = createLiveStickyHost({
       media: this.media,
       articleImports: this.articleImports,
       teachDocuments: this.teachDocuments,
       aiExecution: this.aiExecution,
+      update: this.updateManager,
       queueCommand: (command) => this.applyCommand(command),
     });
     this.aiRunner = createAiService(
@@ -103,6 +120,7 @@ export class Coordinator {
       articleImports: this.articleImports,
       teachDocuments: this.teachDocuments,
       aiExecution: this.aiExecution,
+      update: this.updateManager,
       queueCommand: (command) => commands.push(command),
     });
     return new Scope(
@@ -133,6 +151,7 @@ export class Coordinator {
   }
 
   closePool(): void {
+    this.updateManager?.stop();
     this.pool.close();
     bindCoordinatorEventBus(null);
   }

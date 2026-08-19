@@ -8,7 +8,32 @@ interface BootMessage {
   payload: RuntimeConfig;
 }
 
+function isBootMessage(message: unknown): message is BootMessage {
+  if (!message || typeof message !== "object") return false;
+  const value = message as { type?: unknown; payload?: unknown };
+  return (
+    value.type === "classapp:boot" &&
+    value.payload !== null &&
+    typeof value.payload === "object"
+  );
+}
+
+function assertBootConfig(config: RuntimeConfig): void {
+  if (
+    !config.appDir ||
+    !config.dataRoot ||
+    !config.buildId ||
+    !config.nodeEnv
+  ) {
+    throw new Error("boot 配置缺少 appDir/dataRoot/buildId/nodeEnv");
+  }
+  if (config.nodeEnv === "production" && !config.update) {
+    console.warn("[Server] boot 配置缺少 update，生产环境更新管理器将保持禁用");
+  }
+}
+
 async function start(config: RuntimeConfig): Promise<void> {
+  assertBootConfig(config);
   globalThis.__classappRuntimeConfig = config;
   const serverBundle = pathToFileURL(
     path.join(__dirname, "server", "main.mjs"),
@@ -49,7 +74,10 @@ function startOrExit(config: RuntimeConfig): void {
 process.send!({ type: "classapp:ready" });
 const timeout = setTimeout(() => process.exit(1), 5000);
 timeout.unref();
-process.once("message", (message: BootMessage) => {
+const onMessage = (message: unknown) => {
+  if (!isBootMessage(message)) return;
+  process.off("message", onMessage);
   clearTimeout(timeout);
   startOrExit(message.payload);
-});
+};
+process.on("message", onMessage);

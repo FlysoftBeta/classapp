@@ -46,13 +46,19 @@ launcher.js
   → sends immutable RuntimeConfig over IPC
   → server.js installs config and imports server/main.mjs
   → main creates Coordinator, Executor pool (workers load sibling executor.mjs),
-    update manager, maintenance, listeners
+    update manager on the Coordinator, maintenance, listeners
+  → Executor Action jobs that need update status/install/confirm/rollback RPC
+    to the Coordinator-owned manager
   → graceful shutdown closes protocol/listeners/tasks
 ```
 
 `server.js` and launcher are process adapters. Business logic does not belong
 there. Runtime configuration includes explicit app/data roots, build ID, ports,
 platform renderer paths, HTTPS material, update directories, and proxy policy.
+`UpdateManager` is Coordinator-owned: launcher still sends `update` directories
+in the boot payload, and development omits them so the manager stays disabled.
+Executor workers receive a clone of `RuntimeConfig` with `update` stripped so
+they cannot start a second manager or talk to the launcher over `process.send`.
 
 ## Server deployment state machine
 
@@ -99,7 +105,7 @@ incremental aggregate hashing, not merely increase limits.
 Server deployment and browser asset activation are related by build ID but have
 different owners:
 
-- server `UpdateManager` validates/stages a deployment;
+- server `UpdateManager` validates/stages a deployment on the Coordinator;
 - launcher applies/rolls back version and DB;
 - running client `BundleManager` discovers the active server build's manifest;
 - IndexedDB pointer activates bundle;

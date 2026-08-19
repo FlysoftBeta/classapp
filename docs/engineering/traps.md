@@ -49,8 +49,7 @@ belongs in Data; process lifecycle belongs in Runtime; network/IDB choice belong
 in interact. Decide by responsibility and lifetime, not filename.
 
 Current examples to improve rather than copy include Incident key SQL in
-`IncidentService`, global/singleton update-manager access, and schema creation in
-individual Data modules.
+`IncidentService` and schema creation in individual Data modules.
 
 ## Generic capability DSL or `isAdmin` bypass
 

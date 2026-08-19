@@ -467,7 +467,7 @@ export class Composition {
             createAnnouncementService(this.scope.db),
           ),
           this.scope.getOrInit(adminSystemService, () =>
-            createAdminSystemService(this.scope.db),
+            createAdminSystemService(this.scope.db, this.scope.sticky.update),
           ),
           this.scope.getOrInit(teachDocumentsService, () =>
             createTeachDocumentsService(

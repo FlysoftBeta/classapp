@@ -105,7 +105,7 @@ SQL. Services must not infer the caller's administrative authority. Data must
 not publish events or choose actor policy.
 
 The current code has exceptions, such as incident-key SQL in
-`IncidentService` and singleton access to `UpdateManager`. Service-level event
+`IncidentService`. Service-level event
 publication now goes through a UnitOfWork deferral queue whenever a Facade runs
 a mutation inside `unitOfWork.run`, so events are delivered only after the
 outermost commit; Facades that still bypass UnitOfWork remain migration

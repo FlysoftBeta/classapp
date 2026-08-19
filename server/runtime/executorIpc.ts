@@ -7,6 +7,11 @@ import type { MediaSearchHit } from "@/server/runtime/mediaRuntime";
 import type { ArticleImportTask } from "@/server/services/articleImportService";
 import type { User } from "@/shared/types/api";
 import type { RuntimeConfig } from "@/server/infra/runtimeConfig";
+import type { UpdateStatusView } from "@/server/infra/update/manager";
+import {
+  ContractViolationError,
+  PublicError,
+} from "@/server/services/incidentService";
 
 export interface ExecutorWorkerData {
   config: RuntimeConfig;
@@ -51,7 +56,13 @@ export type StickyRpcMethod =
   | "articleImport.list"
   | "teach.evict"
   | "ai.abort"
-  | "ai.abortUser";
+  | "ai.abortUser"
+  | "update.status"
+  | "update.cloudConfigChanged"
+  | "update.checkCloud"
+  | "update.installCloud"
+  | "update.confirm"
+  | "update.rollback";
 
 export type StickyRpcArgs = {
   "media.search": [query: string, limit: number];
@@ -66,6 +77,12 @@ export type StickyRpcArgs = {
   "teach.evict": [id: string];
   "ai.abort": [runId: string];
   "ai.abortUser": [userId: string];
+  "update.status": [];
+  "update.cloudConfigChanged": [];
+  "update.checkCloud": [];
+  "update.installCloud": [];
+  "update.confirm": [];
+  "update.rollback": [];
 };
 
 export type StickyRpcResult = {
@@ -80,6 +97,12 @@ export type StickyRpcResult = {
   "teach.evict": boolean;
   "ai.abort": void;
   "ai.abortUser": void;
+  "update.status": UpdateStatusView;
+  "update.cloudConfigChanged": void;
+  "update.checkCloud": { build_id: string; update_available: boolean };
+  "update.installCloud": void;
+  "update.confirm": void;
+  "update.rollback": void;
 };
 
 export type WorkerMessage =
@@ -105,5 +128,37 @@ export type ParentMessage =
       type: "rpc-result";
       rpcId: string;
       ok: false;
-      error: { message: string; name?: string };
+      error: StickyRpcError;
     };
+
+export type StickyRpcError = {
+  message: string;
+  name?: string;
+  publicMessage?: string;
+};
+
+export function serializeStickyError(error: unknown): StickyRpcError {
+  if (error instanceof PublicError) {
+    return {
+      message: error.message,
+      name: error.name,
+      publicMessage: error.publicMessage,
+    };
+  }
+  if (error instanceof Error) {
+    return { message: error.message, name: error.name };
+  }
+  return { message: String(error) };
+}
+
+export function reviveStickyError(error: StickyRpcError): Error {
+  if (error.name === "ContractViolationError") {
+    return new ContractViolationError(error.message);
+  }
+  if (error.name === "PublicError") {
+    return new PublicError(error.publicMessage ?? error.message, error.message);
+  }
+  const revived = new Error(error.message);
+  if (error.name) revived.name = error.name;
+  return revived;
+}

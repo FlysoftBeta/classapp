@@ -3,6 +3,7 @@ import type { MediaTrack } from "@/shared/media/types";
 import type { AiModelsConfig } from "@/server/infra/aiModels";
 import type { MediaSearchHit } from "@/server/runtime/mediaRuntime";
 import type { ArticleImportTask } from "@/server/services/articleImportService";
+import type { UpdateStatusView } from "@/server/infra/update/manager";
 
 /** Payload for a StickyRuntime AI execution. Cloneable across worker threads. */
 export type AiExecuteInput = {
@@ -58,10 +59,25 @@ export interface AiSticky {
   execute(input: AiExecuteInput): void;
 }
 
+/**
+ * Coordinator-owned update lifecycle. Executor jobs must RPC here; they must
+ * not construct a second UpdateManager (timers, staging dirs, launcher IPC).
+ */
+export interface UpdateSticky {
+  status(): Promise<UpdateStatusView>;
+  cloudConfigChanged(): void;
+  checkCloud(): Promise<{ build_id: string; update_available: boolean }>;
+  installCloud(): Promise<void>;
+  confirm(): Promise<void>;
+  rollback(): Promise<void>;
+  deploy(zipBytes: Uint8Array): Promise<void>;
+}
+
 /** Sticky ports visible to a request Scope. None of these own a client connection. */
 export interface StickyHost {
   readonly media: MediaSticky;
   readonly articleImports: ArticleImportSticky;
   readonly teachDocuments: TeachSticky;
   readonly ai: AiSticky;
+  readonly update: UpdateSticky;
 }
