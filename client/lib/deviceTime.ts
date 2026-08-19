@@ -1,16 +1,8 @@
-const EXPLICIT_TIME_ZONE = /(?:z|[+-]\d{2}:?\d{2})$/i;
+import { parseDbTime } from "@/shared/time";
 
 /** Parse server timestamps without an explicit offset as UTC. */
 export function parseServerTime(value: string): Date {
-  const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return new Date(`${trimmed}T00:00:00Z`);
-  }
-
-  const isoValue = trimmed.replace(" ", "T");
-  return new Date(
-    EXPLICIT_TIME_ZONE.test(isoValue) ? isoValue : `${isoValue}Z`,
-  );
+  return parseDbTime(value);
 }
 
 function formatServerTime(

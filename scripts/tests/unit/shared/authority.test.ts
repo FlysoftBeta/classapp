@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { roleDependencies } from "./authority";
+import { roleDependencies } from "@/shared/authority";
 
 test("specialized administration roles depend on the administrator identity", () => {
   assert.deepEqual(roleDependencies("operations"), ["administrator"]);
   assert.deepEqual(roleDependencies("root"), ["administrator"]);
+  assert.deepEqual(roleDependencies("administrator"), []);
 });
 
 test("advanced community administration also depends on community management", () => {

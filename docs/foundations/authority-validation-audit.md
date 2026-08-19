@@ -90,7 +90,8 @@ are not ordinary business failures and should be captured as Incidents.
 The client may receive semantic booleans such as `can_post` and `can_leave` to
 render controls and work offline. These are actor-specific server conclusions,
 stored under that actor. They never authorize a server mutation; the Facade
-rechecks every command.
+rechecks every command. Group `can_post` currently means “unmuted, and
+`administrator` when the group is admin-only,” matching the post Facade.
 
 Do not send raw roles, bitsets, or enough internal policy state so the client can
 reimplement the decision. Send the presentation consequence.

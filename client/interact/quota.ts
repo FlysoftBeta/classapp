@@ -3,10 +3,11 @@ import { handleOfflineQuotaPressure } from "@/client/data/repository";
 import { handleMediaQuotaPressure } from "@/client/data/media";
 import { extentFiles } from "@/client/data/files";
 import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
-
-const START_RATIO = 0.9;
-const TARGET_RATIO = 0.8;
-const MAX_ROUNDS = 4;
+import {
+  QUOTA_MAX_ROUNDS,
+  quotaEvictionTargetBytes,
+  quotaUsageAtOrBelowTarget,
+} from "@/client/data/quotaPolicy";
 
 async function estimate(): Promise<{ usage: number; quota: number }> {
   const value = await navigator.storage?.estimate?.();
@@ -43,20 +44,13 @@ class QuotaController {
       return 0;
     });
     let current = await estimate();
-    if (
-      !force &&
-      (!current.quota || current.usage / current.quota < START_RATIO)
-    )
-      return;
-
     let lastUsage = current.usage;
-    for (let round = 0; round < MAX_ROUNDS; round += 1) {
-      const targetBytes = current.quota
-        ? Math.max(
-            force ? 16 * 1024 * 1024 : 0,
-            current.usage - current.quota * TARGET_RATIO,
-          )
-        : 64 * 1024 * 1024;
+    for (let round = 0; round < QUOTA_MAX_ROUNDS; round += 1) {
+      const targetBytes = quotaEvictionTargetBytes({
+        usage: current.usage,
+        quota: current.quota,
+        force,
+      });
       if (!targetBytes) return;
       const excludedArticles = excludeArticleId
         ? new Set([excludeArticleId])
@@ -78,8 +72,7 @@ class QuotaController {
       }
       if (!freed) return;
       current = await estimate();
-      if (!current.quota || current.usage / current.quota <= TARGET_RATIO)
-        return;
+      if (quotaUsageAtOrBelowTarget(current.usage, current.quota)) return;
       // Browser usage is approximate and LevelDB compaction may lag. Stop when
       // another logical deletion round no longer changes the estimate.
       if (current.usage >= lastUsage) return;

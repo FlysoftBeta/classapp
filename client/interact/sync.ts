@@ -14,10 +14,8 @@ import {
 } from "@/client/interact/articles";
 import { downloadBundleForOffline } from "@/client/interact/bundles";
 import { SEGMENT_SIZE } from "@/shared/types/api/article";
-import {
-  conversationRetentionCutoff,
-  type ConversationDownloadPolicy,
-} from "@/client/data/repository";
+import type { ConversationDownloadPolicy } from "@/client/data/retentionPolicy";
+import { conversationRetentionCutoff } from "@/client/data/retentionPolicy";
 import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { syncPendingUserSettings } from "@/client/interact/versionedSettings";
 import { taskStore } from "@/client/hooks/useTaskStore";

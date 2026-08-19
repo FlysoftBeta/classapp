@@ -78,6 +78,7 @@ export async function collectRevisionRange<T extends { revision: number }>(
   fetchPage: (cursor: number, through: number, limit: number) => Promise<T[]>,
   pageSize = 200,
 ): Promise<T[]> {
+  if (pageSize < 1) throw new Error("Revision page size must be positive");
   if (throughRevision <= afterRevision) return [];
   const rows: T[] = [];
   let cursor = afterRevision;

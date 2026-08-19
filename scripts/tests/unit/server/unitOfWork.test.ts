@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { UnitOfWork } from "./unitOfWork";
+import { UnitOfWork } from "@/server/runtime/unitOfWork";
 
 test("UnitOfWork rolls back nested writes and drops after-commit effects", () => {
   const db = new Database(":memory:");
@@ -29,7 +29,7 @@ test("UnitOfWork rolls back nested writes and drops after-commit effects", () =>
   db.close();
 });
 
-test("UnitOfWork publishes effects only after the outer transaction commits", () => {
+test("UnitOfWork publishes effects only after the outer transaction commits even without an EventBus", () => {
   const db = new Database(":memory:");
   db.exec("CREATE TABLE values_table (value INTEGER NOT NULL)");
   const unit = new UnitOfWork(db);

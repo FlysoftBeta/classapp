@@ -5,22 +5,17 @@ import {
   FEATURES,
   hasFeature,
   userFeaturesSchema,
-} from "./features";
+} from "@/shared/features";
 
 test("default product features are enabled independently of administration", () => {
   for (const feature of FEATURES) {
-    assert.equal(
-      hasFeature({ features: DEFAULT_USER_FEATURES }, feature),
-      true,
-    );
+    assert.equal(hasFeature({ features: DEFAULT_USER_FEATURES }, feature), true);
   }
+  assert.equal(hasFeature(null, "ai"), false);
 });
 
 test("feature values form a strict semantic object", () => {
-  assert.equal(
-    userFeaturesSchema.safeParse(DEFAULT_USER_FEATURES).success,
-    true,
-  );
+  assert.equal(userFeaturesSchema.safeParse(DEFAULT_USER_FEATURES).success, true);
   assert.equal(
     userFeaturesSchema.safeParse({ ...DEFAULT_USER_FEATURES, admin: true })
       .success,

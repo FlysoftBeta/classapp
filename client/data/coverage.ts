@@ -28,7 +28,26 @@ export function mergeCursorCoverage<B extends CoverageBoundary>(input: {
   last: B | null;
   exhausted: boolean;
 }): ContinuousCoverage<B> | null {
-  if (!input.first || !input.last) return input.current;
+  if (!input.first || !input.last) {
+    // An empty page cannot publish an interval. It may still prove that a
+    // connected cursor has reached an end of the collection.
+    if (!input.cursor || !input.current || !input.exhausted) {
+      return input.current;
+    }
+    if (
+      input.direction === "after" &&
+      sameBoundary(input.current.oldest, input.cursor)
+    ) {
+      return { ...input.current, reached_oldest: true };
+    }
+    if (
+      input.direction === "before" &&
+      sameBoundary(input.current.newest, input.cursor)
+    ) {
+      return { ...input.current, reached_newest: true };
+    }
+    return input.current;
+  }
   if (!input.cursor) {
     // A root response starts a new proof. Older cached rows are no longer
     // claimed by this interval until a connected page reaches them again.

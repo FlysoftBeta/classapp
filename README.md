@@ -141,6 +141,10 @@ Useful commands:
 | ---------------------------- | --------------------------------------------------------- |
 | `npm run lint`               | build native/Wasm prerequisites, type-check, and lint     |
 | `npm run format`             | format the working tree with Prettier                     |
+| `npm run test`               | unit tests then fresh-database Action smoke               |
+| `npm run test:unit`          | classified pure-logic and in-process SQLite tests         |
+| `npm run test:smoke`         | live Action smoke against a fresh isolated database       |
+| `npm run test:smoke:seeded`  | live Action smoke against a copied seed/production database |
 | `npm run test:e2e`           | build and exercise the fixed Chrome 70 HTTPS/offline path |
 | `npm run test:manual`        | build and start the current manual system harness         |
 | `npm run test:manual-legacy` | run the legacy-browser manual harness                     |
@@ -149,10 +153,12 @@ Useful commands:
 | `npm run https:renew`        | renew certificates through the configured DNS flow        |
 | `npm run pdfrender:update`   | fetch and verify supported native renderers               |
 
-The package currently has no unit-test runner for scattered `*.test.ts` files.
-Type-checking those files is not evidence that their assertions ran. New tests
-belong in the owned system/invariant harness until a deliberate unit-test
-architecture is introduced.
+`npm run test:unit` and `npm run test:smoke` are the executable unit and
+server-API smoke runners. New tests belong under `scripts/tests/unit/` or
+`scripts/tests/smoke/`; a co-located `*.test.ts` next to production code is not
+evidence that assertions ran. Vite does not validate the production Shell,
+Service Worker, IndexedDB activation, offline restart, or Chrome 70
+compatibility — that remains `npm run test:e2e`.
 
 ## Production builds
 

@@ -28,6 +28,9 @@ export function listConversations(
   db: Database,
   userId: string,
 ): ConversationEntity[] {
+  // can_post is a presentation conclusion. It must match
+  // PostActorFacade.requireCanPublishToGroup: unmuted, and administrator
+  // when the group is admin-only. community_manager is not the posting gate.
   const groups = db
     .prepare(
       `SELECT g.id, g.conv_id, g.revision, g.handle, g.name, g.type AS group_type,
@@ -36,7 +39,7 @@ export function listConversations(
          (COALESCE(me.is_muted, 0) = 0 AND
            (g.admin_only = 0 OR EXISTS (
              SELECT 1 FROM user_admin_roles ar
-             WHERE ar.user_id = me.id AND ar.role = 'community_manager'
+             WHERE ar.user_id = me.id AND ar.role = 'administrator'
            ))) AS can_post,
          (g.no_leave = 0) AS can_leave,
          ${LAST_MESSAGE_SQL} AS last_message,

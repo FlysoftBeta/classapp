@@ -4,7 +4,7 @@ import {
   ARTICLE_RETENTION_DAYS,
   type ArticleDownloadPolicy,
   type ConversationDownloadPolicy,
-} from "@/client/data/repository";
+} from "@/client/data/retentionPolicy";
 import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { bundleAvailable } from "@/client/interact/bundles";
 import { client } from "@/client/interact/remote/client";

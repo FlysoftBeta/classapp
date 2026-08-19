@@ -11,8 +11,6 @@ import { findUserBySessionToken } from "@/server/data/auth";
 import { getUserBanStatus } from "@/server/data/users";
 import { getClientIdFromToken } from "@/server/data/clients";
 import { PublicError, ContractViolationError } from "@/server/services/incidentService";
-import { ResultTools } from "@/shared/protocol/result";
-import { BUILD_ID } from "@/server/infra/env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import type {
   ExecutorJob,
@@ -91,23 +89,31 @@ parentPort!.on("message", (message: ParentMessage) => {
     process.exit(0);
   }
   if (message.type !== "job") return;
-  void runJob(message.job)
-    .then((result) => send({ type: "done", result }))
-    .catch((error: unknown) => {
-      const err = error instanceof Error ? error : new Error(String(error));
-      send({
-        type: "done",
-        result: {
-          id: message.job.id,
-          events: [],
-          commands: [],
-          outcome: ResultTools.err(
-            { message: err.message, incidentId: "executor" },
-            { buildId: BUILD_ID },
-          ),
-        },
-      });
-    });
+      void runJob(message.job)
+        .then((result) => send({ type: "done", result }))
+        .catch(async (error: unknown) => {
+          const outcome = await ServerResultCodec.capture(
+            async () => {
+              throw error;
+            },
+            {
+              action:
+                message.job.kind === "action"
+                  ? message.job.action
+                  : "remote.authenticate",
+            },
+            db,
+          );
+          send({
+            type: "done",
+            result: {
+              id: message.job.id,
+              events: [],
+              commands: [],
+              outcome,
+            },
+          });
+        });
 });
 
 send({ type: "ready" });

@@ -17,7 +17,31 @@ function executorWorkerUrl(): URL {
   if (here.endsWith("/main.mjs") || here.endsWith("\\main.mjs")) {
     return new URL("./executor.mjs", here);
   }
-  return new URL("./executorWorker.ts", here);
+  return new URL("./executorWorker.mjs", here);
+}
+
+/**
+ * Workers inherit `process.execArgv`. The unit/smoke runner passes `--test`
+ * and reporter flags that would turn every Executor into another test process.
+ */
+export function executorWorkerExecArgv(
+  execArgv: readonly string[] = process.execArgv,
+): string[] {
+  const next: string[] = [];
+  for (let i = 0; i < execArgv.length; i += 1) {
+    const arg = execArgv[i]!;
+    if (arg === "--watch" || arg.startsWith("--watch=")) continue;
+    if (arg === "--experimental-test-coverage") continue;
+    if (arg === "--test" || arg.startsWith("--test-")) {
+      if (!arg.includes("=")) {
+        const value = execArgv[i + 1];
+        if (value && !value.startsWith("-")) i += 1;
+      }
+      continue;
+    }
+    next.push(arg);
+  }
+  return next;
 }
 
 const RPC_TIMEOUT_MS = 120_000;
@@ -71,8 +95,17 @@ class ExecutorWorkerSlot {
     return !this.busy;
   }
 
-  shutdown(): void {
-    this.post({ type: "shutdown" });
+  shutdown(): Promise<void> {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        void this.worker.terminate().finally(() => resolve());
+      }, 2_000);
+      this.worker.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      this.post({ type: "shutdown" });
+    });
   }
 
   private post(message: ParentMessage): void {
@@ -191,9 +224,7 @@ export class ExecutorPool {
     for (let i = 0; i < count; i += 1) {
       const worker = new Worker(url, {
         workerData,
-        execArgv: process.execArgv.filter(
-          (arg) => arg !== "--watch" && !arg.startsWith("--watch="),
-        ),
+        execArgv: executorWorkerExecArgv(),
       });
       this.slots.push(new ExecutorWorkerSlot(worker, sticky));
     }
@@ -206,7 +237,7 @@ export class ExecutorPool {
     return slot.submit(job);
   }
 
-  close(): void {
-    for (const slot of this.slots) slot.shutdown();
+  async close(): Promise<void> {
+    await Promise.all(this.slots.map((slot) => slot.shutdown()));
   }
 }

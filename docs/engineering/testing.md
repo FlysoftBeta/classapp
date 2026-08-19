@@ -5,26 +5,51 @@ every changed file.
 
 ## Current test reality
 
-The package scripts run typecheck/ESLint and one production Chrome 70 E2E
-harness. There is currently no unit-test runner script. Existing co-located
-`.test.ts` files are typechecked but are not executed by `npm run lint` or any
-declared `npm test` command.
+The owned executable surface lives under `scripts/tests/` and is wired to
+package scripts:
 
-Therefore:
+| Layer | Command | What it proves |
+| ----- | ------- | -------------- |
+| Unit / in-process mechanism | `npm run test:unit` | Pure merge/coverage/quota/time/authority logic and isolated SQLite mechanisms |
+| Smoke | `npm run test:smoke` | Each server subsystem answers real Actions over WebSocket on a fresh database |
+| Seeded smoke | `npm run test:smoke:seeded` | The same Action paths against a copied seed/production database after a forced root-PIN reset |
+| Chrome 70 E2E | `npm run test:e2e` | Production Shell, HTTPS, install, offline boot, reconnect |
+| Manual | `npm run test:manual` | A human can inspect the packaged runtime |
 
-- do not create another `.test.ts` and claim verification;
-- do not scatter test files through domain directories by habit;
-- when executable unit/property tests are valuable, first establish one
-  intentional runner and organized test surface, then wire it into package/CI;
-- until then, put production-path integration harnesses under `scripts/tests`
-  and use explicit runnable scripts.
+`npm test` runs unit then fresh-database smoke. `npm run lint` still does not
+execute tests.
 
-For a temporary investigation, use a directly executed shell/TypeScript probe
-or a bounded file below `.cache/`, then remove it. Migration SQL experiments,
-Zod shape checks, and one-off state inspections are often useful probes, but
-they are not long-term regression evidence until attached to an executable
-harness. See [repository infrastructure](./repository-infrastructure.md) for
-the current script layout and command meanings.
+Do not scatter `.test.ts` files through `client/`, `server/`, or `shared/`.
+Add cases to the classified trees:
+
+```text
+scripts/tests/unit/{client,server,shared}/   Node test runner, no live server
+scripts/tests/smoke/suites/                  one suite per Action subsystem
+scripts/tests/smoke/harness.ts               isolated data root, PIN reset, protocol client
+```
+
+Unit tests may use injected clocks and in-memory SQLite. They must not start
+Coordinator, bind ports, or talk to a browser. Smoke tests start the real
+development backend, connect to `/ws`, login, and check returned state. They
+do not go through the React client, IndexedDB, or Vite.
+
+The smoke harness sets `CLASSAPP_EXECUTORS=1` so a single worker handles
+Actions. Development workers load TypeScript through `executorWorker.mjs`
+(`tsx/esm/api`) because Node cannot use a `.ts` Worker entry point. Executor
+workers must not inherit the parent `--test` flags; see
+`executorWorkerExecArgv`.
+
+Smoke isolation:
+
+- data roots are temporary directories, never `worktree/data` in place;
+- seeded mode copies `CLASSAPP_SMOKE_SEED_ROOT/data.db` (default
+  `worktree/data/data.db`) with SQLite backup, then replaces the root
+  administrator PIN with a harness-owned value;
+- `CLASSAPP_SMOKE_DATA=fresh|seeded|all` selects which database story runs.
+
+A temporary investigation still belongs under `.cache/` or a one-off probe and
+must be deleted unless it is moved into this surface. See
+[repository infrastructure](./repository-infrastructure.md) for script layout.
 
 This is not an argument against tests. It is an argument against non-executed
 test-shaped files that mislead agents and reviewers.
@@ -114,8 +139,11 @@ Minimum common checks:
 
 ```sh
 npm run lint
+npm run test:unit
+npm run test:smoke          # fresh isolated database
+npm run test:smoke:seeded   # copied seed/production database, root PIN reset
 npm run build -- <target>
-npm run test:e2e     # when production browser path is affected
+npm run test:e2e            # when production browser path is affected
 ```
 
 Report exact commands and outcomes. If a test requires missing secrets/browser
