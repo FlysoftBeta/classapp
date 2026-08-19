@@ -245,7 +245,7 @@ test("a stale evictor must not release a rematerialized ledger row", async () =>
             class: "cache",
             now: 4000,
           });
-          quota.release("media", item.itemId);
+          quota.release("media", item.itemId, item);
           return true;
         },
       ],

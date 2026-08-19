@@ -12,7 +12,7 @@ import {
   type TeachDocumentType,
 } from "@/server/data/teachDocuments";
 import { BlobStore } from "@/server/storage/blobStore";
-import { QuotaService } from "@/server/storage/quotaService";
+import { QuotaService, type QuotaItem } from "@/server/storage/quotaService";
 import {
   PublicError,
   recordContainedServerIncident,
@@ -197,18 +197,21 @@ export class TeachDocumentsRuntime {
   }
 
   /** Owner evictor registered with the shared storage quota service. */
-  async evict(itemId: string): Promise<boolean> {
+  async evict(itemId: string, snapshot?: QuotaItem): Promise<boolean> {
     const document = findTeachDocument(this.db, itemId);
     if (!document) return false;
-    return this.removeOne(document);
+    return this.removeOne(document, snapshot);
   }
 
-  private async removeOne(document: {
-    id: string;
-    blob_id: string;
-  }): Promise<boolean> {
+  private async removeOne(
+    document: {
+      id: string;
+      blob_id: string;
+    },
+    snapshot?: QuotaItem,
+  ): Promise<boolean> {
     deleteTeachDocuments(this.db, [document.id]);
-    this.quota.release(TEACH_DOCUMENTS_QUOTA_GROUP, document.id);
+    this.quota.release(TEACH_DOCUMENTS_QUOTA_GROUP, document.id, snapshot);
     try {
       await this.blobs.drop(document.blob_id);
       return true;

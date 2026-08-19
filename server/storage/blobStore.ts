@@ -354,15 +354,19 @@ export class BlobStore {
   /** Delete aged staging and trash files. Never walks objects/. */
   async gc(): Promise<void> {
     const now = this.options.now?.() ?? Date.now();
+    const serialize = (name: string, operation: () => Promise<void>) =>
+      this.locks.run(name, operation);
     await gcAgedDirectory(
       this.layout.stagingRoot,
       gcCutoffMs(now, this.options.stageRetentionMs),
       this.gcIo,
+      serialize,
     );
     await gcAgedDirectory(
       this.layout.trashRoot,
       gcCutoffMs(now, this.options.trashRetentionMs),
       this.gcIo,
+      serialize,
     );
   }
 

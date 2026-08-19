@@ -48,14 +48,16 @@ test("missing directories are already clean; nested directories are not walked",
 
 test("an in-flight recreate after the aged stat must keep the new generation", async () => {
   let generation = 1;
+  let mtimeMs = 0;
   let unlinkedGeneration: number | null = null;
   const io: GcDirectoryIo = {
     async readdir() {
       return ["550e8400-e29b-41d4-a716-446655440000"];
     },
     async stat() {
-      const snapshot = { isFile: true, mtimeMs: 0 };
+      const snapshot = { isFile: true, mtimeMs };
       generation = 2;
+      mtimeMs = 50_000;
       return snapshot;
     },
     async unlink() {

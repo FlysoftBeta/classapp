@@ -63,10 +63,6 @@ function payloadName(id: string): string {
   return `objects/${id}`;
 }
 
-function isEnoent(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
-}
-
 function sha256(bytes: Uint8Array): string {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
@@ -343,16 +339,9 @@ export class TreeStore {
     limits: TreeLimits,
   ): Promise<LoadedTree> {
     if (!blobId) return new LoadedTree(0, new Map(), {});
-    try {
-      const bytes = await this.store.read(blobId, limits.maxArchiveBytes);
-      const tree = loadFromArchive(new Uint8Array(bytes));
-      tree.toEditable().validate(limits);
-      return tree;
-    } catch (error) {
-      if (isEnoent(error)) {
-        return new LoadedTree(0, new Map(), {});
-      }
-      throw error;
-    }
+    const bytes = await this.store.read(blobId, limits.maxArchiveBytes);
+    const tree = loadFromArchive(new Uint8Array(bytes));
+    tree.toEditable().validate(limits);
+    return tree;
   }
 }

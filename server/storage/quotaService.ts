@@ -94,8 +94,12 @@ export class QuotaService {
     touchQuotaItem(this.db, pool, itemId, intensity, now, policy.halfLifeMs);
   }
 
-  release(pool: string, itemId: string): void {
-    deleteQuotaItem(this.db, pool, itemId);
+  release(
+    pool: string,
+    itemId: string,
+    expected?: Pick<QuotaItem, "weight" | "heat" | "touchedAtMs">,
+  ): boolean {
+    return deleteQuotaItem(this.db, pool, itemId, expected);
   }
 
   cacheUsage(pool: string): number {
@@ -105,7 +109,8 @@ export class QuotaService {
   /**
    * Size sweep of cache items for registered evictor pools. Durable rows are
    * never candidates. The evictor must compare-and-delete domain state and
-   * call release itself; this loop only counts successes.
+   * call release itself; this loop only counts ledger rows that are gone
+   * after the evictor returns.
    */
   async reconcile(
     evictors: ReadonlyMap<string, QuotaEvictor>,
@@ -142,6 +147,8 @@ export class QuotaService {
           const current = findQuotaItem(this.db, poolName, candidate.itemId);
           if (!quotaCandidateIsCurrent(candidate, current, now)) continue;
           if (!(await evictor(current))) continue;
+          const remaining = findQuotaItem(this.db, poolName, candidate.itemId);
+          if (remaining) continue;
           evicted += 1;
           reclaimed += current.weight;
           progress = true;

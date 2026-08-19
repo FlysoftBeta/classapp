@@ -8,7 +8,7 @@ import {
   BlobStore,
   RangeNotSatisfiableError,
 } from "@/server/storage/blobStore";
-import { createFsGcIo, type GcDirectoryIo } from "@/server/storage/gc";
+import { createFsGcIo, gcCutoffMs, isReclaimableMtime, type GcDirectoryIo } from "@/server/storage/gc";
 import {
   createStorageLayout,
   objectPath,
@@ -184,19 +184,29 @@ test("an open body keeps the original inode if the id is dropped and replaced", 
 
 test("GC must not unlink a staging file recreated after the aged stat", async () => {
   const id = "11111111-2222-4333-8444-555555555555";
-  const atUnlink = deferred();
+  const now = 50_000;
+  const retentionMs = 1_000;
+  const cutoff = gcCutoffMs(now, retentionMs);
+  const atAgedStat = deferred();
   const resume = deferred();
   const fsIo = createFsGcIo();
+  let sawAged = false;
   const gcIo: GcDirectoryIo = {
     readdir: (directory) => fsIo.readdir(directory),
-    stat: (absolutePath) => fsIo.stat(absolutePath),
-    async unlink(absolutePath) {
-      if (absolutePath.endsWith(id)) {
-        atUnlink.resolve();
+    async stat(absolutePath) {
+      const info = await fsIo.stat(absolutePath);
+      if (
+        absolutePath.endsWith(id) &&
+        isReclaimableMtime(info.mtimeMs, cutoff) &&
+        !sawAged
+      ) {
+        sawAged = true;
+        atAgedStat.resolve();
         await resume.promise;
       }
-      await fsIo.unlink(absolutePath);
+      return info;
     },
+    unlink: (absolutePath) => fsIo.unlink(absolutePath),
   };
 
   await withStore(
@@ -208,37 +218,47 @@ test("GC must not unlink a staging file recreated after the aged stat", async ()
       await utimes(staged, 1, 1);
 
       const gcDone = store.gc();
-      await atUnlink.promise;
+      await atAgedStat.promise;
       await writeFile(staged, "retry-bytes");
       resume.resolve();
       await gcDone;
       assert.equal((await readFile(staged)).toString(), "retry-bytes");
     },
     {
-      now: () => 50_000,
-      stageRetentionMs: 1_000,
-      trashRetentionMs: 1_000,
+      now: () => now,
+      stageRetentionMs: retentionMs,
+      trashRetentionMs: retentionMs,
       gcIo,
     },
   );
 });
 
 test("GC must not unlink a trash file replaced by a newer drop after the aged stat", async () => {
-  const atUnlink = deferred();
+  const now = 50_000;
+  const retentionMs = 1_000;
+  const cutoff = gcCutoffMs(now, retentionMs);
+  const atAgedStat = deferred();
   const resume = deferred();
   const fsIo = createFsGcIo();
+  let sawAged = false;
   let targetName = "";
   const gcIo: GcDirectoryIo = {
     readdir: (directory) => fsIo.readdir(directory),
-    stat: (absolutePath) => fsIo.stat(absolutePath),
-    async unlink(absolutePath) {
-      if (absolutePath.includes(`${path.sep}trash${path.sep}`)) {
+    async stat(absolutePath) {
+      const info = await fsIo.stat(absolutePath);
+      if (
+        absolutePath.includes(`${path.sep}trash${path.sep}`) &&
+        isReclaimableMtime(info.mtimeMs, cutoff) &&
+        !sawAged
+      ) {
+        sawAged = true;
         targetName = path.basename(absolutePath);
-        atUnlink.resolve();
+        atAgedStat.resolve();
         await resume.promise;
       }
-      await fsIo.unlink(absolutePath);
+      return info;
     },
+    unlink: (absolutePath) => fsIo.unlink(absolutePath),
   };
 
   await withStore(
@@ -249,16 +269,8 @@ test("GC must not unlink a trash file replaced by a newer drop after the aged st
       await utimes(trashPath(layout, first.id), 1, 1);
 
       const gcDone = store.gc();
-      await atUnlink.promise;
-      const replacement = await store.put(Buffer.from("new-generation"), {
-        expectedBytes: 14,
-      });
-      assert.equal(replacement.id !== first.id, true);
-      await store.drop(first.id);
-      const slot = await store.create(first.id);
-      await store.writeSlot(slot, Buffer.from("reused-id-bytes"));
-      await slot.commit();
-      await store.drop(first.id);
+      await atAgedStat.promise;
+      await writeFile(trashPath(layout, first.id), "reused-id-bytes");
       resume.resolve();
       await gcDone;
       assert.equal(targetName, first.id);
@@ -268,9 +280,9 @@ test("GC must not unlink a trash file replaced by a newer drop after the aged st
       );
     },
     {
-      now: () => 50_000,
-      stageRetentionMs: 1_000,
-      trashRetentionMs: 1_000,
+      now: () => now,
+      stageRetentionMs: retentionMs,
+      trashRetentionMs: retentionMs,
       gcIo,
     },
   );
