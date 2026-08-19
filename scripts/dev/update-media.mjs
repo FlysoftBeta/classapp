@@ -4,6 +4,8 @@
  *
  * This is the only media path allowed to touch npm/git/network. Normal release
  * builds only verify the committed manifest against `.cache/media`.
+ * `--prepare-cache` fills that cache from the committed pins without rewriting
+ * the manifest; CI uses it so a Windows assembly does not bump yt-dlp/POT.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -47,6 +49,7 @@ function parseArgs(argv) {
   let ytDlpVersion = null;
   let potTag = null;
   let buildPot = true;
+  let prepareCache = false;
   let platform = process.platform === "win32" ? "windows" : "linux";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -57,12 +60,16 @@ function parseArgs(argv) {
     else if (arg === "--platform" && argv[index + 1]) platform = argv[++index];
     else if (arg.startsWith("--platform=")) platform = arg.slice("--platform=".length);
     else if (arg === "--no-pot-build") buildPot = false;
+    else if (arg === "--prepare-cache") prepareCache = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if (platform !== "linux" && platform !== "windows") {
     throw new Error("--platform must be linux or windows");
   }
-  return { ytDlpVersion, potTag, buildPot, platform };
+  if (prepareCache && (ytDlpVersion || potTag)) {
+    throw new Error("--prepare-cache cannot be combined with --yt-dlp or --pot");
+  }
+  return { ytDlpVersion, potTag, buildPot, prepareCache, platform };
 }
 
 function ytDlpRelease(version) {
@@ -239,9 +246,25 @@ function cachePlugin(manifest) {
   console.log(`[media] POT plugin ${tag} cached`);
 }
 
+function populateCache(manifest, { platform, buildPot }) {
+  cacheYtDlp(manifest);
+  cachePlugin(manifest);
+  if (buildPot) {
+    buildPotServer(
+      manifest.potProvider.sourceRef.replace(/^tag\s+/, ""),
+      platform,
+    );
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  if (args.prepareCache) {
+    populateCache(manifest, args);
+    console.log("[media] cache prepared from committed manifest");
+    return;
+  }
   if (args.ytDlpVersion || manifest.ytDlp.version !== args.ytDlpVersion) {
     const ytDlp = ytDlpRelease(args.ytDlpVersion ?? null);
     for (const value of [ytDlp.linux, ytDlp.windows]) {
@@ -260,14 +283,7 @@ function main() {
       bytes: release.bytes,
     };
   }
-  cacheYtDlp(manifest);
-  cachePlugin(manifest);
-  if (args.buildPot) {
-    buildPotServer(
-      manifest.potProvider.sourceRef.replace(/^tag\s+/, ""),
-      args.platform,
-    );
-  }
+  populateCache(manifest, args);
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`[media] manifest updated: ${manifestPath}`);
   if (args.buildPot) {

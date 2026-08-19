@@ -69,6 +69,14 @@ Release assembly currently runs on Linux x64 and accepts `linux-redhat`,
 `linux-debian`, or `windows`. Final archives are written to `build/`; disposable
 intermediates live below `.cache/` or `CLASSAPP_BUILD_CACHE`.
 
+`.github/workflows/build-windows.yml` is the hosted Windows assembly path. It
+runs the same Linux x64 assembler, prepares the Windows POT server cache from
+the committed media manifest (`npm run media:update -- --prepare-cache
+--platform windows`), and uploads `build/bootstrap-windows.zip` and
+`build/deploy-windows.zip`. GitHub-hosted archives omit `worktree/secrets/`
+HTTPS and AI material. The workflow proves that the Windows target still
+packages; it does not exercise a Windows host, launcher rollback, or Chrome 70.
+
 `build-wasm.mjs` keeps the wasm-pack binary cache and cargo home under
 `resolveBuildCache()` (`wasm-pack/` and `cargo-home/`). Wasm prerequisite
 builds therefore do not write to `~/.cache` or `~/.cargo` and remain usable in
@@ -140,6 +148,7 @@ document what invariant it can falsify.
 | `npm run https:check`        | configured certificate material passes script checks     |
 | `npm run pdfrender:update`   | remote renderer artifacts can be fetched and verified    |
 | `npm run media:update`       | media manifest is refreshed and POT server cache rebuilt |
+| `npm run media:update -- --prepare-cache` | `.cache/media` is filled from committed pins without rewriting the manifest |
 
 These commands are not interchangeable. `npm run build` is not needed merely
 to typecheck; `npm run lint` does not execute unit or smoke tests; Vite does

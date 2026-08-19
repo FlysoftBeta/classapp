@@ -194,6 +194,10 @@ Use `--platform linux|windows` to prepare the other platform. Development
 resolves the same `.cache/media` tree, so run the update once after cloning
 before using media features in `npm run dev`.
 
+`--prepare-cache` skips GitHub release refresh and does not rewrite the
+committed manifest. Hosted Windows assembly uses that flag so CI packages the
+pinned yt-dlp/POT versions rather than whatever is latest on the day of the run.
+
 ## Known limitations
 
 - Offline playback works for tracks whose verified extent file exists; the

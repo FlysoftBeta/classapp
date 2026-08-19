@@ -19,7 +19,9 @@ Never generate separate independent version IDs for these artifacts.
 
 ## Release artifacts
 
-The build targets `linux-debian`, `linux-redhat`, or `windows`. It produces:
+The build targets `linux-debian`, `linux-redhat`, or `windows`. Assembly
+runs on Linux x64 for every target; GitHub Actions currently hosts that
+path only for Windows. A release produces:
 
 - bootstrap archive for first installation;
 - deploy archive for an existing launcher;
