@@ -62,7 +62,7 @@ async function fetchBytes(
     redirect: "follow",
     cache: "no-store",
     signal: AbortSignal.timeout(5 * 60 * 1000),
-    headers: { "user-agent": "ClassApp-UpdateManager" },
+    headers: { "user-agent": "ClassApp-UpdateRuntime" },
   });
   if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`);
   const declared = Number(response.headers.get("content-length"));

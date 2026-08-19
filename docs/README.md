@@ -46,6 +46,7 @@ For any product change, start with:
 
 ### Foundations
 
+- [Occupancy and process composition](./foundations/server-occupancy.md)
 - [Lifetimes, ownership, and composition](./foundations/lifetimes-and-ownership.md)
 - [Invariants, transactions, and events](./foundations/invariants-and-transactions.md)
 - [Authority, validation, and audit](./foundations/authority-validation-audit.md)
@@ -113,7 +114,8 @@ For any product change, start with:
    programming errors into ordinary offline or business states.
 10. Prefer direct migrations and explicit hard boundaries over compatibility
     layers for reconstructible data.
-11. Test the invariant at the boundary where it can fail, including the real
+11. Treat leftover after return as occupancy, independent of layer names.
+12. Test the invariant at the boundary where it can fail, including the real
     Chrome 70 production boot chain when browser compatibility is involved.
-12. Do not copy a pattern merely because it exists in the repository. First
+13. Do not copy a pattern merely because it exists in the repository. First
     determine whether it is intentional, repeated, documented, and verified.

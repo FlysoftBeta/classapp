@@ -34,7 +34,7 @@ import {
   ContractViolationError,
   recordContainedServerIncident,
 } from "@/server/services/incidentService";
-import { publishGroupArticle, publishUser } from "@/server/services/eventBus";
+import { publishGroupArticle, publishUser } from "@/server/runtime/eventBus";
 import {
   deleteUserConfig,
   getUserConfig,

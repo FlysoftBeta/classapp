@@ -10,11 +10,12 @@ Cross-stack system documents remain authoritative for behavior.
 | `Coordinator`            | process composition: protocol, EventBus, StickyRuntimes, Executor pool |
 | `EventBusRuntime`        | Coordinator channel fan-out; events are repair hints, not durable log  |
 | `AiExecutionRuntime`     | sticky AI run cancellation and restart reconciliation                  |
-| `ArticleImportRuntime`   | sticky external import pool, queue, long-running task ownership        |
+| `MediaRuntime`           | sticky materialization, search, stream grants, quota eviction          |
+| `ArticleImportRuntime`   | sticky external import pool, queue, long-running task occupancy        |
 | `TeachDocumentsRuntime`  | sticky Office/WPS monitor child, capture, quota policy/ledger          |
 | `ExecutorPool`           | worker_threads; one SQLite connection per worker                       |
 | launcher                | version directories, child restart, pending metadata, rollback watchdog                         |
-| `UpdateManager`         | Coordinator-owned staging/cloud status and launcher IPC; Executor jobs use the update sticky port |
+| `UpdateRuntime`         | Coordinator sticky occupancy: staging/cloud status and launcher IPC |
 | `BundleManager`         | browser post-bootstrap manifest check, stage, activation coordination                           |
 | Service Worker          | selected Shell cache/pointer and navigation fallback only                                       |
 
@@ -67,7 +68,7 @@ Cross-stack system documents remain authoritative for behavior.
 | Service                      | Responsibility                                                         |
 | ---------------------------- | ---------------------------------------------------------------------- |
 | `AppStateService`            | public/authenticated application-state projections and global settings |
-| `AdminSystemService`         | backup/update/rollback/tool facade over infra mechanisms               |
+| `AdminSystemService`         | backup/tools and request view of update occupancy                    |
 | `HttpsUpgradeService`        | certificate/status/redirect setting mechanism                          |
 | `IncidentService`            | grouping, public correlation IDs, bounded diagnostic capture           |
 | `IncidentLogArchiveService`  | current-build diagnostic export                                        |

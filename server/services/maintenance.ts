@@ -3,7 +3,7 @@
  * and storage quota reconciliation.
  */
 import type BetterSqlite3 from "better-sqlite3";
-import { publishClient } from "./eventBus";
+import { publishClient } from "@/server/runtime/eventBus";
 import {
   getIdleLockEnabled,
   IDLE_LOCK_TIMEOUT_MINUTES,

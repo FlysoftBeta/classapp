@@ -30,7 +30,6 @@ import {
   listAssets,
   markAssetDownloading,
   markAssetFailed,
-  mediaConfig,
   mediaQuotaPolicy,
   publishAsset,
   readyAssetBytesForTrack,
@@ -39,7 +38,7 @@ import {
 } from "@/server/data/media";
 import { BlobStore, type StagingSlot } from "@/server/storage/blobStore";
 import { QuotaService } from "@/server/storage/quotaService";
-import { publishSystem } from "@/server/services/eventBus";
+import { publishSystem } from "@/server/runtime/eventBus";
 import { recordContainedServerIncident } from "@/server/services/incidentService";
 import { BUILD_ID } from "@/server/infra/env";
 

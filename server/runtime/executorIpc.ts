@@ -1,13 +1,13 @@
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
 import type { RequestIdentity } from "@/server/runtime/scope";
-import type { BusEvent } from "@/server/services/eventBus";
+import type { BusEvent } from "@/server/runtime/eventBus";
 import type { StickyCommand } from "@/server/runtime/sticky";
 import type { ActionResult } from "@/shared/protocol/result";
 import type { MediaSearchHit } from "@/server/runtime/mediaRuntime";
-import type { ArticleImportTask } from "@/server/services/articleImportService";
+import type { ArticleImportTask } from "@/server/runtime/articleImportRuntime";
 import type { User } from "@/shared/types/api";
 import type { RuntimeConfig } from "@/server/infra/runtimeConfig";
-import type { UpdateStatusView } from "@/server/infra/update/manager";
+import type { UpdateStatusView } from "@/server/runtime/update/runtime";
 import {
   ContractViolationError,
   PublicError,
@@ -89,7 +89,7 @@ export type StickyRpcResult = {
   "media.search": MediaSearchHit[];
   "articleImport.search": Awaited<
     ReturnType<
-      import("@/server/services/articleImportService").ArticleImportRuntime["search"]
+      import("@/server/runtime/articleImportRuntime").ArticleImportRuntime["search"]
     >
   >;
   "articleImport.start": ArticleImportTask;

@@ -35,7 +35,7 @@ import {
 import type { BlobStore } from "@/server/storage/blobStore";
 import { AiWorkspace } from "@/server/services/ai/aiWorkspace";
 import { BUILD_ID } from "@/server/infra/env";
-import { publishUser } from "@/server/services/eventBus";
+import { publishUser } from "@/server/runtime/eventBus";
 import {
   PublicError,
   recordContainedServerIncident,

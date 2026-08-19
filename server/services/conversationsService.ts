@@ -26,7 +26,7 @@ import {
   upsertConversationReadState,
   purgeConversationStateForUser,
 } from "@/server/data/conversations";
-import { publishUserConv } from "./eventBus";
+import { publishUserConv } from "@/server/runtime/eventBus";
 import { PublicError } from "@/server/services/incidentService";
 import { chooseFurthestRead } from "@/shared/sync/arbitration";
 import { parseConvId } from "@/shared/conversations/id";

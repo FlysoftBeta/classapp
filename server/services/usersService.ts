@@ -27,7 +27,7 @@ import {
 } from "@/server/data/users";
 import { PublicError } from "@/server/services/incidentService";
 import { toDbTimestamp } from "@/shared/time";
-import { publishUser } from "./eventBus";
+import { publishUser } from "@/server/runtime/eventBus";
 import type { User } from "@/shared/types/api";
 import {
   DEFAULT_USER_FEATURES,

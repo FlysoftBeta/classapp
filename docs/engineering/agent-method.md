@@ -63,6 +63,7 @@ For a nontrivial change, capture these before code:
 | Identity/order  | Stable key, mutable labels, cursor/tie-breaker, revision?      |
 | Authority       | Which Facade paths are legitimate and why?                     |
 | Owner/lifetime  | Coordinator/Sticky, Executor Scope, operation, local projection, UI? |
+| Occupancy       | Protocol, job, or sticky leftover? Which seam if it must ask another occupancy? |
 | Transaction     | What must commit atomically? What external work is outside?    |
 | Publication     | Pointer/generation/event; what becomes visible when?           |
 | Failure windows | Crash, abort, disconnect, actor switch, concurrent writer?     |
@@ -100,6 +101,8 @@ only if it exposes ownership/transition, not as decoration.
 - objective coherent mechanism/invariant → Service;
 - SQL/row mapping → Data;
 - process/filesystem/native runtime → Runtime/infra, explicitly owned;
+  leftover that outlives the request is occupancy, not a request Service
+  ([occupancy](../foundations/server-occupancy.md));
 - IndexedDB transaction/store mechanism → client/data;
 - local/remote choice, normalization, merge, recovery, quota → client/interact;
 - rendering and ephemeral interaction → hooks/components.

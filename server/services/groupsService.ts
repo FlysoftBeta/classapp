@@ -31,7 +31,7 @@ import {
   PublicError,
 } from "@/server/services/incidentService";
 import { publishConversationUpdate } from "@/server/services/conversationsService";
-import { publishRemoteResubscribe } from "@/server/services/eventBus";
+import { publishRemoteResubscribe } from "@/server/runtime/eventBus";
 import type { AdminGroup, Group, GroupMember } from "@/shared/types/api";
 import { groupConvId } from "@/shared/conversations/id";
 import { userMetadataForIds } from "@/server/data/users";

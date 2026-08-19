@@ -27,7 +27,7 @@ import {
 
 const AUTO_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-type UpdateManagerState =
+type UpdateRuntimeState =
   { status: "idle" } | { status: "pending"; appliedAt: string };
 
 export interface UpdateStatus {
@@ -65,8 +65,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export class UpdateManager {
-  private state: UpdateManagerState = { status: "idle" };
+export class UpdateRuntime {
+  private state: UpdateRuntimeState = { status: "idle" };
   private checkTimer: NodeJS.Timeout | null = null;
   private initialCheckTimer: NodeJS.Timeout | null = null;
   private cloudChecking = false;
@@ -83,7 +83,7 @@ export class UpdateManager {
     if (!appliedAtValue) return;
     if (!fs.existsSync(this.config.backupDir)) {
       console.log(
-        "[UpdateManager] 检测到无 backup/ 的待确认更新，清除残留标记",
+        "[UpdateRuntime] 检测到无 backup/ 的待确认更新，清除残留标记",
       );
       this.clearPending();
       return;
@@ -92,7 +92,7 @@ export class UpdateManager {
     const elapsed = Date.now() - new Date(appliedAtValue).getTime();
     const remaining = Math.max(0, UPDATE_CONFIRM_TIMEOUT_MS - elapsed);
     console.log(
-      `[UpdateManager] 待确认更新（launcher watchdog 剩余约 ${Math.ceil(remaining / 1000)}s）`,
+      `[UpdateRuntime] 待确认更新（launcher watchdog 剩余约 ${Math.ceil(remaining / 1000)}s）`,
     );
   }
 
@@ -128,7 +128,7 @@ export class UpdateManager {
   confirmUpdate(): void {
     this.clearPending();
     runtimeController()?.confirmUpdate();
-    console.log("[UpdateManager] 更新已确认，launcher 将清除应用备份");
+    console.log("[UpdateRuntime] 更新已确认，launcher 将清除应用备份");
   }
 
   requestRollback(): void {
@@ -138,7 +138,7 @@ export class UpdateManager {
     if (!fs.existsSync(this.config.backupDir)) {
       throw new PublicError("backup/ 目录不存在，无法回滚");
     }
-    console.log("[UpdateManager] 管理员触发回滚…");
+    console.log("[UpdateRuntime] 管理员触发回滚…");
     this.triggerRollback();
   }
 
@@ -305,9 +305,9 @@ export class UpdateManager {
   private captureCloudFailure(error: unknown, phase: string): void {
     this.lastCheckedAt = new Date().toISOString();
     this.lastError = errorMessage(error);
-    console.error("[UpdateManager] 云端更新失败:", this.lastError);
+    console.error("[UpdateRuntime] 云端更新失败:", this.lastError);
     recordContainedServerIncident(this.db, BUILD_ID, error, {
-      component: "update-manager",
+      component: "update",
       phase,
     });
   }
@@ -322,7 +322,7 @@ export class UpdateManager {
       this.clearPending();
     } catch (error) {
       recordContainedServerIncident(this.db, BUILD_ID, error, {
-        component: "update-manager",
+        component: "update",
         phase: "clear-pending-before-rollback",
       });
     }

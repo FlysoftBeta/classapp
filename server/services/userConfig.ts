@@ -5,7 +5,7 @@ import {
   upsertUserConfigValue,
   purgeUserConfigValues,
 } from "@/server/data/userConfig";
-import { publishUser } from "./eventBus";
+import { publishUser } from "@/server/runtime/eventBus";
 
 function publishUserConfigChanged(
   userId: string,

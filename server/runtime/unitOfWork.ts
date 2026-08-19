@@ -2,7 +2,7 @@ import type { Database } from "better-sqlite3";
 import {
   deliverDeferredEvents,
   withDeferredEvents,
-} from "@/server/services/eventBus";
+} from "@/server/runtime/eventBus";
 
 /** Owns transaction nesting and defers observable side effects until commit. */
 export class UnitOfWork {

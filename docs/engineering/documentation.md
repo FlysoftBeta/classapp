@@ -59,8 +59,8 @@ Choose ownership by the concern, not by the file being edited:
 
 - project premise and domain philosophy → `product-context.md`;
 - cross-stack topology → `architecture.md`;
-- lifetime, transaction, authority, error, security, or server data concerns →
-  the corresponding `foundations/` document;
+- lifetime, occupancy, transaction, authority, error, security, or server data
+  concerns → the corresponding `foundations/` document;
 - offline representation and protocols → `offline/`;
 - end-to-end product mechanism → `systems/`;
 - implementation, tests, scripts, documentation, and agent workflow →

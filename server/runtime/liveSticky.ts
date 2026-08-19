@@ -1,17 +1,17 @@
 import type { MediaRuntime } from "@/server/runtime/mediaRuntime";
-import type { ArticleImportRuntime } from "@/server/services/articleImportService";
+import type { ArticleImportRuntime } from "@/server/runtime/articleImportRuntime";
 import type { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
 import type { AiExecutionRuntime } from "@/server/runtime/aiExecutionRuntime";
 import type { StickyCommand, StickyHost } from "@/server/runtime/sticky";
 import {
   disabledUpdateStatus,
-  type UpdateManager,
-} from "@/server/infra/update/manager";
+  type UpdateRuntime,
+} from "@/server/runtime/update/runtime";
 import { PublicError } from "@/server/services/incidentService";
 
-function requireUpdate(manager: UpdateManager | null): UpdateManager {
-  if (!manager) throw new PublicError("当前环境已禁用在线更新");
-  return manager;
+function requireUpdate(runtime: UpdateRuntime | null): UpdateRuntime {
+  if (!runtime) throw new PublicError("当前环境已禁用在线更新");
+  return runtime;
 }
 
 export function createLiveStickyHost(input: {
@@ -19,7 +19,7 @@ export function createLiveStickyHost(input: {
   articleImports: ArticleImportRuntime;
   teachDocuments: TeachDocumentsRuntime;
   aiExecution: AiExecutionRuntime;
-  update: UpdateManager | null;
+  update: UpdateRuntime | null;
   queueCommand: (command: StickyCommand) => void;
 }): StickyHost {
   return {

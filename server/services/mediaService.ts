@@ -12,7 +12,7 @@ import {
 } from "@/server/data/media";
 import { MediaError } from "@/lib/media";
 import { PublicError } from "@/server/services/incidentService";
-import { publishSystem, publishUser } from "@/server/services/eventBus";
+import { publishSystem, publishUser } from "@/server/runtime/eventBus";
 import { QuotaService } from "@/server/storage/quotaService";
 
 export function mapMediaError(error: unknown): PublicError {

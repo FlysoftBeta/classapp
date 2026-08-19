@@ -33,11 +33,11 @@ server/
   services/         domain and operational mechanisms; AI lives in services/ai/
   data/             all domain SQL and row mapping
   validation/       semantic input validation shared by entry paths
-  runtime/          Runtime, Scope, Actor, Facts, UnitOfWork and composition
-  storage/          ObjectStore blobs/trees, path containment, quota service
+  runtime/          Coordinator, Executor pool, StickyRuntimes, Scope, UnitOfWork
+  storage/          blobs/trees, path containment, quota service
   http/             raw HTTP handler and generated Service Worker
   http/routes/      upload, download, rendering, Range and discovery adapters
-  infra/            DB bootstrap, files, renderer, config and update mechanisms
+  infra/            DB bootstrap, files, renderer, config
 shared/
   protocol/         correlated Action/wire/result schemas
   types/            semantic API and event DTOs
@@ -57,12 +57,13 @@ Transport → Action / HTTP adapter → Facade / ActorFacade → Service → Dat
 - Facades select legitimate Actor-dependent business paths.
 - Services own coherent objective mechanisms and side effects.
 - Data owns SQL and row mapping.
-- Runtime owns process-lifetime resources. Scope owns one request and lazily
-  composes Actor, Facades, Services, Facts, and UnitOfWork.
+- Runtime owns process occupancy. Scope owns one request and lazily
+  composes Actor, Facades, Services, and UnitOfWork.
 - Raw HTTP routes are for operations that genuinely need HTTP semantics such as
   uploads, downloads, ranges, rendering, or discovery.
 
-Read [architecture](./docs/architecture.md) and
+Read [architecture](./docs/architecture.md),
+[occupancy](./docs/foundations/server-occupancy.md), and
 [lifetimes](./docs/foundations/lifetimes-and-ownership.md) before changing these
 relationships.
 
@@ -106,7 +107,7 @@ documents. The paths are orientation, not a substitute for tracing the flow.
 | server schema, SQL, migration, materialized data | `server/infra/db.ts`, `server/data/`, owning Service                                                                                                                                                                  | [server data model](./docs/foundations/server-data-model.md), [transactions and events](./docs/foundations/invariants-and-transactions.md)                                                               |
 | client schema or offline domain data             | `client/data/schema.ts`, `client/data/migration.ts`, `client/data/model.ts`, `client/data/repository.ts`                                                                                                              | [local data model](./docs/offline/local-model.md), [consistency and recovery](./docs/offline/consistency-and-recovery.md), [storage and quota](./docs/offline/storage-and-quota.md)                      |
 | sync, proposals, coverage, reconnect             | `client/interact/sync.ts`, `consistency.ts`, `remoteLifecycle.ts`, domain interact module                                                                                                                             | [consistency and recovery](./docs/offline/consistency-and-recovery.md), [RemoteManager connection reliability](./docs/offline/remote-connectivity.md), [offline overview](./docs/offline/README.md)                     |
-| Runtime, Scope, Actor, Facts, transactions       | `server/runtime/`, `server/runtime/composition.ts`                                                                                                                                                                    | [lifetimes and ownership](./docs/foundations/lifetimes-and-ownership.md), [transactions and events](./docs/foundations/invariants-and-transactions.md)                                                   |
+| Occupancy, Coordinator, Executor, Sticky, Scope | `server/runtime/`, `server/runtime/composition.ts` | [occupancy](./docs/foundations/server-occupancy.md), [lifetimes](./docs/foundations/lifetimes-and-ownership.md), [transactions](./docs/foundations/invariants-and-transactions.md) |
 | authentication, client trust, roles, validation  | `server/domain/facade/authentication.ts`, `server/services/authService.ts`, `server/services/clientsService.ts`, `server/services/authorityService.ts`, `server/services/roleService.ts`, `server/validation/`        | [authentication](./docs/systems/authentication.md), [authority, validation, and audit](./docs/foundations/authority-validation-audit.md), [security](./docs/foundations/security-threat-model.md)        |
 | Groups, conversations, Posts, Articles           | matching files in `server/domain/facade/`, `server/services/`, `server/data/`, `client/interact/`; UI in `client/components/chat/`, `client/components/articles/`, `client/components/sidebar/`                       | [community and content](./docs/systems/community-and-content.md), plus offline data/consistency docs when cached                                                                                         |
 | React UI, resources, Zustand, large lists        | `client/components/`, `client/hooks/`, `client/interact/resources.ts`, `client/interact/appStore.ts`, `client/lib/`                                                                                                   | [frontend state and UI](./docs/systems/frontend-state-and-ui.md), [infinite scrolling](./docs/systems/infinite-scrolling.md)                                                                             |
@@ -114,7 +115,7 @@ documents. The paths are orientation, not a substitute for tracing the flow.
 | server objects, tree archives, quota eviction    | `server/storage/`, `server/data/quota.ts`, `server/runtime/mediaRuntime.ts`, `server/runtime/teachDocumentsRuntime.ts`, `server/services/teachDocumentsService.ts`, `server/services/ai/aiWorkspace.ts`                                                | [server object storage and quota](./docs/systems/server-storage.md), [lifetimes and ownership](./docs/foundations/lifetimes-and-ownership.md)                                                               |
 | music, media playback, yt-dlp packaging          | `server/runtime/mediaRuntime.ts`, `lib/media/`, `server/services/mediaService.ts`, `server/services/mediaPlaylistService.ts`, `server/data/media.ts`, `client/interact/media.ts`, `client/components/media/`, `scripts/builds/build-media.mjs` | [music and media runtime](./docs/systems/music.md), [storage and quota](./docs/offline/storage-and-quota.md), [repository infrastructure](./docs/engineering/repository-infrastructure.md) |
 | AI conversations, workspace, provider or billing | `server/services/ai/`, `server/domain/facade/ai.ts`, `client/interact/ai.ts`, `client/components/ai/`                                                                                                                 | [AI harness](./docs/systems/ai-harness.md), [AI billing](./docs/systems/ai-billing.md)                                                                                                                   |
-| startup, HTTPS, Shell, bundle or server update   | `shell.html`, `client/lib/bundle.ts`, `client/data/shellSchema.ts`, `server/boot.ts`, `server/main.ts`, `server/infra/update/`, `launcher/`, `scripts/builds/`                                                        | [update and startup](./docs/systems/update-and-startup.md), [Shell and HTTPS](./docs/offline/shell-and-https.md), [repository infrastructure](./docs/engineering/repository-infrastructure.md)           |
+| startup, HTTPS, Shell, bundle or server update   | `shell.html`, `client/lib/bundle.ts`, `client/data/shellSchema.ts`, `server/boot.ts`, `server/main.ts`, `server/runtime/update/`, `launcher/`, `scripts/builds/` | [update and startup](./docs/systems/update-and-startup.md), [occupancy](./docs/foundations/server-occupancy.md), [Shell and HTTPS](./docs/offline/shell-and-https.md) |
 | Incident, audit, operations, administration      | `server/domain/facade/incidents.ts`, `server/domain/facade/audit.ts`, `server/domain/facade/administration.ts`, corresponding Services/Data, `client/components/admin/`                                               | [errors and Incidents](./docs/foundations/errors-and-incidents.md), [observability and operations](./docs/systems/observability-and-operations.md), [admin workbench](./docs/systems/admin-workbench.md) |
 | scripts, build, tests, documentation             | `scripts/`, `package.json`, `vite*.config.ts`, `docs/`                                                                                                                                                                | [repository infrastructure](./docs/engineering/repository-infrastructure.md), [testing](./docs/engineering/testing.md), [documentation maintenance](./docs/engineering/documentation.md)                 |
 
@@ -162,8 +163,9 @@ and [testing](./docs/engineering/testing.md) for exact behavior.
 3. Use `docs/README.md` to find the relevant design memory, then trace the real
    producer-to-consumer path in code. Do not infer architecture from one file or
    imitate a pattern merely because it exists.
-4. For a nontrivial change, identify the domain fact, owner, lifetime, stable
-   identity, transaction/publication boundary, failure windows, and recovery.
+4. For a nontrivial change, identify the domain fact, owner, occupancy,
+   lifetime, stable identity, transaction/publication boundary, failure
+   windows, and recovery.
    Cross-stack work may require tracing UI, protocol, Facade, Service, Data,
    events, client merge, offline retention, and reconnect repair.
 5. Implement through the existing owners. Prefer a coherent migration over two
@@ -206,6 +208,8 @@ The full writing and maintenance guide is
 
 - Which layer owns this fact or consequence? Is the logic merely in the easiest
   caller or an already-large accidental module?
+- What is leftover after return? Is that protocol, job, or sticky occupancy,
+  and which seam reaches a neighboring occupancy if one is needed?
 - Does this introduce a second truth, cache, activation pointer, permission
   check, or representation?
 - Does a generic helper hide a missing owner? Can context, locks,

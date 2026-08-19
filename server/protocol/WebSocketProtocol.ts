@@ -6,7 +6,7 @@ import {
   subscribe,
   systemChannel,
   type BusEvent,
-} from "@/server/services/eventBus";
+} from "@/server/runtime/eventBus";
 import type { Coordinator } from "@/server/runtime/coordinator";
 import {
   authenticateFrameSchema,
