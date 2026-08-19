@@ -8,7 +8,8 @@ process preserves reasoning without turning documentation into ceremony.
 
 Write a record before or with a change that:
 
-- changes an invariant, ownership boundary, lifetime, or dependency direction;
+- changes an invariant, occupancy, ownership boundary, lifetime, or dependency
+  direction;
 - adds a persistence/cache layer, protocol, port, activation pointer, or source
   of truth;
 - changes offline merge, coverage, purge, quota, or recovery semantics;

@@ -19,6 +19,7 @@ Production host
                 ├─ WebSocket /ws ProtocolSession (socket + bindings)
                 ├─ EventBus
                 ├─ StickyRuntimes (AI, media, import, teach, upload, storage)
+                ├─ UpdateRuntime (installed by boot; omitted in development)
                 └─ ExecutorPool (worker_threads → sibling executor.mjs)
                      └─ per worker: SQLite connection + Action Scope
 
@@ -33,6 +34,8 @@ Browser
 ```
 
 The occupancy model is recorded in
+[occupancy and process composition](./foundations/server-occupancy.md).
+The accepted cutover is
 [0001: Coordinator, Executor pool, and StickyRuntimes](./decisions/0001-coordinator-executor.md).
 
 Development starts `server/dev.ts` and Vite separately. It deliberately bypasses
@@ -59,7 +62,7 @@ server/
   data/         SQL and database row mapping
   runtime/      Coordinator, Executor pool, StickyRuntimes, Scope, UnitOfWork
   storage/      object blobs, manifest trees, path containment, quota service
-  infra/        database bootstrap, render process, config/update mechanisms
+  infra/        database bootstrap, render process, config
   validation/   semantic validation shared by server entry paths
 
 shared/         wire schemas, semantic DTOs, pure cross-runtime logic
@@ -105,7 +108,7 @@ SQL. Services must not infer the caller's administrative authority. Data must
 not publish events or choose actor policy.
 
 The current code has exceptions, such as incident-key SQL in
-`IncidentService` and singleton access to `UpdateManager`. Service-level event
+`IncidentService`. Service-level event
 publication now goes through a UnitOfWork deferral queue whenever a Facade runs
 a mutation inside `unitOfWork.run`, so events are delivered only after the
 outermost commit; Facades that still bypass UnitOfWork remain migration
@@ -178,8 +181,9 @@ When deciding whether code belongs in a layer, ask:
 
 1. Is this transport representation, public actor policy, objective domain
    mechanism, persistence representation, client orchestration, or rendering?
-2. What lifetime owns its mutable state?
-3. What fact is authoritative, and can another layer disagree with it?
+2. What occupancy owns leftover after return—protocol, job, or sticky? See
+   [occupancy](./foundations/server-occupancy.md).
+3. What fact is authoritative, and can another occupancy disagree with it?
 4. What transaction or publication boundary makes the result visible?
 5. How is the result repaired after disconnect, restart, abort, or partial
    download?

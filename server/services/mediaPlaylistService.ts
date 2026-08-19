@@ -12,7 +12,7 @@ import {
   removeQueueItem,
   updatePlaylistRetention,
 } from "@/server/data/media";
-import { publishUser } from "@/server/services/eventBus";
+import { publishUser } from "@/server/runtime/eventBus";
 import { PublicError } from "@/server/services/incidentService";
 import type { MediaListSnapshot } from "@/shared/media/types";
 

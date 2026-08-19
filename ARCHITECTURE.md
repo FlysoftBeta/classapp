@@ -32,7 +32,7 @@ Update ownership is deliberately singular:
 | post-bootstrap browser checks and asset download         | `BundleManager`                  |
 | active bundle pointer                                    | IndexedDB `globals`              |
 | active Shell pointer and cached Shell                    | Service Worker Cache Storage     |
-| deployment validation and staging                        | server `UpdateManager`           |
+| deployment validation and staging                        | server `UpdateRuntime`           |
 | directory swap, confirmation timeout and app/DB rollback | launcher                         |
 
 The launcher persists the database backup name and the original apply time in

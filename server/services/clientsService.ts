@@ -20,7 +20,7 @@ import {
   clearUserClientReferences,
   isActiveBoundUser,
 } from "@/server/data/clients";
-import { publishClient } from "@/server/services/eventBus";
+import { publishClient } from "@/server/runtime/eventBus";
 import type { ClientIdentity } from "@/server/infra/clientIdentity";
 import { userMetadataForIds } from "@/server/data/users";
 import type { UserMetadata } from "@/shared/types/api";

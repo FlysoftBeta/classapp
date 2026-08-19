@@ -6,9 +6,9 @@ import {
   listBackupFiles,
   buildBackupDownload,
 } from "@/server/infra/dbBackup";
-import { updateManager } from "@/server/infra/update/manager";
 import { PublicError } from "@/server/services/incidentService";
 import { createHttpsUpgradeService } from "@/server/services/httpsUpgradeService";
+import type { UpdateSticky } from "@/server/runtime/sticky";
 
 export type AdminSystemToolAction = "kill-wps" | "shutdown";
 
@@ -22,7 +22,10 @@ function runBackground(command: string, args: string[]) {
 }
 
 export class AdminSystemService {
-  constructor(private readonly db: BetterSqlite3.Database) {}
+  constructor(
+    private readonly db: BetterSqlite3.Database,
+    private readonly update: UpdateSticky,
+  ) {}
 
   listBackups() {
     return listBackupFiles();
@@ -44,38 +47,19 @@ export class AdminSystemService {
   }
 
   getUpdateStatus() {
-    const status = updateManager()?.getStatus();
-    return status
-      ? { ...status, disabled: false }
-      : {
-          pending: false,
-          applied_at: null,
-          seconds_remaining: 0,
-          timeout_seconds: 0,
-          cloud_checking: false,
-          cloud_installing: false,
-          cloud_latest_build_id: null,
-          cloud_update_available: false,
-          cloud_last_checked_at: null,
-          cloud_last_error: null,
-          disabled: true,
-        };
+    return this.update.status();
   }
 
   cloudConfigChanged(): void {
-    updateManager()?.cloudConfigChanged();
+    this.update.cloudConfigChanged();
   }
 
   async checkCloudUpdate() {
-    const manager = updateManager();
-    if (!manager) throw new PublicError("当前环境已禁用在线更新");
-    return manager.checkCloudUpdate();
+    return this.update.checkCloud();
   }
 
   async installCloudUpdate(): Promise<{ ok: true; message: string }> {
-    const manager = updateManager();
-    if (!manager) throw new PublicError("当前环境已禁用在线更新");
-    await manager.installCloudUpdate();
+    await this.update.installCloud();
     return { ok: true, message: "服务器即将重启以应用云端更新" };
   }
 
@@ -83,25 +67,19 @@ export class AdminSystemService {
     return createHttpsUpgradeService(this.db).getStatus();
   }
 
-  confirmUpdate(): void {
-    const manager = updateManager();
-    if (!manager) throw new PublicError("当前环境已禁用在线更新");
-    manager.confirmUpdate();
+  confirmUpdate(): Promise<void> {
+    return this.update.confirm();
   }
 
-  rollback(): { ok: true; message: string } {
-    const manager = updateManager();
-    if (!manager) throw new PublicError("当前环境已禁用在线更新");
-    manager.requestRollback();
+  async rollback(): Promise<{ ok: true; message: string }> {
+    await this.update.rollback();
     return { ok: true, message: "服务器即将回滚并重启" };
   }
 
   async deployPackage(
     zipBytes: Uint8Array,
   ): Promise<{ ok: true; message: string }> {
-    const manager = updateManager();
-    if (!manager) throw new PublicError("当前环境已禁用在线更新");
-    await manager.deployUpdate(zipBytes);
+    await this.update.deploy(zipBytes);
     return { ok: true, message: "服务器即将重启以应用更新" };
   }
 
@@ -133,6 +111,7 @@ export class AdminSystemService {
 
 export function createAdminSystemService(
   db: BetterSqlite3.Database,
+  update: UpdateSticky,
 ): AdminSystemService {
-  return new AdminSystemService(db);
+  return new AdminSystemService(db, update);
 }

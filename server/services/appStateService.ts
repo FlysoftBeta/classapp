@@ -18,7 +18,7 @@ import {
 } from "@/server/data/appState";
 import { isClientKonamiLocked } from "@/server/data/clients";
 import { getUserBanStatus } from "@/server/data/users";
-import { publishSystem } from "@/server/services/eventBus";
+import { publishSystem } from "@/server/runtime/eventBus";
 
 export { IDLE_LOCK_TIMEOUT_MINUTES } from "@/server/data/appState";
 export type { AppDisableReason };

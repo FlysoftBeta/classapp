@@ -3,7 +3,7 @@ import {
   getUserConfigVersion,
   upsertUserConfigVersion,
 } from "@/server/data/userConfig";
-import { publishUser } from "./eventBus";
+import { publishUser } from "@/server/runtime/eventBus";
 
 export class VersionedUserConfigService {
   constructor(private readonly db: Database) {}

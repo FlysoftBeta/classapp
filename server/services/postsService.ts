@@ -5,7 +5,7 @@ import {
   publishRemoteResubscribe,
   publishGroupPost,
   publishDmPost,
-} from "./eventBus";
+} from "@/server/runtime/eventBus";
 import {
   publishConversationUpdate,
   publishConversationUpdateForPost,

@@ -2,7 +2,9 @@
 
 Lifetime is an independent design dimension. A class is not process-bound
 because its name says `Service`, and a domain boundary is not determined by how
-long an object lives.
+long an object lives. Occupancy—what remains alive after a call returns—is
+owned by [server occupancy](./server-occupancy.md). This document keeps the
+lifetime lattice, Scope/Composition rules, and ownership review questions.
 
 ## Lifetime lattice
 
@@ -10,6 +12,7 @@ long an object lives.
 Coordinator
   ├─ protocol sessions, EventBus
   ├─ StickyRuntimes (AI, media, import, teach, upload, storage)
+  ├─ UpdateRuntime (staging, cloud poll, launcher IPC)
   ├─ Coordinator SQLite connection
   └─ ExecutorPool
        └─ worker: SQLite connection, request Scope
@@ -18,7 +21,6 @@ Coordinator
             ├─ Actor / AuthorityService
             ├─ Composition
             └─ Facades and Services (request-local, not pooled)
-```
 
 operation
   ├─ transaction
@@ -33,9 +35,10 @@ view/component
 ### Coordinator and StickyRuntimes
 
 `Coordinator` is the process composition root. StickyRuntimes own identity-bearing
-in-flight work (AI abort controllers, media download slots, import tasks). Each
-has an explicit start/reconcile/stop story and must not capture a request `Scope`
-or Actor. None of them own a client socket.
+in-flight work. Each has an explicit start/reconcile/stop story and must not
+capture a request `Scope` or Actor. None of them own a client socket. Why leftover
+belongs here, and which seam a job may use to reach it, is
+[occupancy](./server-occupancy.md).
 
 The Executor pool runs domain Actions. A worker's leftover after a job is only
 SQLite rows plus returned events and sticky commands.
@@ -95,7 +98,8 @@ Three kinds, not “stateless vs stateful” as a class label:
 - **StickyRuntime task** — sticks to a domain job id until a terminal state;
   restart reconciles from SQLite.
 
-See [0001: Coordinator, Executor pool, and StickyRuntimes](../decisions/0001-coordinator-executor.md).
+See [occupancy and process composition](./server-occupancy.md) and
+[0001: Coordinator, Executor pool, and StickyRuntimes](../decisions/0001-coordinator-executor.md).
 
 ## Ownership rules
 

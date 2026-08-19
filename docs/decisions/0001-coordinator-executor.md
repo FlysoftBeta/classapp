@@ -4,6 +4,8 @@ Status: accepted
 Date: 2026-08-18
 Owners: server/runtime, server/protocol, server/infra/db
 
+See also: [occupancy and process composition](../foundations/server-occupancy.md)
+
 ## Context
 
 The server ran in one Node thread with one `better-sqlite3` handle. WAL was
@@ -37,6 +39,7 @@ The process composition root is `Coordinator`. It owns:
 - HTTP/WebSocket protocol sessions and the in-memory EventBus;
 - StickyRuntimes (AI execution, media jobs, article import, teach-document
   capture, upload reconcile, storage eviction);
+- `UpdateRuntime` (staging, cloud poll, launcher confirm/rollback IPC);
 - a Coordinator SQLite connection for protocol-adjacent SQL and Sticky
   short transactions;
 - an `ExecutorPool` of `worker_threads`, each with its own SQLite
@@ -92,3 +95,5 @@ Rolldown build.
 - `Facts` and `getDb()` are absent from `server/`.
 - Worker entry sets `RuntimeConfig` before importing `env.ts`.
 - Release assembly emits both `main.mjs` and `executor.mjs`.
+- `UpdateRuntime` is constructed only on the Coordinator when boot `update`
+  directories are present; Executor jobs use sticky RPC, not a worker singleton.

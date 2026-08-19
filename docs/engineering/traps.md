@@ -49,8 +49,18 @@ belongs in Data; process lifecycle belongs in Runtime; network/IDB choice belong
 in interact. Decide by responsibility and lifetime, not filename.
 
 Current examples to improve rather than copy include Incident key SQL in
-`IncidentService`, global/singleton update-manager access, and schema creation in
-individual Data modules.
+`IncidentService` and schema creation in individual Data modules.
+
+## Process occupancy as a request singleton
+
+**Trap:** putting leftover that outlives a request into a module-global
+“manager,” then reading it from a request Service.
+
+Job occupancy cannot see a neighboring process occupancy through a locator.
+Each worker has a different empty singleton; production then looks like an
+occupancy that was never installed. Leftover belongs to protocol, job, or
+sticky occupancy, and jobs reach sticky occupancy through an explicit seam.
+See [occupancy](../foundations/server-occupancy.md).
 
 ## Generic capability DSL or `isAdmin` bypass
 

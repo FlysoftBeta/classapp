@@ -2,21 +2,25 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Database } from "better-sqlite3";
 import { Scope, withScope, type RequestIdentity } from "@/server/runtime/scope";
 import { AiExecutionRuntime } from "@/server/runtime/aiExecutionRuntime";
-import { ArticleImportRuntime } from "@/server/services/articleImportService";
+import { ArticleImportRuntime } from "@/server/runtime/articleImportRuntime";
 import {
   bindCoordinatorEventBus,
   EventBusRuntime,
   type BusEvent,
-} from "@/server/services/eventBus";
+} from "@/server/runtime/eventBus";
 import { MediaRuntime } from "@/server/runtime/mediaRuntime";
 import { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
 import { ArticleUploadRuntime } from "@/server/runtime/articleUploadRuntime";
 import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { BUILD_ID } from "@/server/infra/env";
+import { UpdateRuntime } from "@/server/runtime/update/runtime";
 import { createLiveStickyHost } from "@/server/runtime/liveSticky";
 import { ExecutorPool } from "@/server/runtime/executorPool";
-import type { ExecutorJobBody, ExecutorJobResult } from "@/server/runtime/executorIpc";
+import type {
+  ExecutorJobBody,
+  ExecutorJobResult,
+} from "@/server/runtime/executorIpc";
 import type { StickyCommand } from "@/server/runtime/sticky";
 import {
   createAiService,
@@ -43,6 +47,7 @@ export class Coordinator {
   private readonly aiRunner: AiService;
   private readonly pool: ExecutorPool;
   private readonly liveSticky;
+  private readonly updateRuntime: UpdateRuntime | null;
 
   constructor(
     readonly db: Database,
@@ -73,11 +78,23 @@ export class Coordinator {
       this.teachDocuments.quotaPolicy(),
       (item) => this.teachDocuments.evict(item.itemId),
     );
+    this.updateRuntime = config.update
+      ? new UpdateRuntime(db, config.update)
+      : null;
+    this.updateRuntime?.start();
+    if (this.updateRuntime) {
+      console.log("[UpdateRuntime] 已启用");
+    } else if (config.nodeEnv === "production") {
+      console.warn(
+        "[UpdateRuntime] 生产 boot 配置缺少 update，在线更新保持禁用",
+      );
+    }
     this.liveSticky = createLiveStickyHost({
       media: this.media,
       articleImports: this.articleImports,
       teachDocuments: this.teachDocuments,
       aiExecution: this.aiExecution,
+      update: this.updateRuntime,
       queueCommand: (command) => this.applyCommand(command),
     });
     this.aiRunner = createAiService(
@@ -103,6 +120,7 @@ export class Coordinator {
       articleImports: this.articleImports,
       teachDocuments: this.teachDocuments,
       aiExecution: this.aiExecution,
+      update: this.updateRuntime,
       queueCommand: (command) => commands.push(command),
     });
     return new Scope(
@@ -133,6 +151,7 @@ export class Coordinator {
   }
 
   closePool(): void {
+    this.updateRuntime?.stop();
     this.pool.close();
     bindCoordinatorEventBus(null);
   }

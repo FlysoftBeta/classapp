@@ -5,7 +5,7 @@ import {
   isAnnouncementAcknowledged,
   updateAnnouncement,
 } from "@/server/data/announcement";
-import { publishSystem } from "@/server/services/eventBus";
+import { publishSystem } from "@/server/runtime/eventBus";
 
 export class AnnouncementService {
   constructor(private readonly db: BetterSqlite3.Database) {}

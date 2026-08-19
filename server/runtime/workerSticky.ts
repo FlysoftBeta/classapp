@@ -1,12 +1,14 @@
 import { parentPort } from "node:worker_threads";
-import type {
-  ParentMessage,
-  StickyRpcArgs,
-  StickyRpcMethod,
-  StickyRpcResult,
-  WorkerMessage,
+import {
+  reviveStickyError,
+  type ParentMessage,
+  type StickyRpcArgs,
+  type StickyRpcMethod,
+  type StickyRpcResult,
+  type WorkerMessage,
 } from "@/server/runtime/executorIpc";
 import type { StickyCommand, StickyHost } from "@/server/runtime/sticky";
+import { PublicError } from "@/server/services/incidentService";
 
 function send(message: WorkerMessage): void {
   parentPort!.postMessage(message);
@@ -25,8 +27,7 @@ export function createWorkerStickyHost(input: {
         input.queueCommand({ type: "media.ensureMaterialized", track, kind }),
     },
     articleImports: {
-      search: (userId, query) =>
-        rpc("articleImport.search", [userId, query]),
+      search: (userId, query) => rpc("articleImport.search", [userId, query]),
       start: (user, bookId, groupId, titleHint = "") =>
         rpc("articleImport.start", [user, bookId, groupId, titleHint]),
       list: (userId) => rpc("articleImport.list", [userId]),
@@ -44,6 +45,19 @@ export function createWorkerStickyHost(input: {
       },
       execute: (payload) =>
         input.queueCommand({ type: "ai.execute", input: payload }),
+    },
+    update: {
+      status: () => rpc("update.status", []),
+      cloudConfigChanged: () => {
+        void rpc("update.cloudConfigChanged", []);
+      },
+      checkCloud: () => rpc("update.checkCloud", []),
+      installCloud: () => rpc("update.installCloud", []),
+      confirm: () => rpc("update.confirm", []),
+      rollback: () => rpc("update.rollback", []),
+      deploy: () => {
+        throw new PublicError("部署包必须由 HTTP 入口在 Coordinator 上处理");
+      },
     },
   };
 }
@@ -74,6 +88,6 @@ export function resolveWorkerRpc(message: ParentMessage): boolean {
   if (!waiter) return true;
   pending.delete(message.rpcId);
   if (message.ok) waiter.resolve(message.value);
-  else waiter.reject(new Error(message.error.message));
+  else waiter.reject(reviveStickyError(message.error));
   return true;
 }
