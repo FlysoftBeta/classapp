@@ -10,7 +10,7 @@ package scripts:
 
 | Layer | Command | What it proves |
 | ----- | ------- | -------------- |
-| Unit / in-process mechanism | `npm run test:unit` | Pure merge/coverage/quota/time/authority logic and isolated SQLite mechanisms |
+| Unit / in-process mechanism | `npm run test:unit` | Pure `client/repo` merge/coverage/quota/time/authority logic and isolated SQLite mechanisms |
 | Smoke | `npm run test:smoke` | Each server subsystem answers real Actions over WebSocket on a fresh database |
 | Seeded smoke | `npm run test:smoke:seeded` | The same Action paths against a copied seed/production database after a forced root-PIN reset |
 | Chrome 70 E2E | `npm run test:e2e` | Production Shell, HTTPS, install, offline boot, reconnect |
@@ -58,7 +58,7 @@ test-shaped files that mislead agents and reviewers.
 
 ### Pure invariant/property tests
 
-Best for merge algebras, cursor comparison, feature encoding, pricing, archive
+Best for merge algebras in `client/repo`, cursor comparison, feature encoding, pricing, archive
 parsing, text segmentation, and state machines. Generate reorderings,
 duplicates, boundary values, and interrupted sequences.
 

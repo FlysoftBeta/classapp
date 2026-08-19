@@ -32,7 +32,7 @@ import {
   conversationKey,
   postBelongsToConversation,
 } from "@/client/lib/chat/posts";
-import { collectRevisionRange } from "@/client/interact/consistency";
+import { collectRevisionRange } from "@/client/repo/revision";
 import { useDebugStore } from "@/client/hooks/useDebugStore";
 
 export interface UseChatPostsParams {

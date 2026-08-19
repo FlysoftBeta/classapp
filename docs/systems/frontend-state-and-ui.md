@@ -23,6 +23,7 @@ exposes a stable use case/resource API and owns the decision.
 
 ```text
 component → hook/presentation adapter → interact use case/resource
+                                      → client/repo consistency model
                                       → client API and/or client data
                                       → EventBus/recovery/retention mechanisms
 ```

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Assignments } from "@/client/data/assignments";
+import { Assignments, statePending } from "@/client/repo/assignment";
 
 test("resolved assignment prefers a strictly newer proposal", () => {
   const pending = Assignments.propose(
@@ -45,3 +45,16 @@ test("JSON equality is used for immutable-sized values", () => {
   assert.ok(Assignments.size({ hello: "你好" }) > 0);
   assert.throws(() => Assignments.size(undefined as unknown as object));
 });
+
+test("pending is true when any assignment field still has a proposal", () => {
+  const pending = Assignments.propose(Assignments.assignment(false), true, 2);
+  assert.equal(statePending({ pinned: pending, muted: Assignments.assignment(false) }), 1);
+  assert.equal(
+    statePending({
+      pinned: Assignments.assignment(false),
+      muted: Assignments.assignment(true),
+    }),
+    0,
+  );
+});
+

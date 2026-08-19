@@ -1,11 +1,35 @@
-import type { Assignment } from "./model";
+export interface AssignmentBase<T> {
+  value: T;
+  updated_at: number;
+}
+
+export interface AssignmentProposal<T> extends AssignmentBase<T> {
+  operation_id: string;
+}
+
+export interface Assignment<T> {
+  base: AssignmentBase<T>;
+  proposal: AssignmentProposal<T> | null;
+}
 
 const DEFAULT_ASSIGNMENT_TIME = 0;
 
+export interface LwwProposal<T, Purpose extends string = string> {
+  proposed: T;
+  purpose: Purpose;
+  timestamp: number;
+}
+
+export interface StoredLww<
+  T,
+  Purpose extends string = string,
+> extends LwwProposal<T, Purpose> {
+  acknowledgedTimestamp: number | null;
+}
+
 /**
- * Offline assignment algebra: a canonical base plus at most one local
- * proposal. UI and repositories use these rules; they never compare
- * timestamps themselves.
+ * Assignment (LWW): a canonical base plus at most one local proposal.
+ * Equal timestamps drop the proposal so the canonical value wins.
  */
 export class Assignments {
   static size(value: unknown): number {
@@ -84,4 +108,28 @@ export class Assignments {
       },
     };
   }
+}
+
+export function nextDeviceTimestamp(previous = 0, now = Date.now()): number {
+  return Assignments.nextTimestamp(previous, now);
+}
+
+/** Device-time LWW. Equal timestamps resolve to the remote/canonical value. */
+export function chooseLww<T, Purpose extends string>(
+  local: LwwProposal<T, Purpose> | null,
+  remote: LwwProposal<T, Purpose>,
+): LwwProposal<T, Purpose> {
+  return local && local.timestamp > remote.timestamp ? local : remote;
+}
+
+export function statePending(state: object): 0 | 1 {
+  return Object.values(state as Record<string, unknown>).some(
+    (value) =>
+      !!value &&
+      typeof value === "object" &&
+      "proposal" in value &&
+      !!(value as { proposal?: unknown }).proposal,
+  )
+    ? 1
+    : 0;
 }

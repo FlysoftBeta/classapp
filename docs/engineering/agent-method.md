@@ -104,7 +104,8 @@ only if it exposes ownership/transition, not as decoration.
   leftover that outlives the request is occupancy, not a request Service
   ([occupancy](../foundations/server-occupancy.md));
 - IndexedDB transaction/store mechanism → client/data;
-- local/remote choice, normalization, merge, recovery, quota → client/interact;
+- consistency model (coverage, snapshot, assignment, watermark, immutable, revision) → client/repo;
+- local/remote choice, recovery orchestration, quota → client/interact;
 - rendering and ephemeral interaction → hooks/components.
 
 Do not create a new layer to avoid understanding the existing one. Do not put
@@ -132,8 +133,8 @@ A practical sequence:
 3. Service objective operations;
 4. Facade authority/transaction/audit;
 5. Action/event/HTTP contracts and adapters;
-6. client data representation/atomic primitives;
-7. interact normalization, merge, recovery;
+6. client repo consistency algebras, then data representation/atomic primitives;
+7. interact normalization, recovery, and local/remote choice;
 8. hooks/components/admin help;
 9. purge/retention/startup/update integration;
 10. verification and document update.

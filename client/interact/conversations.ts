@@ -12,7 +12,7 @@ const {
 import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
-import { collectRevisionRange } from "@/client/interact/consistency";
+import { collectRevisionRange } from "@/client/repo/revision";
 import {
   commitPostRevisionRange,
   fetchRemotePosts,

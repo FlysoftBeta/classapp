@@ -23,7 +23,8 @@ client/
   interact/         use cases, resources, Zustand projection, sync and recovery
   interact/remote/  WebSocket transport, session bindings, remote client
   api/              typed Action and raw-HTTP adapters
-  data/             IndexedDB schema, migration, repository, coverage and files
+  repo/             pure consistency models (coverage, snapshot, assignment, watermark, immutable, revision)
+  data/             IndexedDB schema, migration, persistence adapters, and files
   lib/              browser mechanisms: bundle manager, readers, pure helpers
 server/
   boot.ts/main.ts    production IPC bootstrap and HTTP/HTTPS runtime assembly
@@ -71,12 +72,12 @@ The basic client direction is:
 
 ```text
 component → hook/presentation adapter → client/interact
-                                     → client/api and/or client/data
+ → client/repo and client/data
 ```
 
-- Interact owns local/remote choice, normalization, proposals, coverage,
-  reconnect recovery, retention, and quota.
-- `client/data` owns IndexedDB representation and atomic primitives.
+- Interact owns local/remote choice, recovery orchestration, retention, and quota.
+- `client/repo` owns pure consistency-model logic. It must not open IndexedDB.
+- `client/data` owns IndexedDB representation and atomic persistence.
 - Zustand is rebuildable presentation state, not another durable repository.
 - Components express intent and render state; they do not own persistence,
   authorization, synchronization, or online/offline policy.
@@ -106,7 +107,8 @@ documents. The paths are orientation, not a substitute for tracing the flow.
 | product premise, new dependency, compatibility   | `package.json`, `vite*.config.ts`, affected client/build code                                                                                                                                                         | [product context](./docs/product-context.md), [coding standards](./docs/engineering/coding-standards.md), [known traps](./docs/engineering/traps.md)                                                     |
 | server schema, SQL, migration, materialized data | `server/infra/db.ts`, `server/data/`, owning Service                                                                                                                                                                  | [server data model](./docs/foundations/server-data-model.md), [transactions and events](./docs/foundations/invariants-and-transactions.md)                                                               |
 | client schema or offline domain data             | `client/data/schema.ts`, `client/data/migration.ts`, `client/data/model.ts`, `client/data/repository.ts`                                                                                                              | [local data model](./docs/offline/local-model.md), [consistency and recovery](./docs/offline/consistency-and-recovery.md), [storage and quota](./docs/offline/storage-and-quota.md)                      |
-| sync, proposals, coverage, reconnect             | `client/interact/sync.ts`, `consistency.ts`, `remoteLifecycle.ts`, domain interact module                                                                                                                             | [consistency and recovery](./docs/offline/consistency-and-recovery.md), [RemoteManager connection reliability](./docs/offline/remote-connectivity.md), [offline overview](./docs/offline/README.md)                     |
+| offline consistency algebras                     | `client/repo/coverage.ts`, `snapshot.ts`, `assignment.ts`, `watermark.ts`, `immutable.ts`, `revision.ts`                                                                                                              | [consistency and recovery](./docs/offline/consistency-and-recovery.md), [local data model](./docs/offline/local-model.md)                                                                                |
+| sync, proposals, coverage, reconnect             | `client/interact/sync.ts`, `client/repo/`, `remoteLifecycle.ts`, domain interact module                                                                                                                               | [consistency and recovery](./docs/offline/consistency-and-recovery.md), [RemoteManager connection reliability](./docs/offline/remote-connectivity.md), [offline overview](./docs/offline/README.md)     |
 | Occupancy, Coordinator, Executor, Sticky, Scope | `server/runtime/`, `server/runtime/composition.ts` | [occupancy](./docs/foundations/server-occupancy.md), [lifetimes](./docs/foundations/lifetimes-and-ownership.md), [transactions](./docs/foundations/invariants-and-transactions.md) |
 | authentication, client trust, roles, validation  | `server/domain/facade/authentication.ts`, `server/services/authService.ts`, `server/services/clientsService.ts`, `server/services/authorityService.ts`, `server/services/roleService.ts`, `server/validation/`        | [authentication](./docs/systems/authentication.md), [authority, validation, and audit](./docs/foundations/authority-validation-audit.md), [security](./docs/foundations/security-threat-model.md)        |
 | Groups, conversations, Posts, Articles           | matching files in `server/domain/facade/`, `server/services/`, `server/data/`, `client/interact/`; UI in `client/components/chat/`, `client/components/articles/`, `client/components/sidebar/`                       | [community and content](./docs/systems/community-and-content.md), plus offline data/consistency docs when cached                                                                                         |
