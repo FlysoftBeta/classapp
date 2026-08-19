@@ -19,7 +19,6 @@ import type {
   ArticleAccessRow,
   ArticleMembership,
   ArticleUserStateRow,
-  Assignment,
   ConversationAccessRow,
   ConversationUserStateRow,
   GroupMembersAccessRow,
@@ -30,12 +29,30 @@ import type {
   PostCoverage,
   RetentionRow,
   StoredArticleSegment,
+  StoredDm,
+  StoredGroup,
   StoredPost,
 } from "./model";
 import { extentFiles } from "./files";
 import { FileIds } from "./fileIds";
-import { mergeCursorCoverage, type ContinuousCoverage } from "./coverage";
-import { Assignments as Values } from "./assignments";
+import {
+  articleListRootMemberships,
+  connectPostPage,
+  mergeArticleListMemberships,
+  mergeCursorCoverage,
+  nextPostWindowCoverage,
+  postCoverageAfterPrefixDelete,
+  postIsInsidePublishedWindow,
+  shouldExtendPostCoverage,
+  type ContinuousCoverage,
+} from "@/client/repo/coverage";
+import { Assignments as Values, statePending, type Assignment } from "@/client/repo/assignment";
+import { keepWatermarkProposal } from "@/client/repo/watermark";
+import { assertImmutableEntity } from "@/client/repo/immutable";
+import {
+  decideRevisionedWrite,
+  mergeRevisionedIdentity,
+} from "@/client/repo/revision";
 import {
   ARTICLE_RETENTION_DAYS,
   CONVERSATION_RETENTION_DAYS,
@@ -78,32 +95,6 @@ export interface ReadingProgressVersion {
   synced: boolean;
 }
 
-interface GroupRow {
-  id: string;
-  conv_id: string;
-  revision: number;
-  handle: string;
-  name: string;
-  group_type: string;
-  has_password: number;
-  members_hidden: number;
-  admin_only: number;
-  no_leave: number;
-  last_message: string | null;
-  last_at: string | null;
-  touched_at: number;
-}
-
-interface DmRow {
-  conv_id: string;
-  revision: number;
-  peer_a: string;
-  peer_b: string;
-  last_message: string | null;
-  last_at: string | null;
-  touched_at: number;
-}
-
 async function mergeUserMetadata(
   store: IDBObjectStore,
   incoming: UserMetadata,
@@ -111,19 +102,17 @@ async function mergeUserMetadata(
   const current = (await requestResult(store.get(incoming.id))) as
     | ObjectiveUser
     | undefined;
-  // Pre-v4 cached identities have no comparable server revision. Treat them
-  // as older than the first versioned side bundle while retaining offline UX.
-  const currentRevision = current?.revision ?? -1;
-  if (current && incoming.revision < currentRevision) return;
-  if (
-    current &&
-    incoming.revision === currentRevision &&
-    (current.handle !== incoming.handle ||
-      current.username !== incoming.username)
-  ) {
-    throw new Error(`User metadata revision collision: ${incoming.id}`);
-  }
-  store.put(incoming satisfies ObjectiveUser);
+  const next = mergeRevisionedIdentity({
+    current,
+    incoming,
+    sameContent:
+      !current ||
+      (current.handle === incoming.handle &&
+        current.username === incoming.username),
+    identity: incoming.id,
+  });
+  if (next === "keep") return;
+  store.put(next satisfies ObjectiveUser);
 }
 
 class Policies {
@@ -243,23 +232,16 @@ async function deleteConversationPostPrefix(
         const scope = `posts:${convId}`;
         const coverage = (await requestResult(syncStore.get(scope))) as
           PostCoverage | undefined;
-        if (!coverage) return;
-        if (!retained.length) {
+        const next = postCoverageAfterPrefixDelete(coverage, retained);
+        if (next === "unchanged") return;
+        if (next === "delete") {
           // Published coverage is a proof about a non-empty contiguous range.
           // Keeping an empty range would allow revisions to advance while rows
           // are silently discarded.
           syncStore.delete(scope);
           return;
         }
-        const first = retained[0];
-        const last = retained[retained.length - 1];
-        syncStore.put({
-          ...coverage,
-          oldest: { id: first.id, order: first.sequence },
-          newest: { id: last.id, order: last.sequence },
-          reached_oldest: false,
-          updated_at: updatedAt,
-        });
+        syncStore.put({ ...next, updated_at: updatedAt });
       },
     );
     if (!deleted) break;
@@ -311,18 +293,6 @@ function defaultArticleState(
     last_read_at: null,
     pending: 0,
   };
-}
-
-function statePending(state: object): 0 | 1 {
-  return Object.values(state as Record<string, unknown>).some(
-    (value) =>
-      !!value &&
-      typeof value === "object" &&
-      "proposal" in value &&
-      !!(value as { proposal?: unknown }).proposal,
-  )
-    ? 1
-    : 0;
 }
 
 function splitArticle(entry: ArticleWithMeta): {
@@ -430,7 +400,7 @@ async function materializeConversation(
       requestResult(tx.objectStore(STORES.GROUPS).get(access.target_id)),
     );
     if (!row) return null;
-    const group = row as GroupRow;
+    const group = row as StoredGroup;
     return {
       ...group,
       type: "group",
@@ -454,7 +424,7 @@ async function materializeConversation(
     requestResult(tx.objectStore(STORES.DMS).get(access.object_id)),
   );
   if (!row) return null;
-  const dm = row as DmRow;
+  const dm = row as StoredDm;
   const peer = await runTransaction(STORES.USERS, "readonly", (tx) =>
     requestResult(tx.objectStore(STORES.USERS).get(access.target_id)),
   );
@@ -522,7 +492,7 @@ async function upsertConversationInTransaction(
       last_message: entry.last_message,
       last_at: entry.last_at,
       touched_at: now,
-    } satisfies GroupRow);
+    } satisfies StoredGroup);
   } else if (entry.type === "dm" && parsed.type === "dm") {
     tx.objectStore(STORES.DMS).put({
       conv_id: entry.conv_id,
@@ -532,7 +502,7 @@ async function upsertConversationInTransaction(
       last_message: entry.last_message,
       last_at: entry.last_at,
       touched_at: now,
-    } satisfies DmRow);
+    } satisfies StoredDm);
   } else {
     throw new Error(`Conversation type disagrees with id: ${entry.conv_id}`);
   }
@@ -601,12 +571,10 @@ async function upsertArticle(
       const currentAccess = (await requestResult(
         accessStore.get([meId, "article", entry.id]),
       )) as ArticleAccessRow | undefined;
-      const memberships = (currentAccess?.memberships ?? []).filter(
-        (item) =>
-          item.view !== membership.view ||
-          item.group_id !== membership.group_id,
+      const memberships = mergeArticleListMemberships(
+        currentAccess?.memberships,
+        membership,
       );
-      memberships.push(membership);
       accessStore.put({
         me_id: meId,
         kind: "article",
@@ -1357,13 +1325,13 @@ function createOfflineRepository(userScope: string) {
             value: { post_id: remote.postId, sequence: remote.sequence },
             updated_at: remote.updatedAt,
           },
-          proposal:
-            proposal &&
-            (merge === "furthest"
-              ? proposal.value.sequence > remote.sequence
-              : proposal.updated_at > remote.updatedAt)
-              ? proposal
-              : null,
+          proposal: keepWatermarkProposal({
+            proposal,
+            remoteUpdatedAt: remote.updatedAt,
+            merge,
+            proposalCursor: proposal?.value.sequence ?? 0,
+            remoteCursor: remote.sequence,
+          }),
         };
         current.pending = statePending(current);
         store.put(current);
@@ -1402,17 +1370,13 @@ function createOfflineRepository(userScope: string) {
           const scope = `posts:${convId}`;
           const current = (await requestResult(syncStore.get(scope))) as
             PostCoverage | undefined;
-          const extendCoverage =
-            options.extendCoverage === true ||
-            (options.liveAppend === true &&
-              (!current ||
-                (current.reached_newest &&
-                  !!current.newest &&
-                  incoming.every(
-                    (post) => post.sequence > current.newest.order,
-                  ))));
-          let oldest: { id: string; order: number } | null = null;
-          let newest: { id: string; order: number } | null = null;
+          const extendCoverage = shouldExtendPostCoverage({
+            current,
+            extendCoverage: options.extendCoverage,
+            liveAppend: options.liveAppend,
+            incomingSequences: incoming.map((post) => post.sequence),
+          });
+          const written: Array<{ id: string; sequence: number }> = [];
           for (const post of incoming) {
             const entity = post;
             if (
@@ -1425,24 +1389,28 @@ function createOfflineRepository(userScope: string) {
             }
             const previous = (await requestResult(store.get(post.id))) as
               StoredPost | undefined;
-            const insidePublishedWindow =
-              !!current?.oldest &&
-              !!current.newest &&
-              post.sequence >= current.oldest.order &&
-              post.sequence <= current.newest.order;
-            if (!extendCoverage && !previous && !insidePublishedWindow) {
+            if (
+              !extendCoverage &&
+              !previous &&
+              !postIsInsidePublishedWindow(current, post.sequence)
+            ) {
               continue;
             }
-            if (previous && previous.revision > post.revision) continue;
             if (
-              previous &&
-              previous.revision === post.revision &&
-              !Values.equal(
-                { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
-                { ...entity, size: 0, touched_at: 0, eviction_tier: 0 },
-              )
+              decideRevisionedWrite({
+                previous,
+                incoming: post,
+                sameContent: previous
+                  ? Values.equal(
+                      { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
+                      { ...entity, size: 0, touched_at: 0, eviction_tier: 0 },
+                    )
+                  : true,
+                identity: post.id,
+                collisionLabel: "Post revision collision",
+              }) === "skip"
             ) {
-              throw new Error(`Post revision collision: ${post.id}`);
+              continue;
             }
             const row: StoredPost = {
               ...entity,
@@ -1452,32 +1420,26 @@ function createOfflineRepository(userScope: string) {
               eviction_tier: 0,
             };
             store.put(row);
-            if (!oldest || row.sequence < oldest.order) {
-              oldest = { id: row.id, order: row.sequence };
-            }
-            if (!newest || row.sequence > newest.order) {
-              newest = { id: row.id, order: row.sequence };
-            }
+            written.push({ id: row.id, sequence: row.sequence });
           }
-          if (!extendCoverage || !oldest || !newest) return;
+          if (!extendCoverage) return;
+          const next = nextPostWindowCoverage({
+            current,
+            written,
+            reachedOldest: options.reachedOldest,
+            reachedNewest: options.reachedNewest,
+          });
+          if (!next) return;
           syncStore.put({
             scope,
             kind: "posts",
             conv_id: convId,
-            known_revision: current?.known_revision ?? 0,
-            revision_sum: current?.revision_sum ?? "0",
-            oldest:
-              !current?.oldest || oldest.order < current.oldest.order
-                ? oldest
-                : current.oldest,
-            newest:
-              !current?.newest || newest.order > current.newest.order
-                ? newest
-                : current.newest,
-            reached_oldest:
-              (current?.reached_oldest ?? false) || !!options.reachedOldest,
-            reached_newest:
-              (current?.reached_newest ?? false) || !!options.reachedNewest,
+            known_revision: next.known_revision,
+            revision_sum: next.revision_sum,
+            oldest: next.oldest,
+            newest: next.newest,
+            reached_oldest: next.reached_oldest,
+            reached_newest: next.reached_newest,
             updated_at: Date.now(),
           } satisfies PostCoverage);
         },
@@ -1530,21 +1492,31 @@ function createOfflineRepository(userScope: string) {
       const convId = conversationId(ref);
       const coverage = await postCoverage(convId);
       const cursorId = page.beforeId ?? page.afterId;
-      // A cursor page without an existing boundary is a disconnected fragment;
-      // it may be displayed remotely but cannot establish local coverage.
-      let connected = !coverage && !cursorId;
+      let cursorInConversation = false;
       if (coverage && cursorId) {
         const anchor = (await runTransaction(STORES.POSTS, "readonly", (tx) =>
           requestResult(tx.objectStore(STORES.POSTS).get(cursorId)),
         )) as StoredPost | undefined;
-        connected = anchor?.conv_id === convId;
-      } else if (coverage && !cursorId) {
-        const ids = new Set((await this.getPosts(ref)).map((post) => post.id));
-        connected = incoming.some((post) => ids.has(post.id));
-        if (!connected) await clearConversationPostWindow(convId);
-        connected = true;
+        cursorInConversation = anchor?.conv_id === convId;
       }
-      if (!connected) return;
+      const existingIds =
+        coverage && !cursorId
+          ? new Set((await this.getPosts(ref)).map((post) => post.id))
+          : new Set<string>();
+      const connection = connectPostPage({
+        hasCoverage: !!coverage,
+        cursorId,
+        cursorInConversation,
+        incomingOverlapsExisting: incoming.some((post) =>
+          existingIds.has(post.id),
+        ),
+      });
+      // A cursor page without an existing boundary is a disconnected fragment;
+      // it may be displayed remotely but cannot establish local coverage.
+      if (connection === "ignore") return;
+      if (connection === "replace-window") {
+        await clearConversationPostWindow(convId);
+      }
       if (incoming.length) {
         await this.savePosts(ref, incoming, {
           extendCoverage: true,
@@ -1883,18 +1855,15 @@ function createOfflineRepository(userScope: string) {
                 .index("by-me-kind")
                 .getAll(IDBKeyRange.only([actorId(), "article"])),
             )) as ArticleAccessRow[];
-            for (const row of rows) {
-              if (pageIds.has(row.object_id)) continue;
-              const memberships = row.memberships.filter(
-                (membership) =>
-                  membership.view !== page.view ||
-                  membership.group_id !== page.groupId,
-              );
-              if (memberships.length) {
-                accessStore.put({ ...row, memberships });
-              } else {
-                accessStore.delete([row.me_id, row.kind, row.object_id]);
-              }
+            const { put, remove } = articleListRootMemberships({
+              rows,
+              pageIds,
+              view: page.view,
+              groupId: page.groupId,
+            });
+            for (const row of put) accessStore.put(row);
+            for (const row of remove) {
+              accessStore.delete([row.me_id, row.kind, row.object_id]);
             }
             if (!entries.length) {
               store.delete(scope);
@@ -2338,9 +2307,11 @@ function createOfflineRepository(userScope: string) {
         const previous = (await requestResult(
           store.get([articleId, startOffset]),
         )) as StoredArticleSegment | undefined;
-        if (previous && !Values.equal(previous.value, data)) {
-          throw new Error(
-            `Immutable article segment changed: ${articleId}:${startOffset}`,
+        if (previous) {
+          assertImmutableEntity(
+            previous.value,
+            data,
+            `article:${articleId}:${startOffset}`,
           );
         }
         store.put({

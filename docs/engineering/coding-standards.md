@@ -36,9 +36,10 @@ untrusted and which semantic checks remain after structural parsing.
 - Split a large file when independent mechanisms, lifetimes, or test matrices
   emerge—not merely at an arbitrary line count.
 
-The current 2,500-line client repository, 1,100-line AI Data module, and giant
-admin components are warnings: do not add another unrelated branch to them.
-Extract by ownership while preserving atomic transaction APIs.
+The 1,100-line AI Data module and giant admin components are warnings: do not
+add another unrelated branch to them. Extract by ownership while preserving
+atomic transaction APIs. Client merge algebras belong in `client/repo`, not in
+`client/data/repository.ts`.
 
 ## Async and resources
 
@@ -72,7 +73,8 @@ Extract by ownership while preserving atomic transaction APIs.
 - No network or unrelated await inside IDB transaction callbacks.
 - A cache row identifies its actor/objective classification.
 - Partial collections carry coverage; do not infer completeness from rows.
-- Normalize all response/event variants through one merge rule.
+- Merge rules live in `client/repo`. Persistence adapters apply them; they do
+  not invent a second algebra.
 - Remote success should survive reconstructible cache failure.
 - Zustand contains only ephemeral/rebuildable presentation state.
 

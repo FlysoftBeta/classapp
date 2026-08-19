@@ -92,14 +92,15 @@ Cross-stack system documents remain authoritative for behavior.
 
 | Owner                              | Responsibility                                                                 |
 | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `client/repo`                      | pure consistency models: coverage (posts and lists), snapshot, assignment, watermark, immutable, revision |
 | `client/data/schema,migration,idb` | stores, schema-owner races, leases, transactions                               |
-| `client/data/repository`           | normalized persistence APIs; should be decomposed by owned mechanism over time |
+| `client/data/repository`           | IndexedDB adapters that persist repo decisions; no second merge algebra        |
 | `client/data/files`                | extent generations, locks, streaming/publication                               |
 | remote transport                   | WebSocket connection only                                                      |
 | remote session                     | per-user token bindings and credential epochs                                  |
 | remote client                      | typed request correlation, result/event validation                             |
 | `ActorContext`                     | immutable actor identity for one async operation                               |
-| `client/interact` use cases        | local/remote choice, normalization, proposal/coverage/recovery policy          |
+| `client/interact` use cases        | local/remote choice, recovery orchestration, quota policy                      |
 | React/Zustand                      | rendering and rebuildable/ephemeral presentation state                         |
 
 ## Data ownership rule

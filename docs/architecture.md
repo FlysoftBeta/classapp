@@ -29,6 +29,7 @@ Browser
          └─ active monolithic ESM bundle from IndexedDB
               ├─ React presentation
               ├─ client/interact policy and orchestration
+              ├─ client/repo consistency models
               ├─ client/data IndexedDB mechanisms
               └─ one WebSocket transport
 ```
@@ -50,7 +51,8 @@ client/
   components/   rendering and user interaction
   hooks/        presentation lifecycle adapters
   interact/     client business policy, synchronization, recovery
-  data/         raw IndexedDB mechanisms and normalized persistence
+  repo/         pure consistency models; no IndexedDB
+  data/         IndexedDB mechanisms and persistence adapters
   lib/          pure browser algorithms, bundle parsing, virtualization support
 
 server/
@@ -123,7 +125,8 @@ component/hook
      ├─ consult connection and coverage state
      ├─ make a typed Action or raw streaming request
      ├─ normalize objective / actor / decision fields
-     ├─ merge transactionally into IndexedDB
+     ├─ apply a client/repo consistency model
+     ├─ persist through client/data IndexedDB adapters
      └─ publish a presentation DTO
 ```
 
@@ -131,6 +134,12 @@ React expresses intent and presentation state. It does not decide whether the
 operation is online, infer cache completeness, compare revisions, or write raw
 IndexedDB. Zustand may hold rebuildable view projections and ephemeral UI state;
 it is not a second persistent cache.
+
+`client/repo` owns the merge algebras: coverage (including lists), snapshot,
+assignment, watermark, immutable identity, and revisioned current state. Those
+modules are pure so they can be unit-tested without IndexedDB. `client/data`
+opens transactions and stores rows; it must not grow a second copy of a merge
+rule. `client/interact` chooses local versus remote and recovery order.
 
 `client/api` is a narrow protocol adapter, not another business layer. New
 components should normally call `client/interact`, not `client/api` directly.

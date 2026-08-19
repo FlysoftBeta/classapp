@@ -27,7 +27,8 @@ partial data from complete data is not correct offline support.
 ## Core invariants
 
 - React never chooses online versus offline and never writes raw IndexedDB.
-- `client/data` owns mechanisms; `client/interact` owns policy.
+- `client/repo` owns consistency algebras; `client/data` owns IndexedDB;
+  `client/interact` owns local/remote policy.
 - Objective entities are stored once per device; actor visibility and decisions
   are keyed by stable user ID.
 - Pending proposals are never evicted or cleared by an old response.

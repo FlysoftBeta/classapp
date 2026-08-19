@@ -4,6 +4,19 @@ Local rows are not evidence of completeness. Each collection protocol defines
 identity, authoritative order, coverage proof, merge rule, recovery source, and
 watermark publication.
 
+The current client split is:
+
+```text
+client/repo     pure consistency models (unit-testable, no IndexedDB)
+client/data     schema, transactions, and persistence adapters
+client/interact local/remote choice and recovery orchestration
+```
+
+`client/repo` is the owner of the algebras below. `client/data/repository.ts`
+loads and stores rows; it must call these functions rather than reimplement
+them. Lists are coverage: an article list page uses the same rooted-interval
+proof as a Post window.
+
 ## Transaction scope
 
 Prefer one IndexedDB transaction when several local facts must become visible
@@ -41,7 +54,9 @@ no covered rows ⇒ no published coverage
 Do not preserve `reached_newest=true` with null boundaries. It creates a state
 where live rows can be discarded while revision continues to advance.
 
-## Post protocol
+Current mechanism: `client/repo/coverage.ts`.
+
+### Posts
 
 Posts have immutable IDs/sequences and revisioned current state. Conversation
 awareness supplies a remote revision and revision sum. Catch-up:
@@ -63,6 +78,23 @@ An event outside coverage may be stored as an overlay and trigger catch-up. It
 must not assert the missing interval. Event application and quota trimming for
 one conversation must be serialized or use transaction-local current state.
 
+### Lists
+
+Each `(actor, view, group filter)` owns a rooted range. Cursor identity is:
+
+```text
+(server-provided list_sort_at, article_id)
+```
+
+The server's sort value is opaque; clients do not recompute it. `before` and
+`after` pages extend only their requested boundary. An arbitrary locate page may
+cache entities/membership but not claim completeness between it and the root.
+
+List membership is actor/view projection. A missing Article on a partial page
+does not delete the objective entity. Explicit delete events or authoritative
+range reconciliation remove memberships. A root page replaces the published
+interval and drops memberships that the new proof no longer includes.
+
 ## Snapshot protocol
 
 Conversation directory and unrevisioned member lists are authoritative
@@ -79,21 +111,8 @@ An event arriving while refresh is underway waits in the recovery queue. Apply
 the snapshot first, then replay the event, so an older snapshot cannot erase a
 new event.
 
-## Article list protocol
-
-Each `(actor, view, group filter)` owns a rooted range. Cursor identity is:
-
-```text
-(server-provided list_sort_at, article_id)
-```
-
-The server's sort value is opaque; clients do not recompute it. `before` and
-`after` pages extend only their requested boundary. An arbitrary locate page may
-cache entities/membership but not claim completeness between it and the root.
-
-List membership is actor/view projection. A missing Article on a partial page
-does not delete the objective entity. Explicit delete events or authoritative
-snapshot/range reconciliation remove memberships.
+Current mechanism: `client/repo/snapshot.ts`. Media list replacement lives in
+`client/data/media.ts` and follows the same replace-membership rule.
 
 ## Merge algebras for decisions
 
@@ -114,6 +133,8 @@ Device-clock dominance is an accepted current limitation. If strict causal
 ordering becomes necessary, evolve the wire stamp to a logical/physical tuple;
 do not silently use incompatible client-only metadata.
 
+Current mechanism: `client/repo/assignment.ts`.
+
 ### Grow-only watermark
 
 Used for conversation read position and article furthest-read position:
@@ -126,11 +147,24 @@ Article resume and furthest are separate facts. Resume may move backward and is
 assignment. Furthest is monotonic. The command explicitly states `override` or
 `furthest`; connection state must not change semantics implicitly.
 
+Current mechanism: `client/repo/watermark.ts`.
+
 ### Dormant proposal
 
 If access disappears, retain the proposal but exclude it from automatic flush.
 If access returns, it may resume. Only an explicit user command may abandon it.
 Network errors never erase it.
+
+## Objective merge
+
+Revisioned current rows (`client/repo/revision.ts`) keep the higher revision
+and treat equal-revision content disagreement as a contract violation. Public
+user identity uses the same rule; pre-versioned cached rows compare as older
+than the first versioned side bundle.
+
+Immutable bodies (`client/repo/immutable.ts`) may be stored again but cannot
+change bytes for the same identity. Article cores, text segments, and
+equal-revision Post content use this check.
 
 ## Reconnect state machine
 

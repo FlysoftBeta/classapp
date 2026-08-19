@@ -6,7 +6,8 @@ import type {
   User,
 } from "@/shared/types/api";
 import type { Article } from "@/client/interact/presentation";
-import type { ContinuousCoverage } from "./coverage";
+import type { ContinuousCoverage } from "@/client/repo/coverage";
+import type { Assignment } from "@/client/repo/assignment";
 
 export type EvictionTier = 0 | 1 | 2;
 
@@ -30,12 +31,38 @@ export interface ObjectiveGroup extends Group {
   touched_at: number;
 }
 
+export interface StoredGroup {
+  id: string;
+  conv_id: string;
+  revision: number;
+  handle: string;
+  name: string;
+  group_type: string;
+  has_password: number;
+  members_hidden: number;
+  admin_only: number;
+  no_leave: number;
+  last_message: string | null;
+  last_at: string | null;
+  touched_at: number;
+}
+
 export interface ObjectiveDm {
   conv_id: string;
   peer_a: string;
   peer_b: string;
   revision: number;
   created_at?: string;
+  touched_at: number;
+}
+
+export interface StoredDm {
+  conv_id: string;
+  revision: number;
+  peer_a: string;
+  peer_b: string;
+  last_message: string | null;
+  last_at: string | null;
   touched_at: number;
 }
 
@@ -129,20 +156,6 @@ export interface GroupMembersAccessRow {
 export type AccessRow =
   ConversationAccessRow | ArticleAccessRow | GroupMembersAccessRow;
 
-export interface AssignmentBase<T> {
-  value: T;
-  updated_at: number;
-}
-
-export interface AssignmentProposal<T> extends AssignmentBase<T> {
-  operation_id: string;
-}
-
-export interface Assignment<T> {
-  base: AssignmentBase<T>;
-  proposal: AssignmentProposal<T> | null;
-}
-
 export interface ConversationUserStateRow {
   me_id: string;
   conv_id: string;
@@ -191,16 +204,25 @@ export interface PostCoverage extends ContinuousCoverage<{
   updated_at: number;
 }
 
+export interface ArticleListCoverage {
+  scope: string;
+  kind: "article-list";
+  me_id: string;
+  complete: boolean;
+  updated_at: number;
+  detail?: ContinuousCoverage<{ id: string; order: string }>;
+}
+
 export interface SnapshotCoverage {
   scope: string;
-  kind: "conversation-snapshot" | "article-list" | "group-members";
+  kind: "conversation-snapshot" | "group-members";
   me_id: string;
   complete: boolean;
   updated_at: number;
   detail?: unknown;
 }
 
-export type SyncRow = PostCoverage | SnapshotCoverage;
+export type SyncRow = PostCoverage | ArticleListCoverage | SnapshotCoverage;
 
 export interface RetentionRow {
   claimant: string;

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  assertImmutableEntity,
-  changedConversationRevisions,
-  chooseFurthestRead,
   chooseLww,
+  nextDeviceTimestamp,
+} from "@/client/repo/assignment";
+import { chooseFurthestRead, keepWatermarkProposal } from "@/client/repo/watermark";
+import { assertImmutableEntity } from "@/client/repo/immutable";
+import {
+  changedConversationRevisions,
   choosePostVersion,
   collectRevisionRange,
-  nextDeviceTimestamp,
-} from "@/client/interact/consistency";
+} from "@/client/repo/revision";
 
 test("nextDeviceTimestamp stays monotonic when the wall clock goes backwards", () => {
   assert.equal(nextDeviceTimestamp(100, 90), 101);
@@ -81,6 +83,44 @@ test("read watermarks prefer sequence over wall clock", () => {
       { postId: "remote-tie", sequence: 1, timestamp: 10 },
     ).postId,
     "remote-tie",
+  );
+});
+
+test("furthest acknowledgement keeps only a strictly greater local cursor", () => {
+  const proposal = {
+    value: { post_id: "p", sequence: 8 },
+    updated_at: 1,
+    operation_id: "op",
+  };
+  assert.equal(
+    keepWatermarkProposal({
+      proposal,
+      remoteUpdatedAt: 99,
+      merge: "furthest",
+      proposalCursor: 8,
+      remoteCursor: 7,
+    })?.operation_id,
+    "op",
+  );
+  assert.equal(
+    keepWatermarkProposal({
+      proposal,
+      remoteUpdatedAt: 99,
+      merge: "furthest",
+      proposalCursor: 8,
+      remoteCursor: 8,
+    }),
+    null,
+  );
+  assert.equal(
+    keepWatermarkProposal({
+      proposal,
+      remoteUpdatedAt: 1,
+      merge: "override",
+      proposalCursor: 8,
+      remoteCursor: 1,
+    }),
+    null,
   );
 });
 

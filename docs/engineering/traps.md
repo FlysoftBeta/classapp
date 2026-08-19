@@ -209,12 +209,12 @@ condition.
 
 ## Giant-file accretion
 
-**Trap:** append unrelated functions to `repository.ts`, `server/data/ai.ts`, a
+**Trap:** append unrelated functions to `client/data/repository.ts`, `server/data/ai.ts`, a
 large hook, or admin tab because related code is already there.
 
-Large files obscure ownership and transaction boundaries. Extract coherent
-mechanisms with narrow APIs; do not split raw helpers so widely that atomic
-operations become impossible.
+Large files obscure ownership and transaction boundaries. Consistency-model
+logic belongs in `client/repo`. Extract coherent mechanisms with narrow APIs;
+do not split raw helpers so widely that atomic operations become impossible.
 
 ## UI duplicates domain policy
 

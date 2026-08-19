@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeCursorCoverage } from "@/client/data/coverage";
+import {
+  articleListRootMemberships,
+  connectPostPage,
+  mergeCursorCoverage,
+  postCoverageAfterPrefixDelete,
+  postIsInsidePublishedWindow,
+  shouldExtendPostCoverage,
+} from "@/client/repo/coverage";
 
 const boundary = (order: number) => ({ id: `item-${order}`, order });
 
@@ -180,3 +187,143 @@ test("a root page replaces any previous interval", () => {
     reached_oldest: false,
   });
 });
+
+test("live append extends coverage only from a reached newest bound", () => {
+  assert.equal(
+    shouldExtendPostCoverage({
+      current: {
+        newest: { id: "n", order: 10 },
+        oldest: { id: "o", order: 1 },
+        reached_newest: true,
+        reached_oldest: false,
+        known_revision: 4,
+        revision_sum: "4",
+      },
+      liveAppend: true,
+      incomingSequences: [11, 12],
+    }),
+    true,
+  );
+  assert.equal(
+    shouldExtendPostCoverage({
+      current: {
+        newest: { id: "n", order: 10 },
+        oldest: { id: "o", order: 1 },
+        reached_newest: false,
+        reached_oldest: false,
+        known_revision: 4,
+        revision_sum: "4",
+      },
+      liveAppend: true,
+      incomingSequences: [11],
+    }),
+    false,
+  );
+});
+
+test("an overlay post outside the window does not count as inside coverage", () => {
+  assert.equal(
+    postIsInsidePublishedWindow(
+      {
+        newest: { id: "n", order: 10 },
+        oldest: { id: "o", order: 5 },
+        reached_newest: true,
+        reached_oldest: false,
+        known_revision: 1,
+        revision_sum: "1",
+      },
+      4,
+    ),
+    false,
+  );
+});
+
+test("a disconnected cursor page is ignored and a root gap replaces the window", () => {
+  assert.equal(
+    connectPostPage({
+      hasCoverage: false,
+      cursorId: "cursor",
+      cursorInConversation: false,
+      incomingOverlapsExisting: false,
+    }),
+    "ignore",
+  );
+  assert.equal(
+    connectPostPage({
+      hasCoverage: true,
+      cursorId: undefined,
+      cursorInConversation: false,
+      incomingOverlapsExisting: false,
+    }),
+    "replace-window",
+  );
+  assert.equal(
+    connectPostPage({
+      hasCoverage: true,
+      cursorId: undefined,
+      cursorInConversation: false,
+      incomingOverlapsExisting: true,
+    }),
+    "apply",
+  );
+});
+
+test("prefix deletion removes empty coverage and drops reached_oldest", () => {
+  const current = {
+    newest: { id: "n", order: 10 },
+    oldest: { id: "o", order: 1 },
+    reached_newest: true,
+    reached_oldest: true,
+    known_revision: 9,
+    revision_sum: "9",
+  };
+  assert.equal(postCoverageAfterPrefixDelete(current, []), "delete");
+  assert.deepEqual(
+    postCoverageAfterPrefixDelete(current, [
+      { id: "a", sequence: 4 },
+      { id: "b", sequence: 10 },
+    ]),
+    {
+      ...current,
+      oldest: { id: "a", order: 4 },
+      newest: { id: "b", order: 10 },
+      reached_oldest: false,
+    },
+  );
+});
+
+test("a root article list page drops memberships outside the new proof", () => {
+  const { put, remove } = articleListRootMemberships({
+    rows: [
+      {
+        object_id: "kept",
+        memberships: [{ view: "all", group_id: null, sort_at: "1" }],
+      },
+      {
+        object_id: "gone",
+        memberships: [{ view: "all", group_id: null, sort_at: "2" }],
+      },
+      {
+        object_id: "shared",
+        memberships: [
+          { view: "all", group_id: null, sort_at: "3" },
+          { view: "bookmarked", group_id: null, sort_at: "4" },
+        ],
+      },
+    ],
+    pageIds: new Set(["kept"]),
+    view: "all",
+    groupId: null,
+  });
+  assert.deepEqual(
+    remove.map((row) => row.object_id),
+    ["gone"],
+  );
+  assert.deepEqual(put, [
+    {
+      object_id: "shared",
+      memberships: [{ view: "bookmarked", group_id: null, sort_at: "4" }],
+    },
+  ]);
+});
+
