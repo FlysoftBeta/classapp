@@ -28,6 +28,25 @@ const CANDIDATE_BATCH = 50;
 const MAX_SIZE_SWEEPS_PER_POOL = 20;
 
 /**
+ * Compare-and-skip for one reconcile candidate. A touch, pin, class change,
+ * or rematerialized weight that lands before this check must suppress eviction.
+ */
+export function quotaCandidateIsCurrent(
+  candidate: QuotaItem,
+  current: QuotaItem | null,
+  now: number,
+): current is QuotaItem {
+  return (
+    current !== null &&
+    current.class === "cache" &&
+    current.weight === candidate.weight &&
+    current.touchedAtMs === candidate.touchedAtMs &&
+    current.heat === candidate.heat &&
+    current.pinUntilMs <= now
+  );
+}
+
+/**
  * DB-backed quota accounting. It never opens or deletes files. Request owners
  * construct it on demand; process maintenance constructs its own instance.
  */
@@ -121,16 +140,7 @@ export class QuotaService {
           if (this.cacheUsage(poolName) <= target) break;
           if (evicted >= limitPerPool) break;
           const current = findQuotaItem(this.db, poolName, candidate.itemId);
-          if (
-            !current ||
-            current.class !== "cache" ||
-            current.weight !== candidate.weight ||
-            current.touchedAtMs !== candidate.touchedAtMs ||
-            current.heat !== candidate.heat ||
-            current.pinUntilMs > now
-          ) {
-            continue;
-          }
+          if (!quotaCandidateIsCurrent(candidate, current, now)) continue;
           if (!(await evictor(current))) continue;
           evicted += 1;
           reclaimed += current.weight;

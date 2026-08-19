@@ -3,7 +3,6 @@ import {
   copyFile,
   mkdir,
   open,
-  readdir,
   rename,
   rm,
   stat,
@@ -20,6 +19,12 @@ import {
   type StorageLayout,
 } from "./paths";
 import { createKeyedLock, type KeyedLock } from "./keyedLock";
+import {
+  createFsGcIo,
+  gcAgedDirectory,
+  gcCutoffMs,
+  type GcDirectoryIo,
+} from "./gc";
 
 export interface BlobInfo {
   id: string;
@@ -70,6 +75,8 @@ export interface BlobStoreOptions {
   stageRetentionMs: number;
   trashRetentionMs: number;
   now?: () => number;
+  /** Injected so tests can pause between GC stat and unlink. */
+  gcIo?: GcDirectoryIo;
 }
 
 const DEFAULT_OPTIONS: BlobStoreOptions = {
@@ -193,11 +200,13 @@ function webReadable(
 export class BlobStore {
   private readonly layout: StorageLayout;
   private readonly options: BlobStoreOptions;
+  private readonly gcIo: GcDirectoryIo;
   private readonly locks: KeyedLock = createKeyedLock();
 
   constructor(root: string, options: Partial<BlobStoreOptions> = {}) {
     this.layout = createStorageLayout(root);
     this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.gcIo = options.gcIo ?? createFsGcIo();
   }
 
   /**
@@ -344,11 +353,17 @@ export class BlobStore {
 
   /** Delete aged staging and trash files. Never walks objects/. */
   async gc(): Promise<void> {
-    await this.gcDirectory(
+    const now = this.options.now?.() ?? Date.now();
+    await gcAgedDirectory(
       this.layout.stagingRoot,
-      this.options.stageRetentionMs,
+      gcCutoffMs(now, this.options.stageRetentionMs),
+      this.gcIo,
     );
-    await this.gcDirectory(this.layout.trashRoot, this.options.trashRetentionMs);
+    await gcAgedDirectory(
+      this.layout.trashRoot,
+      gcCutoffMs(now, this.options.trashRetentionMs),
+      this.gcIo,
+    );
   }
 
   private async commit(
@@ -375,30 +390,6 @@ export class BlobStore {
       await rename(stagedPath, target);
       return { id, bytes: info.size, sha256 };
     });
-  }
-
-  private async gcDirectory(
-    directory: string,
-    retentionMs: number,
-  ): Promise<void> {
-    const cutoff = (this.options.now?.() ?? Date.now()) - retentionMs;
-    let names: string[] = [];
-    try {
-      names = await readdir(directory);
-    } catch (error) {
-      if (isEnoent(error)) return;
-      throw error;
-    }
-    for (const name of names) {
-      const target = path.join(directory, name);
-      try {
-        const info = await stat(target);
-        if (!info.isFile()) continue;
-        if (info.mtimeMs <= cutoff) await rm(target, { force: true });
-      } catch {
-        // Concurrent commit/discard wins; a missing entry is already clean.
-      }
-    }
   }
 }
 

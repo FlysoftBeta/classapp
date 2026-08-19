@@ -93,7 +93,7 @@ export interface StoredRenderArchive extends RenderArchiveIndex {
   stream(range?: { start: number; end: number }): Promise<ReadableStream<Uint8Array>>;
 }
 
-interface ZipEntrySummary {
+export interface RenderArchiveZipEntry {
   name: string;
   size: number;
   originalSize: number;
@@ -102,7 +102,7 @@ interface ZipEntrySummary {
 
 const indexCache = new Map<string, Promise<StoredRenderArchive>>();
 
-function validEntryName(name: string): boolean {
+export function isRenderArchiveEntryName(name: string): boolean {
   return (
     name === MANIFEST_NAME ||
     name === "dictionary.zdict" ||
@@ -112,8 +112,8 @@ function validEntryName(name: string): boolean {
 
 async function extractManifest(
   chunks: AsyncIterable<Uint8Array>,
-): Promise<{ manifestBytes: Uint8Array; entries: ZipEntrySummary[] }> {
-  const entries: ZipEntrySummary[] = [];
+): Promise<{ manifestBytes: Uint8Array; entries: RenderArchiveZipEntry[] }> {
+  const entries: RenderArchiveZipEntry[] = [];
   const names = new Set<string>();
   const manifestChunks: Uint8Array[] = [];
   let manifestSize = 0;
@@ -123,7 +123,7 @@ async function extractManifest(
     if (entries.length >= MAX_ARCHIVE_ENTRIES + 2) {
       throw new PublicError("渲染归档包含过多条目");
     }
-    if (!validEntryName(file.name) || names.has(file.name)) {
+    if (!isRenderArchiveEntryName(file.name) || names.has(file.name)) {
       throw new PublicError("渲染归档包含无效条目");
     }
     if (file.size === undefined || file.originalSize === undefined) {
@@ -213,7 +213,7 @@ function publicResource(resource: ArchiveResource): BundleResource {
 
 function validateManifest(
   manifest: ArchiveManifest,
-  entries: ZipEntrySummary[],
+  entries: RenderArchiveZipEntry[],
   archiveSize: number,
 ): Omit<RenderArchiveIndex, "archiveSize"> {
   const zipEntries = new Map(entries.map((entry) => [entry.name, entry]));
@@ -350,6 +350,18 @@ function validateManifest(
     })),
     resources,
   };
+}
+
+/**
+ * Pure manifest/entry contract used by tests and by the file/blob indexers.
+ * ZIP framing and STORED-entry enforcement stay in extractManifest.
+ */
+export function validateRenderArchiveContents(
+  manifestBytes: Uint8Array,
+  entries: readonly RenderArchiveZipEntry[],
+  archiveSize: number,
+): Omit<RenderArchiveIndex, "archiveSize"> {
+  return validateManifest(parseManifest(manifestBytes), [...entries], archiveSize);
 }
 
 /**
