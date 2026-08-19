@@ -3,6 +3,7 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import {
   evictScore,
+  findQuotaItem,
   heatNow,
   listCacheEvictionCandidates,
   touchQuotaItem,
@@ -130,5 +131,168 @@ test("upserting an existing quota item preserves heat and does not rewind the cl
   });
   assert.equal(ranked[0]?.weight, 20);
   assert.ok((ranked[0]?.heat ?? 0) > 4);
+  db.close();
+});
+
+test("touch of a missing item is a no-op; stacked touches add intensity after decay", () => {
+  const db = memoryQuotaDb();
+  upsertQuotaPool(db, {
+    name: "media",
+    maxWeight: 100,
+    targetRatio: 0.8,
+    halfLifeMs: 1000,
+  });
+  touchQuotaItem(db, "media", "absent", 5, 10, 1000);
+  assert.equal(findQuotaItem(db, "media", "absent"), null);
+
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "track",
+    class: "cache",
+    weight: 10,
+    now: 0,
+    heat: 2,
+  });
+  touchQuotaItem(db, "media", "track", 1, 1000, 1000);
+  const afterFirst = findQuotaItem(db, "media", "track");
+  assert.equal(afterFirst?.heat, 2);
+  touchQuotaItem(db, "media", "track", 3, 1000, 1000);
+  assert.equal(findQuotaItem(db, "media", "track")?.heat, 5);
+  touchQuotaItem(db, "media", "track", 1, 0, 1000);
+  assert.equal(findQuotaItem(db, "media", "track")?.touchedAtMs, 1000);
+  db.close();
+});
+
+test("pins, zero weight, and durable rows are not eviction candidates; a pin that expires at now is eligible", () => {
+  const db = memoryQuotaDb();
+  upsertQuotaPool(db, {
+    name: "media",
+    maxWeight: 10,
+    targetRatio: 0.8,
+    halfLifeMs: 1000,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "zero",
+    class: "cache",
+    weight: 0,
+    now: 0,
+    heat: 0.1,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "pinned-future",
+    class: "cache",
+    weight: 50,
+    now: 0,
+    heat: 0.1,
+    pinUntilMs: 11,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "pin-expires",
+    class: "cache",
+    weight: 40,
+    now: 0,
+    heat: 0.1,
+    pinUntilMs: 10,
+  });
+  const ranked = listCacheEvictionCandidates(db, "media", 1000, {
+    now: 10,
+    limit: 10,
+  });
+  assert.deepEqual(
+    ranked.map((item) => item.itemId),
+    ["pin-expires"],
+  );
+  db.close();
+});
+
+test("upsert can extend a pin but must not shorten it or rewind heat", () => {
+  const db = memoryQuotaDb();
+  upsertQuotaPool(db, {
+    name: "media",
+    maxWeight: 10,
+    targetRatio: 0.8,
+    halfLifeMs: 1000,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "track",
+    class: "cache",
+    weight: 10,
+    now: 5,
+    heat: 9,
+    pinUntilMs: 100,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "track",
+    class: "cache",
+    weight: 10,
+    now: 6,
+    heat: 0,
+    pinUntilMs: 50,
+  });
+  const kept = findQuotaItem(db, "media", "track");
+  assert.equal(kept?.pinUntilMs, 100);
+  assert.equal(kept?.heat, 9);
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "track",
+    class: "cache",
+    weight: 10,
+    now: 6,
+    pinUntilMs: 200,
+  });
+  assert.equal(findQuotaItem(db, "media", "track")?.pinUntilMs, 200);
+  db.close();
+});
+
+test("negative weight and intensity are rejected; equal eviction scores break ties by touch then id", () => {
+  const db = memoryQuotaDb();
+  upsertQuotaPool(db, {
+    name: "media",
+    maxWeight: 10,
+    targetRatio: 0.8,
+    halfLifeMs: 1000,
+  });
+  assert.throws(
+    () =>
+      upsertQuotaItem(db, {
+        pool: "media",
+        itemId: "bad",
+        class: "cache",
+        weight: -1,
+        now: 0,
+      }),
+    /non-negative/,
+  );
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "b",
+    class: "cache",
+    weight: 10,
+    now: 1,
+    heat: 1,
+  });
+  upsertQuotaItem(db, {
+    pool: "media",
+    itemId: "a",
+    class: "cache",
+    weight: 10,
+    now: 1,
+    heat: 1,
+  });
+  assert.throws(
+    () => touchQuotaItem(db, "media", "a", -1, 1, 1000),
+    /non-negative/,
+  );
+  assert.deepEqual(
+    listCacheEvictionCandidates(db, "media", 1000, { now: 1, limit: 2 }).map(
+      (item) => item.itemId,
+    ),
+    ["a", "b"],
+  );
   db.close();
 });

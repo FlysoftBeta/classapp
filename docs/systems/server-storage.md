@@ -12,6 +12,8 @@ decide retention.
 ```text
 server/storage/
   paths.ts           blob-id validation, sharded layout, tree-path rules
+  keyedLock.ts       per-id async mutex owned by one store instance
+  gc.ts              staging/trash mtime GC; injectable I/O for TOCTOU tests
   blobStore.ts       allocated-id blobs: create/commit/open/drop, staging/trash GC
   treeStore.ts       manifest ZIP adapter over one blob
   renderArchive.ts   document-specific STORED-ZIP index over one blob
@@ -127,6 +129,39 @@ Owner eviction:
 
 Maintenance runs BlobStore GC, quota cache sweeps for registered owners, and
 each owner's own stale-intent cleanup. It does not walk `objects/`.
+
+## Failure windows
+
+SQLite and the filesystem cannot share a transaction. Unit tests under
+`scripts/tests/unit/server/` pin the windows below.
+
+### Blob GC versus create, drop, and mtime touch
+
+Physical deletion is mtime GC of `staging/` and `trash/` only. Each name is
+serialized with the blob-id lock, then compared-and-deleted: a second stat
+must still see an aged file before unlink. A retry that recreates the same
+id, a `utimes` touch that makes the file younger than the TTL, or a later
+`drop` into the same trash name after the first snapshot is kept. Missing
+names are concurrent commit/discard; other unlink errors surface.
+`objects/` must still never be reconciled against a live-key snapshot; a
+crash leftover there is indistinguishable from an in-flight publish.
+
+### Quota reconcile versus touch and rematerialize
+
+`QuotaService.reconcile` re-reads the ledger row before calling the owner
+evictor, so a touch or rematerialized weight that lands after listing and
+before that check is skipped. After the evictor returns, the loop counts a
+success only if the ledger row is gone. `release` accepts the snapshot it
+was given and compare-and-deletes `(weight, heat, touched_at)`; a stale
+owner that releases after a concurrent `account` of the same `item_id`
+leaves the rematerialized row. Callers that are not racing an eviction
+(abandoning a unique upload id) may omit the snapshot.
+
+### Named tree blobs that are missing on disk
+
+`TreeStore` treats `blobId === null` as an empty tree. A non-null id whose
+object is absent is an orphaned pointer and fails; it must not look like a
+new workspace.
 
 ## Migration
 

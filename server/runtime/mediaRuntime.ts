@@ -37,7 +37,7 @@ import {
   touchTrack,
 } from "@/server/data/media";
 import { BlobStore, type StagingSlot } from "@/server/storage/blobStore";
-import { QuotaService } from "@/server/storage/quotaService";
+import { QuotaService, type QuotaItem } from "@/server/storage/quotaService";
 import { publishSystem } from "@/server/runtime/eventBus";
 import { recordContainedServerIncident } from "@/server/services/incidentService";
 import { BUILD_ID } from "@/server/infra/env";
@@ -529,7 +529,7 @@ export class MediaRuntime {
   }
 
   /** Owner evictor registered with the shared quota service. */
-  async evictTrack(trackId: string): Promise<boolean> {
+  async evictTrack(trackId: string, snapshot?: QuotaItem): Promise<boolean> {
     if (this.hasLease(trackId)) return false;
     const blobIds = this.db.transaction(() =>
       deleteAssetsIfUnreferenced(this.db, trackId),
@@ -538,7 +538,7 @@ export class MediaRuntime {
     for (const blobId of blobIds) {
       await this.blobs.drop(blobId);
     }
-    new QuotaService(this.db).release("media", trackId);
+    new QuotaService(this.db).release("media", trackId, snapshot);
     publishSystem({
       kind: "media.materialization.changed",
       data: {

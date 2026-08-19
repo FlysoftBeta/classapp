@@ -198,10 +198,28 @@ export function deleteQuotaItem(
   db: Database,
   pool: string,
   itemId: string,
-): void {
-  db.prepare(
-    "DELETE FROM storage_quota_items WHERE pool = ? AND item_id = ?",
-  ).run(pool, itemId);
+  expected?: Pick<QuotaItem, "weight" | "heat" | "touchedAtMs">,
+): boolean {
+  const result = expected
+    ? db
+        .prepare(
+          `DELETE FROM storage_quota_items
+            WHERE pool = ? AND item_id = ? AND weight = ? AND heat = ?
+              AND touched_at_ms = ?`,
+        )
+        .run(
+          pool,
+          itemId,
+          expected.weight,
+          expected.heat,
+          expected.touchedAtMs,
+        )
+    : db
+        .prepare(
+          "DELETE FROM storage_quota_items WHERE pool = ? AND item_id = ?",
+        )
+        .run(pool, itemId);
+  return result.changes > 0;
 }
 
 export function quotaPoolWeight(

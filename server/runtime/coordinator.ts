@@ -70,13 +70,13 @@ export class Coordinator {
       this.storage.blobs,
     );
     this.storage.registerEvictor("media", this.media.quotaPolicy(), (item) =>
-      this.media.evictTrack(item.itemId),
+      this.media.evictTrack(item.itemId, item),
     );
     this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.blobs);
     this.storage.registerEvictor(
       "teach-documents",
       this.teachDocuments.quotaPolicy(),
-      (item) => this.teachDocuments.evict(item.itemId),
+      (item) => this.teachDocuments.evict(item.itemId, item),
     );
     this.updateRuntime = config.update
       ? new UpdateRuntime(db, config.update)

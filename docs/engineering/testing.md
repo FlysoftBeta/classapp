@@ -71,6 +71,8 @@ Use real SQLite/IndexedDB/filesystem behavior for:
 - WAL snapshot / write-lock re-read;
 - IDB schema owner race and transaction abort;
 - extent publication and orphan GC;
+- blob staging/trash mtime GC versus create, drop, and touch;
+- quota reconcile versus rematerialize/touch;
 - render archive range validation;
 - update extraction/part hashes;
 - Incident grouping/detail cap/public IDs;
