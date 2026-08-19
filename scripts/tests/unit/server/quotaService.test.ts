@@ -9,6 +9,7 @@ import {
 import {
   QuotaService,
   quotaCandidateIsCurrent,
+  type QuotaItem,
 } from "@/server/storage/quotaService";
 
 function memoryQuotaDb(): Database.Database {
@@ -123,7 +124,7 @@ test("reconcile ignores durable rows, zero-max pools, and evictor refusals", asy
     new Map([
       [
         "media",
-        async (item) => {
+        async (item: QuotaItem) => {
           asked.push(item.itemId);
           return false;
         },
@@ -168,7 +169,7 @@ test("reconcile skips a candidate touched after listing in the same sweep", asyn
     new Map([
       [
         "media",
-        async (item) => {
+        async (item: QuotaItem) => {
           asked.push(item.itemId);
           if (item.itemId === "cold") {
             quota.touch("media", "warm", 10, 5000);
@@ -203,7 +204,7 @@ test("reconcile must not count a rematerialize that lands during the evictor as 
     new Map([
       [
         "media",
-        async (item) => {
+        async (item: QuotaItem) => {
           quota.account("media", item.itemId, {
             weight: 12,
             class: "cache",
@@ -238,7 +239,7 @@ test("a stale evictor must not release a rematerialized ledger row", async () =>
     new Map([
       [
         "media",
-        async (item) => {
+        async (item: QuotaItem) => {
           quota.account("media", item.itemId, {
             weight: 12,
             class: "cache",
