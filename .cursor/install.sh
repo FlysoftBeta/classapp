@@ -38,4 +38,10 @@ echo "==> Building Chrome 70 Wasm prerequisites (infini, zstd)"
 npm run infini:build
 npm run zstd:build
 
+# Cache the pinned media artifacts (yt-dlp + POT provider). Release builds
+# (`npm run build -- <target>`) resolve these from .cache/media and fail
+# without them. Idempotent: re-runs are cache hits.
+echo "==> Caching pinned media artifacts (yt-dlp, POT provider)"
+npm run media:update
+
 echo "==> ClassApp environment ready"
