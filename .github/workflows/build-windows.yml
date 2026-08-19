@@ -73,8 +73,14 @@ jobs:
         run: |
           set -euo pipefail
           ls -lh build/bootstrap-windows.zip build/deploy-windows.zip
-          unzip -l build/bootstrap-windows.zip | grep -E 'launcher\.js|start\.bat|current/'
-          unzip -l build/deploy-windows.zip | grep -E 'server\.js|build-id\.txt|yt-dlp\.exe'
+          bootstrap="$(unzip -Z1 build/bootstrap-windows.zip)"
+          deploy="$(unzip -Z1 build/deploy-windows.zip)"
+          for name in launcher.js start.bat current/server.js current/build-id.txt; do
+            printf '%s\n' "$bootstrap" | grep -qx "$name"
+          done
+          for name in server.js build-id.txt server/media/yt-dlp.exe server/media/pot-server/main.js node_modules/better-sqlite3/prebuilds/win32-x64.node; do
+            printf '%s\n' "$deploy" | grep -qx "$name"
+          done
 
       - name: Upload Windows archives
         uses: actions/upload-artifact@v4
