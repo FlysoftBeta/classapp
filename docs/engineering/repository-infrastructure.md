@@ -119,10 +119,12 @@ runner is invoked by `scripts/tests/run.mts`:
   inspection;
 - `prod-runtime.mts` provides controlled production-runtime test support.
 
-Unit tests run with `--test-isolation=none`. Smoke tests run sequentially with
+Unit tests run in-process. Smoke tests run sequentially with
 `CLASSAPP_EXECUTORS=1` because `setRuntimeConfig` and `env.ts` are
 process-global. Each smoke process uses a temporary data root, never
-`worktree/data`.
+`worktree/data`. Development executor workers load TypeScript through
+`server/runtime/executorWorker.dev.mjs` rather than inheriting `node --test`
+execArgv.
 
 Use `.cache/` or a directly executed shell/TypeScript probe for temporary
 investigation. Temporary migration SQL experiments, Zod shape checks, and

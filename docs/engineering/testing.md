@@ -30,6 +30,11 @@ directly. They classify coverage by protocol, auth, groups, posts,
 conversations, users (deactivate vs purge), stickers, announcement, and HTTP
 discovery. They are not a substitute for Chrome 70 production E2E.
 
+Development executor workers boot through `server/runtime/executorWorker.dev.mjs`,
+which loads TypeScript with `tsx/esm/api` `tsImport`. Worker threads do not
+reliably apply the parent `--import tsx` hook, and `node --test` flags must
+not leak into `execArgv` or the worker becomes a test runner.
+
 Do not scatter co-located `*.test.ts` files through domain directories. A test
 that should remain belongs in `scripts/tests/unit/<module>/` or
 `scripts/tests/smoke/`, is executed by `npm run test:unit` or

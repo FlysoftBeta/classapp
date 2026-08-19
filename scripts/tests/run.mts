@@ -5,7 +5,9 @@ import { projectRoot } from "../paths.mjs";
 
 const kind = process.argv[2];
 if (kind !== "unit" && kind !== "smoke") {
-  console.error("Usage: node --import tsx scripts/tests/run.mts <unit|smoke>");
+  console.error(
+    "Usage: node --import tsx scripts/tests/run.mts <unit|smoke> [extra node --test args]",
+  );
   process.exit(2);
 }
 
@@ -24,12 +26,11 @@ const args = [
   "--import",
   "tsx",
   "--test",
-  "--test-isolation=none",
   "--test-reporter=spec",
   `--test-timeout=${kind === "smoke" ? "120000" : "30000"}`,
 ];
 if (kind === "smoke") args.push("--test-concurrency=1");
-args.push(...files);
+args.push(...files, ...process.argv.slice(3));
 
 const child = spawn(process.execPath, args, {
   cwd: projectRoot,

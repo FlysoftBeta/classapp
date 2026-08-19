@@ -12,6 +12,18 @@ The working tree contains several generations of design and incomplete rewrite
 work. Existence proves only that code was written. Corroborate with product
 constraints, newer repeated patterns, invariants, and actual verification.
 
+## Executor workers inherit Node CLI flags
+
+**Trap:** spawning `worker_threads` with the default `process.execArgv`, or
+pointing a development worker at a `.ts` file and assuming parent `--import tsx`
+applies.
+
+`node --test` turns the worker into a test runner so Actions never complete.
+`--watch` watches the worker entry forever. Worker threads also do not reliably
+apply the parent TypeScript loader, which surfaces as `ERR_UNKNOWN_FILE_EXTENSION`
+and a hung Action. Filter test/watch flags and boot development workers through
+`executorWorker.dev.mjs`.
+
 ## Scattered `.test.ts` files
 
 **Trap:** adding a test beside every helper and reporting it as passed.

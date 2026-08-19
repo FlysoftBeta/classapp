@@ -50,8 +50,19 @@ async function freePort(): Promise<number> {
 }
 
 async function closeHttp(server: Server): Promise<void> {
+  if (typeof server.closeAllConnections === "function") {
+    server.closeAllConnections();
+  }
   await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
+    const timer = setTimeout(
+      () => reject(new Error("HTTP server close timed out")),
+      5_000,
+    );
+    server.close((error) => {
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    });
   });
 }
 

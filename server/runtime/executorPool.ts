@@ -10,13 +10,29 @@ import type {
   WorkerMessage,
 } from "@/server/runtime/executorIpc";
 import type { StickyHost } from "@/server/runtime/sticky";
+import { ResultTools } from "@/shared/protocol/result";
 
 function executorWorkerUrl(): URL {
   const here = import.meta.url;
   if (here.endsWith("/main.mjs") || here.endsWith("\\main.mjs")) {
     return new URL("./executor.mjs", here);
   }
-  return new URL("./executorWorker.ts", here);
+  return new URL("./executorWorker.dev.mjs", here);
+}
+
+/**
+ * Worker threads inherit `process.execArgv` unless replaced. `node --test`
+ * and `tsx watch` must not leak: the former turns the worker into a test
+ * runner, the latter watches the worker entry forever.
+ */
+export function filterExecutorExecArgv(execArgv: readonly string[]): string[] {
+  return execArgv.filter(
+    (arg) =>
+      arg !== "--watch" &&
+      !arg.startsWith("--watch=") &&
+      arg !== "--test" &&
+      !arg.startsWith("--test-"),
+  );
 }
 
 const RPC_TIMEOUT_MS = 120_000;
@@ -38,6 +54,7 @@ interface PendingJob {
 
 class ExecutorWorkerSlot {
   private busy = false;
+  private failed: Error | null = null;
   private readonly pending = new Map<string, PendingJob>();
   private readonly queue: Array<() => void> = [];
 
@@ -49,29 +66,53 @@ class ExecutorWorkerSlot {
       void this.onMessage(message);
     });
     worker.on("error", (error: Error) => {
-      for (const job of this.pending.values()) job.reject(error);
-      this.pending.clear();
+      this.fail(error);
+    });
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        this.fail(new Error(`Executor worker exited with code ${code}`));
+      }
     });
   }
 
   submit(job: ExecutorJob): Promise<ExecutorJobResult> {
     return new Promise((resolve, reject) => {
       const run = () => {
+        if (this.failed) {
+          reject(this.failed);
+          return;
+        }
         this.busy = true;
         this.pending.set(job.id, { resolve, reject });
         this.post({ type: "job", job });
       };
+      if (this.failed) {
+        reject(this.failed);
+        return;
+      }
       if (this.busy) this.queue.push(run);
       else run();
     });
   }
 
   get idle(): boolean {
-    return !this.busy;
+    return !this.busy && !this.failed;
   }
 
   shutdown(): void {
     this.post({ type: "shutdown" });
+  }
+
+  private fail(error: Error): void {
+    if (!this.failed) {
+      this.failed = error;
+      console.error("[ExecutorPool] worker failed", error);
+    }
+    for (const job of this.pending.values()) job.reject(error);
+    this.pending.clear();
+    this.busy = false;
+    const queued = this.queue.splice(0);
+    for (const run of queued) run();
   }
 
   private post(message: ParentMessage): void {
@@ -151,6 +192,7 @@ class ExecutorWorkerSlot {
 export class ExecutorPool {
   private readonly slots: ExecutorWorkerSlot[] = [];
   private cursor = 0;
+  private readonly buildId: string;
 
   constructor(
     config: RuntimeConfig,
@@ -158,6 +200,7 @@ export class ExecutorPool {
     mediaAvailable: boolean,
     teachMonitorAvailable: boolean,
   ) {
+    this.buildId = config.buildId;
     const workerData: ExecutorWorkerData = {
       config,
       mediaAvailable,
@@ -165,22 +208,34 @@ export class ExecutorPool {
     };
     const url = executorWorkerUrl();
     const count = executorWorkerCount();
+    const execArgv = filterExecutorExecArgv(process.execArgv);
     for (let i = 0; i < count; i += 1) {
       const worker = new Worker(url, {
         workerData,
-        execArgv: process.execArgv.filter(
-          (arg) => arg !== "--watch" && !arg.startsWith("--watch="),
-        ),
+        execArgv,
       });
       this.slots.push(new ExecutorWorkerSlot(worker, sticky));
     }
   }
 
-  submit(job: ExecutorJob): Promise<ExecutorJobResult> {
+  async submit(job: ExecutorJob): Promise<ExecutorJobResult> {
     const idle = this.slots.find((slot) => slot.idle);
     const slot = idle ?? this.slots[this.cursor % this.slots.length]!;
     this.cursor += 1;
-    return slot.submit(job);
+    try {
+      return await slot.submit(job);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      return {
+        id: job.id,
+        events: [],
+        commands: [],
+        outcome: ResultTools.err(
+          { message: err.message, incidentId: "executor" },
+          { buildId: this.buildId },
+        ),
+      };
+    }
   }
 
   close(): void {
