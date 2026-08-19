@@ -180,6 +180,7 @@ export function publish<K extends ServerEventName>(
 }
 
 export function deliverDeferredEvents(events: BusEvent[]): void {
+  if (events.length === 0) return;
   const active = coordinatorBus;
   if (!active) {
     const jobQueue = jobEvents.getStore();
