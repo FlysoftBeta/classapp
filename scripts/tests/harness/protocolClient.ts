@@ -28,7 +28,8 @@ type Pending = {
 
 /**
  * Thin WebSocket protocol client. It speaks frames only and does not use the
- * application client, Interact layer, or IndexedDB.
+ * application client, Interact layer, or IndexedDB. Each instance sends a
+ * unique User-Agent so the server treats it as a distinct physical client.
  */
 export class ProtocolClient {
   private socket: WebSocket | null = null;
@@ -40,12 +41,20 @@ export class ProtocolClient {
     { resolve: () => void; reject: (error: Error) => void }
   >();
   readonly events: EventFrame[] = [];
+  readonly userAgent: string;
 
-  constructor(private readonly url: string) {}
+  constructor(
+    private readonly url: string,
+    userAgent = `classapp-smoke/${randomUUID()}`,
+  ) {
+    this.userAgent = userAgent;
+  }
 
   async connect(timeoutMs = 10_000): Promise<HelloFrame> {
     if (this.socket) throw new Error("Protocol client already connected");
-    const socket = new WebSocket(this.url);
+    const socket = new WebSocket(this.url, {
+      headers: { "User-Agent": this.userAgent },
+    });
     this.socket = socket;
     const hello = await new Promise<HelloFrame>((resolve, reject) => {
       const timer = setTimeout(

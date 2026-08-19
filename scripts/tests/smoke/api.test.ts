@@ -111,7 +111,7 @@ describe("smoke: protocol and API", () => {
         session.admin.user.id,
       );
       assert.ok("user" in created);
-      const member = await session.login(pin);
+      const member = await session.login(pin, session.client);
       await session.client.request("logoutAction", [], member.user.id);
       await assert.rejects(
         session.client.request(
@@ -127,6 +127,32 @@ describe("smoke: protocol and API", () => {
         session.admin.user.id,
       );
       assert.ok(Array.isArray(feed.posts));
+    });
+
+    test("a physical client cannot bind a third account", async () => {
+      const firstPin = uniquePin();
+      const firstHandle = uniqueHandle();
+      await session.client.request(
+        "adminCreateUserAction",
+        [{ handle: firstHandle, pin: firstPin, username: firstHandle }],
+        session.admin.user.id,
+      );
+      const first = await session.login(firstPin, session.client);
+      const secondPin = uniquePin();
+      await session.client.request(
+        "adminCreateUserAction",
+        [{ handle: uniqueHandle(), pin: secondPin, username: uniqueHandle() }],
+        session.admin.user.id,
+      );
+      const refused = await session.client.request(
+        "loginPinAction",
+        [secondPin],
+        null,
+      );
+      assert.deepEqual(refused, {
+        error: "该客户端已登录两个账户，请先退出其中一个",
+      });
+      await session.client.request("logoutAction", [], first.user.id);
     });
   });
 
@@ -172,7 +198,7 @@ describe("smoke: protocol and API", () => {
         session.admin.user.id,
       );
       const member = await session.login(pin);
-      const joined = await session.client.request(
+      const joined = await member.client.request(
         "joinGroupAction",
         [
           {
@@ -363,7 +389,7 @@ describe("smoke: protocol and API", () => {
         session.admin.user.id,
       );
       assert.equal(posted.post.conv_id, convId);
-      const listed = await session.client.request(
+      const listed = await member.client.request(
         "fetchConversationsAction",
         [],
         member.user.id,
@@ -384,10 +410,11 @@ describe("smoke: protocol and API", () => {
       assert.ok("user" in created);
       if (!("user" in created)) return;
       const userId = created.user.id;
-      const posted = await session.client.request(
+      const member = await session.login(pin);
+      const posted = await member.client.request(
         "createPostAction",
         [{ conv_id: "group:wild", content: "停用前的帖" }],
-        (await session.login(pin)).user.id,
+        member.user.id,
       );
 
       await session.client.request(
@@ -431,7 +458,7 @@ describe("smoke: protocol and API", () => {
       if (!("user" in created)) return;
       const userId = created.user.id;
       const member = await session.login(pin);
-      const posted = await session.client.request(
+      const posted = await member.client.request(
         "createPostAction",
         [{ conv_id: "group:wild", content: "清除前的帖" }],
         member.user.id,

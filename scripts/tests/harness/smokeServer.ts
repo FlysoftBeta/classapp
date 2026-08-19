@@ -18,7 +18,7 @@ export { ProtocolClient, ProtocolError };
 export type LoginSuccess = Extract<
   ActionData<"loginPinAction">,
   { user: User; token: string }
->;
+> & { client: ProtocolClient };
 
 export interface SmokeSession {
   dataRoot: string;
@@ -132,17 +132,18 @@ export async function startSmokeServer(): Promise<SmokeSession> {
 
   async function login(
     pin: string,
-    target: ProtocolClient = client,
+    target?: ProtocolClient,
   ): Promise<LoginSuccess> {
-    const result = await target.request("loginPinAction", [pin], null);
+    const actor = target ?? (await openClient());
+    const result = await actor.request("loginPinAction", [pin], null);
     if (!("user" in result) || !("token" in result)) {
       throw new Error(`Login did not return a session: ${JSON.stringify(result)}`);
     }
-    await target.authenticate(result.user.id, result.token);
-    return result;
+    await actor.authenticate(result.user.id, result.token);
+    return { ...result, client: actor };
   }
 
-  const admin = await login(ADMIN_PIN);
+  const admin = await login(ADMIN_PIN, client);
   let closed = false;
   return {
     dataRoot,
