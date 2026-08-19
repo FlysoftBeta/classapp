@@ -4,9 +4,22 @@
  * formatting consistent across server and client code.
  */
 
-/** Parse a DB timestamp (with or without trailing "Z") as UTC. */
+const EXPLICIT_TIME_ZONE = /(?:z|[+-]\d{2}:?\d{2})$/i;
+
+/**
+ * Parse a DB or server timestamp as UTC. Space-separated SQLite values are
+ * converted to ISO so Chrome 70 and Node agree; date-only values are midnight
+ * UTC.
+ */
 export function parseDbTime(s: string): Date {
-  return new Date(s.endsWith("Z") ? s : s + "Z");
+  const trimmed = s.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return new Date(`${trimmed}T00:00:00Z`);
+  }
+  const isoValue = trimmed.replace(" ", "T");
+  return new Date(
+    EXPLICIT_TIME_ZONE.test(isoValue) ? isoValue : `${isoValue}Z`,
+  );
 }
 
 /** Format a Date as the DB timestamp format "YYYY-MM-DD HH:MM:SS" (UTC). */

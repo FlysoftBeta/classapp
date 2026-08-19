@@ -1,67 +1,30 @@
 import { mkdirSync } from "node:fs";
-import { createServer } from "node:http";
 import {
-  createPlatformRuntimeConfig,
-  setRuntimeConfig,
-} from "@/server/infra/runtimeConfig";
-import { projectRoot, worktreePath } from "@/scripts/paths.mjs";
+  projectRoot,
+  worktreePath,
+} from "@/scripts/paths.mjs";
+import { startDevelopmentServer } from "@/server/runtime/developmentServer";
 
 async function main(): Promise<void> {
   const appDir = process.env.CLASSAPP_APP_DIR ?? projectRoot;
   const dataRoot = process.env.CLASSAPP_DATA_ROOT ?? worktreePath("data");
   mkdirSync(dataRoot, { recursive: true });
   const port = Number(process.env.CLASSAPP_PORT ?? "3001");
-  const config = setRuntimeConfig({
+  const server = await startDevelopmentServer({
     appDir,
     dataRoot,
+    port,
     buildId: process.env.CLASSAPP_BUILD_ID ?? "dev",
-    ports: [port],
-    securePorts: [],
-    bindHost: "127.0.0.1",
-    trustedProxyIps: ["127.0.0.1", "::1"],
-    nodeEnv: "development",
     initialAdminPin: "123456",
-    platform: createPlatformRuntimeConfig(appDir, "development"),
   });
-
-  const [
-    { createHttpHandler },
-    { openCoordinatorDatabase },
-    { WebSocketProtocol },
-    { Coordinator },
-    { startMaintenance },
-    { reconcileStaleAiWorkspaces },
-  ] = await Promise.all([
-    import("@/server/http/handler"),
-    import("@/server/infra/db"),
-    import("@/server/protocol/WebSocketProtocol"),
-    import("@/server/runtime/coordinator"),
-    import("@/server/services/maintenance"),
-    import("@/server/services/ai/aiWorkspace"),
-  ]);
-  const db = openCoordinatorDatabase();
-  const coordinator = new Coordinator(db, config.buildId);
-  await coordinator.storage.start();
-  await coordinator.articleUploads.reconcile();
-  await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
-  await coordinator.media.start();
-  coordinator.teachDocuments.start();
-  const backend = createServer(createHttpHandler(config, coordinator));
-  new WebSocketProtocol("dev", coordinator).attach(backend);
-  const stopMaintenance = startMaintenance(db, coordinator);
-  backend.listen(port, "127.0.0.1", () =>
-    console.log(`[Server] backend on http://127.0.0.1:${port}`),
-  );
+  console.log(`[Server] backend on http://127.0.0.1:${server.port}`);
 
   const shutdown = async () => {
-    stopMaintenance();
-    coordinator.teachDocuments.stop();
-    await coordinator.media.stop();
-    coordinator.closePool();
-    backend.close(() => process.exit(0));
+    await server.close();
+    process.exit(0);
   };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
 }
 
 main().catch((error: unknown) => {

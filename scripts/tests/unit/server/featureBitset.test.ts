@@ -4,7 +4,7 @@ import {
   decodeFeatureBitset,
   encodeFeatureBitset,
   isValidFeatureBitset,
-} from "./featureBitset";
+} from "@/server/data/featureBitset";
 import { DEFAULT_USER_FEATURES } from "@/shared/features";
 
 test("feature bitset is a lossless Data-only encoding", () => {
@@ -13,13 +13,11 @@ test("feature bitset is a lossless Data-only encoding", () => {
     ai: false,
     article_download: false,
   };
-  assert.deepEqual(
-    decodeFeatureBitset(encodeFeatureBitset(features)),
-    features,
-  );
+  assert.deepEqual(decodeFeatureBitset(encodeFeatureBitset(features)), features);
 });
 
 test("feature bitset rejects bits outside the current storage layout", () => {
   assert.equal(isValidFeatureBitset(-1), false);
   assert.equal(isValidFeatureBitset(2 ** 20), false);
+  assert.equal(isValidFeatureBitset(0), true);
 });

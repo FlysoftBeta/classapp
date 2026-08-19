@@ -13,7 +13,8 @@ Groups may have:
 - discoverability through search or a parent Group;
 - a password on the join path;
 - hidden member list and per-member self-hiding;
-- administrator-only posting;
+- administrator-only posting (`can_post` uses the `administrator` role, the
+  same gate as the post Facade; it is not `community_manager`);
 - no-leave policy;
 - special `wild` or `announcement` type;
 - Articles, Posts, and DM establishment relationships.

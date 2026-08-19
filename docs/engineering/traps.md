@@ -16,10 +16,10 @@ constraints, newer repeated patterns, invariants, and actual verification.
 
 **Trap:** adding a test beside every helper and reporting it as passed.
 
-The current package has no unit test runner. These files are typechecked but not
-executed. Scattering more creates false confidence and source-tree noise. Add an
-intentional runner/test taxonomy first, or add a runnable integration harness in
-`scripts/tests`.
+Co-located `*.test.ts` files are not part of `npm test`. New cases belong in
+`scripts/tests/unit/` or `scripts/tests/smoke/` so the runner actually executes
+them. Scattering more files through domain directories creates false confidence
+and source-tree noise.
 
 ## Modern-browser cargo cult
 

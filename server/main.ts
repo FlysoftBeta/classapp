@@ -90,6 +90,6 @@ export async function bootstrap(
     );
     coordinator.teachDocuments.stop();
     await coordinator.media.stop();
-    coordinator.closePool();
+    await coordinator.closePool();
   };
 }

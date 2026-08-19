@@ -150,9 +150,9 @@ export class Coordinator {
     return result;
   }
 
-  closePool(): void {
+  async closePool(): Promise<void> {
     this.updateRuntime?.stop();
-    this.pool.close();
+    await this.pool.close();
     bindCoordinatorEventBus(null);
   }
 

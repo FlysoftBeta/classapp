@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseServerTime } from "./deviceTime";
+import { parseServerTime } from "@/client/lib/deviceTime";
 
 test("parses offset-less database timestamps as UTC", () => {
   assert.equal(

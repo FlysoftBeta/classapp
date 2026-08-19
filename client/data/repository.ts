@@ -35,17 +35,22 @@ import type {
 import { extentFiles } from "./files";
 import { FileIds } from "./fileIds";
 import { mergeCursorCoverage, type ContinuousCoverage } from "./coverage";
+import { Assignments as Values } from "./assignments";
+import {
+  ARTICLE_RETENTION_DAYS,
+  CONVERSATION_RETENTION_DAYS,
+  conversationRetentionCutoff,
+  type ArticleDownloadPolicy,
+  type ConversationDownloadPolicy,
+} from "./retentionPolicy";
 
-export type ConversationDownloadPolicy = "auto" | "week" | "half-year";
-export type ArticleDownloadPolicy =
-  { mode: "auto" } | { mode: "retained"; days: 1 | 7 | 180; expiresAt: number };
-
-export const ARTICLE_RETENTION_DAYS = [1, 7, 180] as const;
-export const CONVERSATION_RETENTION_DAYS = {
-  auto: 0,
-  week: 7,
-  "half-year": 180,
-} as const satisfies Record<ConversationDownloadPolicy, number>;
+export {
+  ARTICLE_RETENTION_DAYS,
+  CONVERSATION_RETENTION_DAYS,
+  conversationRetentionCutoff,
+  type ArticleDownloadPolicy,
+  type ConversationDownloadPolicy,
+};
 
 const MAX_RECORD_DELETES_PER_TRANSACTION = 64;
 
@@ -97,84 +102,6 @@ interface DmRow {
   last_message: string | null;
   last_at: string | null;
   touched_at: number;
-}
-
-const DEFAULT_ASSIGNMENT_TIME = 0;
-
-class Values {
-  static size(value: unknown): number {
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) throw new Error("Cannot size non-JSON value");
-    return new TextEncoder().encode(encoded).byteLength;
-  }
-
-  static equal(left: unknown, right: unknown): boolean {
-    return JSON.stringify(left) === JSON.stringify(right);
-  }
-
-  static nextTimestamp(previous = 0): number {
-    return Math.max(Date.now(), previous + 1);
-  }
-
-  static assignment<T>(value: T, updatedAt = 0): Assignment<T> {
-    return {
-      base: { value, updated_at: updatedAt },
-      proposal: null,
-    };
-  }
-
-  static resolved<T>(assignment: Assignment<T>): {
-    value: T;
-    updatedAt: number;
-    pending: boolean;
-  } {
-    const proposal = assignment.proposal;
-    if (proposal && proposal.updated_at > assignment.base.updated_at) {
-      return {
-        value: proposal.value,
-        updatedAt: proposal.updated_at,
-        pending: true,
-      };
-    }
-    return {
-      value: assignment.base.value,
-      updatedAt: assignment.base.updated_at,
-      pending: false,
-    };
-  }
-
-  static reconcile<T>(
-    current: Assignment<T> | null,
-    remote: { value: T; updatedAt: number },
-  ): Assignment<T> {
-    const base = { value: remote.value, updated_at: remote.updatedAt };
-    if (!current?.proposal || current.proposal.updated_at <= remote.updatedAt) {
-      return { base, proposal: null };
-    }
-    return { base, proposal: current.proposal };
-  }
-
-  static propose<T>(
-    current: Assignment<T> | null,
-    value: T,
-    updatedAt?: number,
-  ): Assignment<T> {
-    const previous = current
-      ? Math.max(
-          current.base.updated_at,
-          current.proposal?.updated_at ?? DEFAULT_ASSIGNMENT_TIME,
-        )
-      : DEFAULT_ASSIGNMENT_TIME;
-    const stamp = updatedAt ?? Values.nextTimestamp(previous);
-    return {
-      base: current?.base ?? { value, updated_at: 0 },
-      proposal: {
-        value,
-        updated_at: stamp,
-        operation_id: `${stamp.toString(36)}-${Math.random().toString(36).slice(2)}`,
-      },
-    };
-  }
 }
 
 async function mergeUserMetadata(
@@ -749,14 +676,6 @@ async function materializeArticle(
     last_read_at: state.last_read_at,
     ...(membership?.sort_at ? { list_sort_at: membership.sort_at } : {}),
   } as Article;
-}
-
-export function conversationRetentionCutoff(
-  policy: ConversationDownloadPolicy,
-  now = Date.now(),
-): number | null {
-  const days = CONVERSATION_RETENTION_DAYS[policy];
-  return days ? now - days * 86_400_000 : null;
 }
 
 async function deviceConversationCutoff(
