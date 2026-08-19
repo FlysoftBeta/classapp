@@ -4,7 +4,7 @@ import {
   decodeFeatureBitset,
   encodeFeatureBitset,
   isValidFeatureBitset,
-} from "./featureBitset";
+} from "@/server/data/featureBitset";
 import { DEFAULT_USER_FEATURES } from "@/shared/features";
 
 test("feature bitset is a lossless Data-only encoding", () => {

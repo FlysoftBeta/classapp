@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aiAccountingWindow } from "./ai";
+import { aiAccountingWindow } from "@/server/data/ai";
 
 test("AI accounting uses every UTC calendar day, including weekends", () => {
   const saturday = aiAccountingWindow(new Date("2026-08-15T12:00:00Z"));

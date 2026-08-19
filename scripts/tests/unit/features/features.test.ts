@@ -5,7 +5,7 @@ import {
   FEATURES,
   hasFeature,
   userFeaturesSchema,
-} from "./features";
+} from "@/shared/features";
 
 test("default product features are enabled independently of administration", () => {
   for (const feature of FEATURES) {

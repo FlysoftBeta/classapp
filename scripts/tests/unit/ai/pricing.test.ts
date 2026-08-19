@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AiModelsConfig } from "@/server/infra/aiModels";
-import { providerCostMicros } from "./pricing";
+import { providerCostMicros } from "@/server/services/ai/pricing";
 import { creditsFromMicros } from "@/server/data/ai";
 
 const config = {

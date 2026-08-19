@@ -128,6 +128,8 @@ production Shell and bundle-installation path.
 npm run lint                 TypeScript and ESLint after prerequisite builds
 npm run build -- <target>   Build linux-redhat, linux-debian, or windows
 npm run media:update        Refresh pinned media artifacts and POT cache
+npm run test:unit            Server/shared unit tests (consistency, quota, storage)
+npm run test:smoke           Isolated server API smoke tests, no application client
 npm run test:e2e            Chrome 70 HTTPS/install/offline/reconnect path
 npm run test:manual         Current manual production harness
 npm run test:manual-legacy  Legacy-browser manual harness
@@ -137,16 +139,17 @@ Run `npm run media:update` once after cloning (and again when bumping yt-dlp
 or the POT provider); dev and release builds then resolve verified media
 artifacts from `.cache/media`.
 
-There is no general unit-test runner. Co-located `*.test.ts` files may typecheck
-without executing. Use a bounded `.cache` or shell probe for temporary work;
-maintained executable scenarios currently belong under `scripts/tests/`.
+There is an executable unit-test and API smoke-test runner under
+`scripts/tests/`. Co-located `*.test.ts` files next to domain modules are not
+the maintained surface. Use a bounded `.cache` or shell probe for temporary
+work; Chrome 70 production-path scenarios remain under `scripts/tests/`.
 
 Infrastructure ownership:
 
 - `scripts/builds/` — prerequisite and release assembly;
 - `scripts/dev/` — development orchestration and reset/update tools;
 - `scripts/operation/` — narrow operator/build-host workflows;
-- `scripts/tests/` — maintained system and manual harnesses;
+- `scripts/tests/` — unit, API smoke, and production/manual harnesses;
 - `worktree/` — ignored runtime state and secrets;
 - `.cache/` — reconstructible intermediates and temporary probes;
 - `build/` — final release archives.
@@ -253,9 +256,10 @@ compatibility, and test placement belongs in
 ## Finishing a change
 
 Choose verification proportionally. `npm run lint` is the common type/lint
-check; production build, Chrome 70 E2E, migration exercise, or platform testing
-is needed when that boundary changed. Vite does not validate production, and
-compilation does not execute co-located tests.
+check; `npm run test:unit` and `npm run test:smoke` execute the server test
+surface. Production build, Chrome 70 E2E, migration exercise, or platform
+testing is needed when that boundary changed. Vite does not validate
+production.
 
 Before handoff, state the behavior and failure cases verified, exact commands or
 manual checks, anything skipped, migrations/cleanup/documentation handled, and

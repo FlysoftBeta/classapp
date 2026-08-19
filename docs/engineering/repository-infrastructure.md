@@ -103,10 +103,15 @@ implicitly available to client code or deployment packages.
 
 ## Current test infrastructure
 
-There is no general unit-test runner. Co-located `*.test.ts` files may be
-typechecked, but no declared package command executes them. The maintained
-executable harnesses live under `scripts/tests/`:
+The executable test surface is owned by `scripts/tests/`. Node's `node:test`
+runner is invoked by `scripts/tests/run.mts`:
 
+- `harness/` starts isolated temp data roots, in-memory quota schemas, and a
+  thin WebSocket protocol client that does not use the application client;
+- `unit/<module>/` holds pure-logic and in-process mechanism tests, classified
+  by module (runtime, quota, incidents, storage, consistency, …);
+- `smoke/` starts one isolated HTTP+WebSocket development server and calls
+  Actions directly;
 - `test-e2e.mts` exercises the fixed Chrome 70 production HTTPS, install,
   offline restart, and reconnect path;
 - `test-manual.mts` starts the current manual production harness;
@@ -114,16 +119,17 @@ executable harnesses live under `scripts/tests/`:
   inspection;
 - `prod-runtime.mts` provides controlled production-runtime test support.
 
+Unit tests run with `--test-isolation=none`. Smoke tests run sequentially with
+`CLASSAPP_EXECUTORS=1` because `setRuntimeConfig` and `env.ts` are
+process-global. Each smoke process uses a temporary data root, never
+`worktree/data`.
+
 Use `.cache/` or a directly executed shell/TypeScript probe for temporary
 investigation. Temporary migration SQL experiments, Zod shape checks, and
 one-off state inspections are probes, not permanent tests. Delete them when
-the investigation ends. A test intended to remain must live in an owned,
-explicitly executable harness—currently normally `scripts/tests/`—and document
-what invariant it can falsify.
-
-Do not add a test-shaped file merely to accompany a source file. If the project
-later gains a unit/property runner, introduce its location, command, isolation
-rules, and CI meaning as one deliberate infrastructure change.
+the investigation ends. A test intended to remain must live under
+`scripts/tests/unit/` or `scripts/tests/smoke/` and document what invariant it
+can falsify. Do not add a co-located `*.test.ts` beside domain source.
 
 ## Command meanings
 
@@ -131,6 +137,9 @@ rules, and CI meaning as one deliberate infrastructure change.
 | ---------------------------- | -------------------------------------------------------- |
 | `npm run lint`               | prerequisites build, TypeScript checking, and ESLint     |
 | `npm run build -- <target>`  | one target can be assembled into release archives        |
+| `npm run test:unit`          | unit/property tests for server and shared invariants     |
+| `npm run test:smoke`         | isolated server API smoke tests, no application client   |
+| `npm run test`               | unit then smoke                                          |
 | `npm run test:e2e`           | the configured fixed-browser production/offline scenario |
 | `npm run test:manual`        | a human can inspect the current production harness       |
 | `npm run test:manual-legacy` | a human can inspect the legacy-browser harness           |
@@ -139,7 +148,7 @@ rules, and CI meaning as one deliberate infrastructure change.
 | `npm run media:update`       | media manifest is refreshed and POT server cache rebuilt |
 
 These commands are not interchangeable. `npm run build` is not needed merely
-to typecheck; `npm run lint` does not execute co-located tests; Vite does not
+to typecheck; `npm run lint` does not execute tests; Vite does not
 exercise Shell activation; a manual harness is not an automated assertion.
 
 ## Extending the infrastructure

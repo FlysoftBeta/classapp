@@ -141,6 +141,8 @@ Useful commands:
 | ---------------------------- | --------------------------------------------------------- |
 | `npm run lint`               | build native/Wasm prerequisites, type-check, and lint     |
 | `npm run format`             | format the working tree with Prettier                     |
+| `npm run test:unit`          | run server/shared unit tests                              |
+| `npm run test:smoke`         | run isolated server API smoke tests, no application client |
 | `npm run test:e2e`           | build and exercise the fixed Chrome 70 HTTPS/offline path |
 | `npm run test:manual`        | build and start the current manual system harness         |
 | `npm run test:manual-legacy` | run the legacy-browser manual harness                     |
@@ -149,10 +151,9 @@ Useful commands:
 | `npm run https:renew`        | renew certificates through the configured DNS flow        |
 | `npm run pdfrender:update`   | fetch and verify supported native renderers               |
 
-The package currently has no unit-test runner for scattered `*.test.ts` files.
-Type-checking those files is not evidence that their assertions ran. New tests
-belong in the owned system/invariant harness until a deliberate unit-test
-architecture is introduced.
+Unit and API smoke tests live under `scripts/tests/` and are executed by
+`npm run test:unit` and `npm run test:smoke`. Do not add co-located
+`*.test.ts` files beside domain source; those are not the executable surface.
 
 ## Production builds
 

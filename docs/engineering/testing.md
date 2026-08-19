@@ -5,29 +5,40 @@ every changed file.
 
 ## Current test reality
 
-The package scripts run typecheck/ESLint and one production Chrome 70 E2E
-harness. There is currently no unit-test runner script. Existing co-located
-`.test.ts` files are typechecked but are not executed by `npm run lint` or any
-declared `npm test` command.
+The maintained executable test surface lives under `scripts/tests/` and is
+wired to package scripts. Node's built-in test runner (`node:test`) executes
+it through `scripts/tests/run.mts`.
 
-Therefore:
+```text
+scripts/tests/
+  harness/     isolated temp roots, quota memory DB, thin WebSocket client
+  unit/<module>/   pure logic and in-process mechanism tests
+  smoke/       HTTP+WebSocket API tests that do not use the application client
+  run.mts      test runner
+  test-e2e.mts / test-manual*.mts   production browser harnesses
+```
 
-- do not create another `.test.ts` and claim verification;
-- do not scatter test files through domain directories by habit;
-- when executable unit/property tests are valuable, first establish one
-  intentional runner and organized test surface, then wire it into package/CI;
-- until then, put production-path integration harnesses under `scripts/tests`
-  and use explicit runnable scripts.
+Unit tests cover merge algebras, conversation ids, quota heat/eviction,
+UnitOfWork, blob GC, pagination, incidents, and other invariants that can be
+falsified without a live Coordinator. They use `:memory:` SQLite or temporary
+directories and must not import `server/infra/env.ts` unless they first call
+`setRuntimeConfig`.
+
+Smoke tests start an isolated development server (`CLASSAPP_EXECUTORS=1`,
+temporary `dataRoot`, admin PIN `123456`) and speak the WebSocket protocol
+directly. They classify coverage by protocol, auth, groups, posts,
+conversations, users (deactivate vs purge), stickers, announcement, and HTTP
+discovery. They are not a substitute for Chrome 70 production E2E.
+
+Do not scatter co-located `*.test.ts` files through domain directories. A test
+that should remain belongs in `scripts/tests/unit/<module>/` or
+`scripts/tests/smoke/`, is executed by `npm run test:unit` or
+`npm run test:smoke`, and names the invariant it can falsify.
 
 For a temporary investigation, use a directly executed shell/TypeScript probe
-or a bounded file below `.cache/`, then remove it. Migration SQL experiments,
-Zod shape checks, and one-off state inspections are often useful probes, but
-they are not long-term regression evidence until attached to an executable
-harness. See [repository infrastructure](./repository-infrastructure.md) for
-the current script layout and command meanings.
-
-This is not an argument against tests. It is an argument against non-executed
-test-shaped files that mislead agents and reviewers.
+or a bounded file below `.cache/`, then remove it. See
+[repository infrastructure](./repository-infrastructure.md) for command
+meanings.
 
 ## Verification pyramid for this project
 
@@ -114,6 +125,8 @@ Minimum common checks:
 
 ```sh
 npm run lint
+npm run test:unit
+npm run test:smoke   # when server Actions, protocol, or recycle paths changed
 npm run build -- <target>
 npm run test:e2e     # when production browser path is affected
 ```

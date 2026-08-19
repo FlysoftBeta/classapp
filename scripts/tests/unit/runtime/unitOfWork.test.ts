@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { UnitOfWork } from "./unitOfWork";
+import { UnitOfWork } from "@/server/runtime/unitOfWork";
 
 test("UnitOfWork rolls back nested writes and drops after-commit effects", () => {
   const db = new Database(":memory:");
