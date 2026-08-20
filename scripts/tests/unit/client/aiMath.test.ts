@@ -8,7 +8,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
-import type { Pluggable } from "unified";
+import type { Plugin } from "unified";
 
 import { STREAMDOWN_PLUGINS } from "@/client/components/ai/markdown";
 import { prepareKatexCss } from "@/scripts/builds/katexCss";
@@ -17,17 +17,6 @@ const require = createRequire(import.meta.url);
 
 function katexPackageDir(from = "."): string {
   return path.dirname(require.resolve("katex/package.json", { paths: [from] }));
-}
-
-function applyPluggable(
-  processor: ReturnType<typeof unified>,
-  pluggable: Pluggable,
-): void {
-  if (Array.isArray(pluggable)) {
-    processor.use(pluggable[0], pluggable[1]);
-    return;
-  }
-  processor.use(pluggable);
 }
 
 function collectClasses(tree: unknown): string[] {
@@ -51,9 +40,22 @@ function collectClasses(tree: unknown): string[] {
   return [...classes];
 }
 
+function applyConfiguredPlugin(
+  processor: { use: (plugin: Plugin, ...parameters: unknown[]) => unknown },
+  pluggable:
+    | (typeof STREAMDOWN_PLUGINS.math)["remarkPlugin"]
+    | (typeof STREAMDOWN_PLUGINS.math)["rehypePlugin"],
+): void {
+  if (Array.isArray(pluggable)) {
+    processor.use(pluggable[0] as Plugin, pluggable[1]);
+    return;
+  }
+  processor.use(pluggable as Plugin);
+}
+
 async function renderMathClasses(markdown: string): Promise<string[]> {
   const processor = unified().use(remarkParse);
-  applyPluggable(processor, STREAMDOWN_PLUGINS.math.remarkPlugin);
+  applyConfiguredPlugin(processor, STREAMDOWN_PLUGINS.math.remarkPlugin);
   processor.use(remarkRehype).use(rehypeSanitize, {
     ...defaultSchema,
     attributes: {
@@ -61,7 +63,7 @@ async function renderMathClasses(markdown: string): Promise<string[]> {
       code: [...(defaultSchema.attributes?.code ?? []), "metastring"],
     },
   });
-  applyPluggable(processor, STREAMDOWN_PLUGINS.math.rehypePlugin);
+  applyConfiguredPlugin(processor, STREAMDOWN_PLUGINS.math.rehypePlugin);
   processor.compiler = (tree) => collectClasses(tree).join("\n");
   const output = String(await processor.process(markdown));
   return output === "" ? [] : output.split("\n");
