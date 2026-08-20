@@ -40,6 +40,12 @@ import {
   purgePostsByUser,
   updatePostBody,
 } from "@/server/data/posts";
+import { getPostImage } from "@/server/data/postImages";
+import {
+  encodeImageBody,
+  serializeStoredPostContent,
+} from "@/server/services/postContent";
+import type { PostImageService } from "@/server/services/postImagesService";
 import {
   findDmConversation,
   insertDmConversation,
@@ -415,7 +421,10 @@ export interface PostListInput {
 }
 
 export class PostService {
-  constructor(private readonly db: BetterSqlite3.Database) {}
+  constructor(
+    private readonly db: BetterSqlite3.Database,
+    private readonly images: PostImageService | null = null,
+  ) {}
 
   list(userId: string, input: PostListInput) {
     if (
@@ -477,6 +486,39 @@ export class PostService {
     return { post, users: postUserMetadata(this.db, [post]) };
   }
 
+  createImage(
+    userId: string,
+    input: {
+      conv_id: string;
+      reply_to: string | null;
+      imageId: string;
+    },
+    opts?: CreatePostOptions,
+  ) {
+    if (!this.images) throw new PublicError("图片服务不可用");
+    const encoded = encodeImageBody(input.imageId);
+    const contentJson = serializeStoredPostContent(encoded.stored);
+    const id = crypto.randomUUID();
+    this.db.transaction(() => {
+      if (opts?.authorizedDirectPeerId) {
+        ensureDirectConversation(this.db, userId, opts.authorizedDirectPeerId);
+      }
+      insertPost(this.db, {
+        id,
+        userId,
+        convId: input.conv_id,
+        brief: encoded.brief,
+        contentJson,
+        replyTo: input.reply_to,
+      });
+      this.images!.attach(input.imageId, id);
+    })();
+    const post = getPostById(this.db, id);
+    if (!post) throw new PublicError("帖子不存在");
+    if (!opts?.deferNotify) notifyPostCreated(this.db, post);
+    return { post, users: postUserMetadata(this.db, [post]) };
+  }
+
   update(postId: string, text: string) {
     const post = updatePost(this.db, postId, text);
     return { post, users: postUserMetadata(this.db, [post]) };
@@ -514,7 +556,7 @@ export class PostService {
     return findDmConversation(this.db, peerA, peerB) !== null;
   }
 
-  purgeUser(userId: string): void {
+  async purgeUser(userId: string): Promise<void> {
     const affected = purgePostsByUser(this.db, userId);
     for (const post of affected.posts) {
       const tombstone = getPostById(this.db, post.id);
@@ -554,9 +596,18 @@ export class PostService {
         }
       }
     }
+    if (this.images) {
+      for (const imageId of affected.imageIds) {
+        const image = getPostImage(this.db, imageId);
+        if (image) await this.images.reclaim(image);
+      }
+    }
   }
 }
 
-export function createPostService(db: BetterSqlite3.Database): PostService {
-  return new PostService(db);
+export function createPostService(
+  db: BetterSqlite3.Database,
+  images: PostImageService | null = null,
+): PostService {
+  return new PostService(db, images);
 }

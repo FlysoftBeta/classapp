@@ -13,6 +13,7 @@ export type Post = PostEntity & {
 
 export type TextPost = Extract<Post, { type: "text" }>;
 export type StickerPost = Extract<Post, { type: "sticker" }>;
+export type ImagePost = Extract<Post, { type: "image" }>;
 export type DeletedPost = Extract<Post, { type: "deleted" }>;
 
 export type PostStreamEvent =

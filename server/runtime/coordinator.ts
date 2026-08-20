@@ -10,7 +10,7 @@ import {
 } from "@/server/runtime/eventBus";
 import { MediaRuntime } from "@/server/runtime/mediaRuntime";
 import { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
-import { ArticleUploadRuntime } from "@/server/runtime/articleUploadRuntime";
+import { PostImageRuntime } from "@/server/runtime/postImageRuntime";
 import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { BUILD_ID } from "@/server/infra/env";
@@ -42,6 +42,7 @@ export class Coordinator {
   readonly articleUploads: ArticleUploadRuntime;
   readonly events: EventBusRuntime;
   readonly media: MediaRuntime;
+  readonly postImages: PostImageRuntime;
   readonly storage: StorageRuntime;
   readonly teachDocuments: TeachDocumentsRuntime;
   private readonly aiRunner: AiService;
@@ -71,6 +72,12 @@ export class Coordinator {
     );
     this.storage.registerEvictor("media", this.media.quotaPolicy(), (item) =>
       this.media.evictTrack(item.itemId, item),
+    );
+    this.postImages = new PostImageRuntime(db, this.storage.blobs);
+    this.storage.registerEvictor(
+      "post-image-thumbs",
+      this.postImages.quotaPolicy(),
+      (item) => this.postImages.evict(item.itemId, item),
     );
     this.teachDocuments = new TeachDocumentsRuntime(db, this.storage.blobs);
     this.storage.registerEvictor(
@@ -175,6 +182,11 @@ export class Coordinator {
       case "media.ensureMaterialized":
         void this.media
           .ensureMaterialized(command.track, command.kind)
+          .catch(() => undefined);
+        return;
+      case "postImage.ensureThumbnail":
+        void this.postImages
+          .ensureThumbnail(command.imageId)
           .catch(() => undefined);
         return;
     }

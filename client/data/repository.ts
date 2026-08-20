@@ -36,6 +36,11 @@ import type {
 import { extentFiles } from "./files";
 import { FileIds } from "./fileIds";
 import {
+  imageIdsFromPosts,
+  deletePostImageExtents,
+  postEntityForRevisionCompare,
+} from "./postImages";
+import {
   articleListRootMemberships,
   connectPostPage,
   mergeArticleListMemberships,
@@ -152,19 +157,30 @@ async function postCoverage(convId: string): Promise<PostCoverage | null> {
 }
 
 async function clearConversationPostWindow(convId: string): Promise<void> {
-  await runTransaction([STORES.POSTS, STORES.SYNC], "readwrite", async (tx) => {
-    const keys = await requestResult(
-      tx
-        .objectStore(STORES.POSTS)
-        .index("by-conversation-sequence")
-        .getAllKeys(
-          IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
-        ),
-    );
-    const posts = tx.objectStore(STORES.POSTS);
-    for (const key of keys) posts.delete(key);
-    tx.objectStore(STORES.SYNC).delete(`posts:${convId}`);
-  });
+  const removed = await runTransaction(
+    [STORES.POSTS, STORES.SYNC],
+    "readwrite",
+    async (tx) => {
+      const keys = await requestResult(
+        tx
+          .objectStore(STORES.POSTS)
+          .index("by-conversation-sequence")
+          .getAllKeys(
+            IDBKeyRange.bound([convId, 0], [convId, Number.MAX_SAFE_INTEGER]),
+          ),
+      );
+      const posts = tx.objectStore(STORES.POSTS);
+      const rows: StoredPost[] = [];
+      for (const key of keys) {
+        const row = (await requestResult(posts.get(key))) as StoredPost | undefined;
+        if (row) rows.push(row);
+        posts.delete(key);
+      }
+      tx.objectStore(STORES.SYNC).delete(`posts:${convId}`);
+      return imageIdsFromPosts(rows);
+    },
+  );
+  await deletePostImageExtents(removed);
 }
 
 async function deleteConversationPostPrefix(
@@ -176,6 +192,7 @@ async function deleteConversationPostPrefix(
   let remaining = count;
   let bytes = 0;
   let deletedProtected = false;
+  const removedImageIds: string[] = [];
   while (remaining > 0) {
     let deleted = 0;
     await runTransaction(
@@ -227,6 +244,7 @@ async function deleteConversationPostPrefix(
           postStore.delete(row.id);
           bytes += row.size;
         }
+        removedImageIds.push(...imageIdsFromPosts(batch));
 
         const syncStore = tx.objectStore(STORES.SYNC);
         const scope = `posts:${convId}`;
@@ -247,6 +265,7 @@ async function deleteConversationPostPrefix(
     if (!deleted) break;
     remaining -= deleted;
   }
+  await deletePostImageExtents(removedImageIds);
   return { bytes, deletedProtected };
 }
 
@@ -1402,8 +1421,18 @@ function createOfflineRepository(userScope: string) {
                 incoming: post,
                 sameContent: previous
                   ? Values.equal(
-                      { ...previous, size: 0, touched_at: 0, eviction_tier: 0 },
-                      { ...entity, size: 0, touched_at: 0, eviction_tier: 0 },
+                      {
+                        ...postEntityForRevisionCompare(previous),
+                        size: 0,
+                        touched_at: 0,
+                        eviction_tier: 0,
+                      },
+                      {
+                        ...postEntityForRevisionCompare(entity),
+                        size: 0,
+                        touched_at: 0,
+                        eviction_tier: 0,
+                      },
                     )
                   : true,
                 identity: post.id,

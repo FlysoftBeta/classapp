@@ -1,6 +1,7 @@
 import { runtimeDatabase } from "@/client/data/idb";
 import { handleOfflineQuotaPressure } from "@/client/data/repository";
 import { handleMediaQuotaPressure } from "@/client/data/media";
+import { handlePostImageQuotaPressure } from "@/client/data/postImages";
 import { extentFiles } from "@/client/data/files";
 import { captureDetachedClientIncident } from "@/client/interact/clientIncidents";
 import {
@@ -69,6 +70,9 @@ class QuotaController {
       }
       if (freed < targetBytes) {
         freed += await handleMediaQuotaPressure(targetBytes - freed);
+      }
+      if (freed < targetBytes) {
+        freed += await handlePostImageQuotaPressure(targetBytes - freed);
       }
       if (!freed) return;
       current = await estimate();

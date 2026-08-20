@@ -1,5 +1,5 @@
 import { getStickerEntry } from "@/server/infra/stickerLoader";
-import { stickerBrief } from "@/shared/posts/brief";
+import { imageBrief, stickerBrief } from "@/shared/posts/brief";
 import type { CreatePostPayload } from "@/shared/validation/posts";
 
 // ── 存储层（content_json，不向外暴露）────────────────────────────────────────
@@ -11,9 +11,14 @@ type StoredSticker = {
   sticker_pack: string;
   sticker_id: string;
 };
+type StoredImage = { type: "image"; image_id: string };
 type StoredDeleted = { type: "deleted" };
-type StoredPostContent =
-  StoredTextInline | StoredTextBody | StoredSticker | StoredDeleted;
+export type StoredPostContent =
+  | StoredTextInline
+  | StoredTextBody
+  | StoredSticker
+  | StoredImage
+  | StoredDeleted;
 
 function isStoredPostContent(value: unknown): value is StoredPostContent {
   if (!value || typeof value !== "object") return false;
@@ -31,6 +36,10 @@ function isStoredPostContent(value: unknown): value is StoredPostContent {
       v.sticker_pack.length > 0 &&
       v.sticker_id.length > 0
     );
+  }
+  if (t === "image") {
+    const v = value as StoredImage;
+    return typeof v.image_id === "string" && v.image_id.length > 0;
   }
   if (t === "deleted") return Object.keys(value).length === 1;
   return false;
@@ -80,6 +89,16 @@ export function encodeTextBody(text: string): {
   return {
     brief: trimmed,
     stored: { type: "text", text_same_as_brief: true },
+  };
+}
+
+export function encodeImageBody(imageId: string): {
+  brief: string;
+  stored: StoredPostContent;
+} {
+  return {
+    brief: imageBrief(),
+    stored: { type: "image", image_id: imageId },
   };
 }
 

@@ -35,9 +35,11 @@ export interface SmokeRuntime {
   userId: string;
   handle: string;
   username: string;
+  token: string;
   dataRoot: string;
   client: SmokeProtocolClient;
   wsUrl: string;
+  httpUrl: string;
   openClient(): Promise<SmokeProtocolClient>;
   close(): Promise<void>;
 }
@@ -143,9 +145,11 @@ export async function startSmokeRuntime(
       userId: session.userId,
       handle: session.handle,
       username: session.username,
+      token: session.token,
       dataRoot,
       client,
       wsUrl,
+      httpUrl: `http://127.0.0.1:${port}`,
       async openClient() {
         const next = await openClient();
         clients.push(next);

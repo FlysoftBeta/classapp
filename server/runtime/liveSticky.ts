@@ -50,6 +50,10 @@ export function createLiveStickyHost(input: {
       execute: (payload) =>
         input.queueCommand({ type: "ai.execute", input: payload }),
     },
+    postImages: {
+      prepare: (imageId) =>
+        input.queueCommand({ type: "postImage.ensureThumbnail", imageId }),
+    },
     update: {
       status: async () =>
         input.update

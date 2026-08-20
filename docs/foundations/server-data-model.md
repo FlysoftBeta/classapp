@@ -1,16 +1,17 @@
 # Server data model and migration discipline
 
 The server database is the durable authority. In the examined working tree it
-uses SQLite schema v27. Production deployments are schema v18; development
+uses SQLite schema v28. Production deployments are schema v18; development
 snapshots may still be v17. Migrations accept v17 as the oldest baseline:
 v17 → v18, then one consolidated v18 → v25 step, then v25 → v26, then
-v26 → v27. Unlike
+v26 → v27, then v27 → v28. Unlike
 the reconstructible browser projection, server rows are not casually nuked.
 v26 drops reconstructible cache (media bytes, teach copies, bundle articles,
 old quota ledger) and switches remaining blobs to allocated `blob_id`s.
 v27 replaces playlist `owner_user_id` with principal access bindings, adds
 booklists as an articles-domain collection (`booklists` / `group_booklists`),
 capability possession, and treats group-chat articles as ownerless objects.
+v28 adds durable post-image originals and a reconstructible thumbnail cache.
 
 ## Table families
 
@@ -19,7 +20,7 @@ capability possession, and treats group-chat articles as ownerless objects.
 | identity            | `users`, `deleted_users`, `user_pins`, `sessions`, `ghost_users`                            |
 | authority           | `user_admin_roles`, feature bitset on `users`, `admin_audit_log`                            |
 | clients             | `clients`, `client_ips`, `client_associations`, `client_attempts`, `client_last_active`     |
-| community           | `groups`, `group_members`, `dms`, `posts`, `convs_user`                                     |
+| community           | `groups`, `group_members`, `dms`, `posts`, `convs_user`, `post_images`, `post_image_thumbs` |
 | articles            | `articles`, `text_article_segments`, `article_read_progress`, `booklists`, `booklist_items`, `group_booklists` |
 | media               | `media_tracks`, `media_assets`, `media_lists` (`playlist` / `queue`), `media_list_items`, `user_queues`, `media_stream_grants` |
 | access              | owned: `access_bindings`, `access_effective`; ownerless possession: `resource_possession` |

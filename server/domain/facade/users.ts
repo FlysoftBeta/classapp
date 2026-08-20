@@ -178,7 +178,7 @@ export class UserActorFacade {
       );
     }
     this.conversations.purgeUser(userId);
-    this.posts.purgeUser(userId);
+    await this.posts.purgeUser(userId);
     await this.articles.purgeUser(userId);
     this.words.purgeUser(userId);
     this.clients.purgeUser(userId);

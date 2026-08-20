@@ -158,10 +158,10 @@ from whether the client seems online.
 
 ## Data topology
 
-The authoritative server database is SQLite schema v27 in the examined working
+The authoritative server database is SQLite schema v28 in the examined working
 tree. Production is schema v18; migrations accept v17 as the oldest baseline
 and consolidate everything after v18 into one v18 → v25 step, then v25 → v26,
-then v26 → v27. Resource access bindings and ownerless capabilities are
+then v26 → v27, then v27 → v28. Resource access bindings and ownerless capabilities are
 described in [resource authorization](./systems/resource-authorization.md).
 The browser uses the shared
 `classapp-runtime` IndexedDB database but has two independent schema owners:

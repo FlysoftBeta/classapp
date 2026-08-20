@@ -84,6 +84,12 @@ complete generation is published only after the server-reported byte size and
 SHA-256 have been verified; a `media` claim records local retention intent
 independently of the server-side track ref count.
 
+Post-image originals and thumbnails are extent files
+`post-image:<image_id>:original` and `post-image:<image_id>:thumb`. The list
+shows only the thumbnail; opening the post fetches the original. Deleting a
+local post prefix also deletes those extents. Quota pressure may drop extents
+whose posts are no longer stored; they rematerialize from the server.
+
 Conversation retention is a moving window. Trimming may remove only a legal
 covered prefix or the whole window; never punch a hole in the middle.
 

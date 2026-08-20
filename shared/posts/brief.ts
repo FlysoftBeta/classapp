@@ -5,3 +5,7 @@ export function stickerBrief(stickerName: string): string {
 export function articleBrief(title: string): string {
   return `[文章] ${title}`;
 }
+
+export function imageBrief(): string {
+  return "[图片]";
+}

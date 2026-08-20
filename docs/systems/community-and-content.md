@@ -66,6 +66,17 @@ The Facade selects a legitimate path:
 `PostService` enforces objective content/revision/state invariants and emits
 complete authoritative versions. It does not take a generic `isAdmin` flag.
 
+Image posts are a third current body beside text and stickers. The original
+bytes are a durable BlobStore object named by `post_images`; the post row only
+stores `{ type: "image", image_id }`. Thumbnails are a reconstructible cache
+view in `post_image_thumbs` (`absent | staging | ready | failed`) and the
+`post-image-thumbs` quota pool. Listing or opening a post queues thumbnail
+materialization; the list still returns immediately. Clients show the
+thumbnail until the user opens the original. Upload is a multipart HTTP path
+(`POST /api/posts/images`) because the body is a file, not an Action payload.
+Authorization matches conversation posting/reading. See
+[server blob storage and quota](./server-storage.md).
+
 Posts store author/reply user IDs. Presentation user metadata travels as a
 deduplicated side bundle and is normalized into `domain_users`. The same
 envelope applies to DM peers, Group membership rows, Articles, and the admin

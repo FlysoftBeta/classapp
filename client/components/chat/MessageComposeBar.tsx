@@ -12,6 +12,7 @@ import SendIcon from "@mui/icons-material/Send";
 import ReplyIcon from "@mui/icons-material/Reply";
 import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
+import ImageIcon from "@mui/icons-material/Image";
 import type {
   User,
   StickerRecentItem,
@@ -19,6 +20,7 @@ import type {
 import type { Conversation, Post } from "@/client/interact/presentation";
 import type { UserConfigChangedEvent } from "@/client/hooks/useAppLogic";
 import { createPost, type CreatePostBody } from "@/client/interact/posts";
+import { uploadPostImage } from "@/client/interact/postImages";
 import { sendStickerPost } from "@/client/api/stickers";
 import {
   fetchConversationDraft,
@@ -65,6 +67,7 @@ export function MessageComposeBar({
   const skipDraftSaveRef = useRef(true);
   const draftConvKeyRef = useRef("");
   const contentRef = useRef("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const prevConvRef = useRef<{ type: "group" | "dm"; id: string } | null>(null);
 
   const convKey = `${conversation.type}:${conversation.id}`;
@@ -238,6 +241,31 @@ export function MessageComposeBar({
     })();
   };
 
+  const handleImagePick = (file: File | undefined) => {
+    if (!file || loading || !online) return;
+    setError("");
+    setLoading(true);
+    void (async () => {
+      try {
+        const { res, data } = await uploadPostImage({
+          file,
+          conv_id: conversation.conv_id,
+          ...(replyTo ? { reply_to: replyTo.id } : {}),
+        });
+        if (!res.ok || !("post" in data) || !data.post) {
+          setError(("error" in data && data.error) || "发送图片失败");
+          return;
+        }
+        onPosted(data.post);
+        onClearReply();
+      } catch {
+        setError("发送图片失败");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  };
+
   const muted =
     !!currentUser.is_muted &&
     (!currentUser.muted_until ||
@@ -349,6 +377,30 @@ export function MessageComposeBar({
           disabled={loading || !online}
           onPick={handleStickerPick}
           subscribeConfigEvents={subscribeConfigEvents}
+        />
+        <Tooltip title="发送图片">
+          <span>
+            <IconButton
+              size="small"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={loading || !online}
+              aria-label="发送图片"
+              sx={{ mb: 0.5, mr: 0.5 }}
+            >
+              <ImageIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            handleImagePick(file);
+          }}
         />
         <TextField
           fullWidth
