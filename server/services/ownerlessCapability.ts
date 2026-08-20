@@ -72,6 +72,11 @@ export class OwnerlessCapabilityService {
   ): void {
     const verified = this.hmac.verify(capability, { kind, id }, now);
     if (!verified.ok) return;
+    const stored = readPossession(this.db, userId, kind, id);
+    if (stored) {
+      const existing = this.hmac.verify(stored.capability, { kind, id }, now);
+      if (existing.ok && existing.payload.exp >= verified.payload.exp) return;
+    }
     upsertPossession(this.db, {
       userId,
       resourceKind: kind,
@@ -127,6 +132,11 @@ export class OwnerlessCapabilityService {
     );
   }
 
+  /**
+   * Present, reuse possession, or recover. Listing uses this so expired
+   * favorites/recents stay visible while a containing collection is still
+   * readable. This writes possession when recovery mints a token.
+   */
   peek(
     userId: string,
     kind: string,

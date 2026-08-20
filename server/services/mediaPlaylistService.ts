@@ -4,6 +4,7 @@ import {
   addQueueItem,
   clearQueue,
   createPlaylistRow,
+  deleteExpiredQueues,
   deletePlaylistById,
   listPlaylistsByIds,
   playlistSnapshotById,
@@ -16,7 +17,7 @@ import {
 import { touchRecent } from "@/server/data/preferences";
 import { publishUser } from "@/server/runtime/eventBus";
 import { PublicError } from "@/server/services/incidentService";
-import type { AccessService } from "@/server/services/accessService";
+import { AccessService } from "@/server/services/accessService";
 import type { OwnerlessCapabilityService } from "@/server/services/ownerlessCapability";
 import type {
   MediaListSnapshot,
@@ -267,4 +268,11 @@ export class MediaPlaylistService {
       data: { playlist_id: playlistId, revision: 0 },
     });
   }
+}
+
+export function reclaimExpiredQueues(db: Database): string[] {
+  const access = new AccessService(db);
+  const ids = deleteExpiredQueues(db);
+  for (const id of ids) access.dropResource("queue", id);
+  return ids;
 }

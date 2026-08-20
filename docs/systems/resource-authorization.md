@@ -76,9 +76,16 @@ Fine-grained checks (`canDoSomething`) read the corresponding flag column
 (`can_read`, `can_write`, `can_own`, `can_share_*`) rather than walking the
 graph again.
 
-Invalidation happens on grant, revoke, group join/leave/delete, and user purge.
-Group membership changes rematerialize only the lists bound to that group for
-that user.
+Invalidation happens on grant, revoke, group join/leave/delete, last-member
+empty-group deletion, and user deactivate/purge. Group membership
+changes rematerialize only the lists bound to that group for that user. When
+the group itself is deleted, group principal bindings are dropped. Expired
+queues drop their access bindings with the list row.
+
+`OwnerlessCapabilityService.peek` is not a read-only lookup: listing recents
+and favorites calls it so still-reachable objects can recover a token from a
+readable collection. That may write possession. `remember` never replaces a
+longer-lived held token with a shorter one.
 
 ## Preference overlay
 

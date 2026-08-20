@@ -295,7 +295,11 @@ export class ArticleActorFacade {
     return this.articles.storedBundle(articleId);
   }
 
-  async segment(input: { articleId: string; offset: number }): Promise<{
+  async segment(input: {
+    articleId: string;
+    offset: number;
+    capability?: string;
+  }): Promise<{
     content: string;
     offset: number;
     has_more: boolean;
@@ -303,7 +307,7 @@ export class ArticleActorFacade {
   }> {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("article_reader");
-    this.requireAccess(user.id, input.articleId);
+    this.requireAccess(user.id, input.articleId, input.capability);
     return this.articles.segment(input);
   }
 
@@ -312,10 +316,11 @@ export class ArticleActorFacade {
     cursor: number | null;
     before: number;
     after: number;
+    capability?: string;
   }) {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    this.requireAccess(user.id, input.articleId);
+    this.requireAccess(user.id, input.articleId, input.capability);
     return this.articles.openBundle(input);
   }
 
@@ -324,10 +329,11 @@ export class ArticleActorFacade {
     cursor: number;
     direction: "before" | "after";
     limit: number;
+    capability?: string;
   }) {
     const user = await this.actor.requireFeature("articles");
     await this.actor.requireFeature("ebook_reader");
-    this.requireAccess(user.id, input.articleId);
+    this.requireAccess(user.id, input.articleId, input.capability);
     return this.articles.fetchBundle(input);
   }
 
@@ -354,9 +360,10 @@ export class ArticleActorFacade {
     offset: number,
     updatedAt: number,
     merge: "override" | "furthest",
+    capability?: string,
   ): Promise<{ offset: number; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
-    this.requireAccess(user.id, articleId);
+    this.requireAccess(user.id, articleId, capability);
     return this.articles.saveProgress(
       user.id,
       articleId,
@@ -369,15 +376,16 @@ export class ArticleActorFacade {
   async recordReading(
     articleId: string,
     input: { seconds?: number; active?: boolean },
+    capability?: string,
   ): Promise<void> {
     const user = await this.actor.requireFeature("articles");
-    this.requireAccess(user.id, articleId);
+    this.requireAccess(user.id, articleId, capability);
     this.articles.recordReading(user.id, articleId, input);
   }
 
-  async delete(articleId: string): Promise<void> {
+  async delete(articleId: string, capability?: string): Promise<void> {
     const user = await this.actor.requireFeature("articles");
-    const article = this.requireAccess(user.id, articleId).article;
+    const article = this.requireAccess(user.id, articleId, capability).article;
     if (article.user_id !== user.id) {
       const admin = this.actor.requireRole("community_manager");
       await this.articles.delete(user.id, articleId);

@@ -159,18 +159,21 @@ export class GroupService {
     return parentGroupId;
   }
 
-  private tryDeleteEmptyGroup(groupId: string): void {
+  private tryDeleteEmptyGroup(groupId: string): boolean {
     const group = findGroupType(this.db, groupId);
     if (!group || isSpecialType(group.type)) {
-      return;
+      return false;
     }
     if (listGroupMemberIds(this.db, groupId).length === 0) {
       deleteGroupById(this.db, groupId);
+      return true;
     }
+    return false;
   }
 
   /** Remove an identity from every group, bypassing normal no-leave policy. */
-  removeUserFromAllGroups(userId: string): void {
+  removeUserFromAllGroups(userId: string): Array<{ groupId: string; deleted: boolean }> {
+    const changes: Array<{ groupId: string; deleted: boolean }> = [];
     for (const groupId of listUserGroupIds(this.db, userId)) {
       removeGroupMember(this.db, userId, groupId);
       publishConversationUpdate(this.db, userId, {
@@ -178,13 +181,17 @@ export class GroupService {
         id: groupId,
         removed: true,
       });
-      this.tryDeleteEmptyGroup(groupId);
+      changes.push({
+        groupId,
+        deleted: this.tryDeleteEmptyGroup(groupId),
+      });
     }
     publishRemoteResubscribe(userId, "membership");
+    return changes;
   }
 
-  purgeUser(userId: string): void {
-    this.removeUserFromAllGroups(userId);
+  purgeUser(userId: string): Array<{ groupId: string; deleted: boolean }> {
+    return this.removeUserFromAllGroups(userId);
   }
 
   private createInternal(
@@ -307,7 +314,7 @@ export class GroupService {
     return { ok: true, group };
   }
 
-  leave(userId: string, groupKey: string): Group {
+  leave(userId: string, groupKey: string): { group: Group; deleted: boolean } {
     const group = this.requireGroup(groupKey);
     const policy = findGroupLeavePolicy(this.db, group.id);
     if (!policy) {
@@ -326,8 +333,7 @@ export class GroupService {
       removed: true,
     });
     publishRemoteResubscribe(userId, "membership");
-    this.tryDeleteEmptyGroup(group.id);
-    return group;
+    return { group, deleted: this.tryDeleteEmptyGroup(group.id) };
   }
 
   members(
@@ -477,7 +483,7 @@ export class GroupService {
     publishRemoteResubscribe(userId, "membership");
   }
 
-  adminRemoveMember(groupId: string, userId: string): void {
+  adminRemoveMember(groupId: string, userId: string): boolean {
     const group = this.requireGroup(groupId);
     removeGroupMember(this.db, userId, group.id);
     publishConversationUpdate(this.db, userId, {
@@ -486,7 +492,7 @@ export class GroupService {
       removed: true,
     });
     publishRemoteResubscribe(userId, "membership");
-    this.tryDeleteEmptyGroup(group.id);
+    return this.tryDeleteEmptyGroup(group.id);
   }
 
   isGroupAdminOnly(groupId: string): boolean {

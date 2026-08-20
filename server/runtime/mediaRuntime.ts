@@ -24,7 +24,6 @@ import type { MediaRuntimeConfig } from "@/server/infra/runtimeConfig";
 import type { MediaTrack } from "@/shared/media/types";
 import {
   deleteAssetsIfUnreferenced,
-  deleteExpiredQueues,
   deleteExpiredStreamGrants,
   findReadyAsset,
   listAssets,
@@ -36,6 +35,7 @@ import {
   reconcileReadyAssetQuotaItems,
   touchTrack,
 } from "@/server/data/media";
+import { reclaimExpiredQueues } from "@/server/services/mediaPlaylistService";
 import { BlobStore, type StagingSlot } from "@/server/storage/blobStore";
 import { QuotaService, type QuotaItem } from "@/server/storage/quotaService";
 import { publishSystem } from "@/server/runtime/eventBus";
@@ -525,7 +525,7 @@ export class MediaRuntime {
   /** Non-storage transient cleanup that still belongs to the media mechanism. */
   reconcileTransient(): void {
     deleteExpiredStreamGrants(this.db);
-    deleteExpiredQueues(this.db);
+    reclaimExpiredQueues(this.db);
   }
 
   /** Owner evictor registered with the shared quota service. */

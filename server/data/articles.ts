@@ -359,7 +359,7 @@ export function listArticlesForUser(
   let where = `WHERE ${accessCondition(view, options.groupId)}`;
   const sortAt =
     view === "bookmarked"
-      ? "COALESCE(rp.updated_at, ab.created_at)"
+      ? "COALESCE(rp.updated_at, fav.created_at)"
       : view === "recent"
         ? "rp.updated_at"
         : "a.created_at";

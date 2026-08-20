@@ -702,7 +702,12 @@ export const actionContracts = {
     object({ bindings: z.array(accessBindingSchema) }),
   ),
   fetchArticleAction: contract(
-    one(nonEmptyString),
+    one(
+      object({
+        articleId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
     object({
       article: articleWithMetaSchema,
       users: z.array(userMetadataSchema),
@@ -713,6 +718,7 @@ export const actionContracts = {
       object({
         articleId: nonEmptyString,
         offset: z.number().int().nonnegative(),
+        capability: capabilityTokenSchema.optional(),
       }),
     ),
     object({
@@ -748,6 +754,7 @@ export const actionContracts = {
         offset: z.number().int().nonnegative(),
         updatedAt: timestamp,
         merge: z.enum(["override", "furthest"]),
+        capability: capabilityTokenSchema.optional(),
       }),
     ),
     object({ offset: z.number().int().nonnegative(), updatedAt: timestamp }),
@@ -758,11 +765,20 @@ export const actionContracts = {
         articleId: nonEmptyString,
         seconds: z.number().finite().nonnegative(),
         active: z.boolean(),
+        capability: capabilityTokenSchema.optional(),
       }),
     ),
     okSchema,
   ),
-  deleteArticleAction: contract(one(nonEmptyString), okSchema),
+  deleteArticleAction: contract(
+    one(
+      object({
+        articleId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
+    okSchema,
+  ),
 
   fetchConversationsAction: contract(
     noArgs,

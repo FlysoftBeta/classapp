@@ -47,8 +47,8 @@ export class GroupActorFacade {
 
   async leave(groupKey: string): Promise<void> {
     const user = await this.actor.requireUser();
-    const group = this.groups.leave(user.id, groupKey);
-    this.access.onGroupMembershipChanged(user.id, group.id);
+    const { group, deleted } = this.groups.leave(user.id, groupKey);
+    this.access.onGroupMembershipChanged(user.id, group.id, deleted);
   }
 
   async members(groupKey: string): Promise<GroupMembersResult> {
@@ -124,8 +124,8 @@ export class GroupActorFacade {
 
   adminRemoveMember(groupId: string, userId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
-    this.groups.adminRemoveMember(groupId, userId);
-    this.access.onGroupMembershipChanged(userId, groupId);
+    const deleted = this.groups.adminRemoveMember(groupId, userId);
+    this.access.onGroupMembershipChanged(userId, groupId, deleted);
     this.audit.record({
       actorId: admin.id,
       action: "group.member.remove",

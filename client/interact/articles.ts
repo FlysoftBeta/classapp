@@ -314,6 +314,7 @@ export async function reportArticleReading(
       articleId,
       seconds: body.seconds,
       active: body.active,
+      capability: articleCapability(articleId),
     }),
   );
 }
@@ -335,7 +336,10 @@ export async function fetchArticle(articleId: string) {
         }
       : null;
   }
-  const result = await fetchArticleAction(articleId);
+  const result = await fetchArticleAction({
+    articleId,
+    capability: articleCapability(articleId),
+  });
   if (result.ok) rememberArticleCapability(articleId, result.data.article.capability);
   observeActionResult(result);
   if (!result.ok) return null;
@@ -410,7 +414,11 @@ export async function fetchArticleSegment(
   // Article bodies are immutable. A cached segment is authoritative and can
   // warm-start the reader even while the remote connection is available.
   if (cached || !client.isConnected()) return cached;
-  const result = await fetchArticleSegmentAction({ articleId, offset });
+  const result = await fetchArticleSegmentAction({
+    articleId,
+    offset,
+    capability: articleCapability(articleId),
+  });
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
@@ -565,6 +573,7 @@ export async function saveArticleProgress(articleId: string, offset: number) {
     offset: local.offset,
     updatedAt: local.updatedAt,
     merge: "override",
+    capability: articleCapability(articleId),
   });
   const response = observeActionResult(result);
   if (result.ok) {
@@ -592,6 +601,7 @@ export async function flushPendingArticleProgress(
     offset,
     updatedAt,
     merge: "furthest",
+    capability: articleCapability(articleId),
   });
   observeActionResult(result);
   if (result.ok) {
@@ -614,7 +624,10 @@ export function fetchArticleSource(token: string, articleId: string) {
 }
 
 export async function deleteArticle(articleId: string) {
-  const result = await deleteArticleAction(articleId);
+  const result = await deleteArticleAction({
+    articleId,
+    capability: articleCapability(articleId),
+  });
   const res = observeActionResult(result);
   const data = result.ok ? result.data : { error: result.error.message };
   if (result.ok) {

@@ -452,6 +452,7 @@ export async function openArticleBundle(
     cursor,
     before: 4,
     after: 6,
+    capability: articleCapability(articleId),
   });
   if (!result.ok) return null;
   return acceptSlice(articleId, result.data, cursor);
@@ -478,6 +479,7 @@ export async function fetchArticleBundleItems(
     cursor,
     direction,
     limit: 12,
+    capability: articleCapability(articleId),
   });
   if (!result.ok) return null;
   return acceptSlice(

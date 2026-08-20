@@ -112,7 +112,11 @@ export class AccessService {
     }
   }
 
-  onGroupMembershipChanged(userId: string, groupId: string): void {
+  onGroupMembershipChanged(
+    userId: string,
+    groupId: string,
+    groupDeleted = false,
+  ): void {
     const bindings = listBindingsForPrincipal(this.db, {
       kind: "group",
       id: groupId,
@@ -120,6 +124,7 @@ export class AccessService {
     for (const binding of bindings) {
       this.rematerialize(userId, binding.resourceKind, binding.resourceId);
     }
+    if (groupDeleted) this.onGroupDeleted(groupId);
   }
 
   onGroupDeleted(groupId: string): void {

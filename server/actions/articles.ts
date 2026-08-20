@@ -30,10 +30,10 @@ export async function createArticleAction(
 }
 
 export async function fetchArticleAction(
-  articleId: ActionInput<"fetchArticleAction">,
+  input: ActionInput<"fetchArticleAction">,
 ) {
   return withActionScope(async (scope) => {
-    return scope.facades().articles().getMeta(articleId);
+    return scope.facades().articles().getMeta(input.articleId, input.capability);
   });
 }
 
@@ -44,6 +44,7 @@ export async function fetchArticleSegmentAction(
     return scope.facades().articles().segment({
       articleId: input.articleId,
       offset: input.offset,
+      capability: input.capability,
     });
   });
 }
@@ -98,6 +99,7 @@ export async function saveArticleProgressAction(
         input.offset,
         input.updatedAt,
         input.merge,
+        input.capability,
       );
   });
 }
@@ -109,19 +111,19 @@ export async function reportArticleReadingAction(
     await scope.facades().articles().recordReading(input.articleId, {
       seconds: input.seconds,
       active: input.active,
-    });
+    }, input.capability);
     return { ok: true as const };
   });
 }
 
 export async function deleteArticleAction(
-  articleId: ActionInput<"deleteArticleAction">,
+  input: ActionInput<"deleteArticleAction">,
 ) {
   return withActionScope(async (scope) => {
     await scope
       .facades()
       .articles()
-      .delete(expectString(articleId, "文章不存在"));
+      .delete(expectString(input.articleId, "文章不存在"), input.capability);
     return { ok: true as const };
   });
 }

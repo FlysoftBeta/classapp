@@ -801,7 +801,7 @@ export interface StreamGrant {
   expiresAt: number;
 }
 
-export function deleteExpiredQueues(db: Database): number {
+export function deleteExpiredQueues(db: Database): string[] {
   const rows = db
     .prepare(
       `SELECT id FROM media_lists
@@ -814,7 +814,7 @@ export function deleteExpiredQueues(db: Database): number {
     db.prepare("DELETE FROM media_list_items WHERE list_id = ?").run(row.id);
     db.prepare("DELETE FROM media_lists WHERE id = ?").run(row.id);
   }
-  return rows.length;
+  return rows.map((row) => row.id);
 }
 
 export function insertStreamGrant(db: Database, grant: StreamGrant): void {

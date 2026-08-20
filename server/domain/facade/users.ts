@@ -152,7 +152,13 @@ export class UserActorFacade {
     this.roles.assertRemovable(userId);
     if (userId === admin.id) throw new PublicError("不能删除自己");
     if (mode === "deactivate") {
-      this.groups.removeUserFromAllGroups(userId);
+      for (const change of this.groups.removeUserFromAllGroups(userId)) {
+        this.access.onGroupMembershipChanged(
+          userId,
+          change.groupId,
+          change.deleted,
+        );
+      }
       this.users.deactivate(userId);
       this.audit.record({
         actorId: admin.id,
@@ -164,7 +170,13 @@ export class UserActorFacade {
     }
 
     // Each mechanism removes its own state; the identity row is deleted last.
-    this.groups.purgeUser(userId);
+    for (const change of this.groups.purgeUser(userId)) {
+      this.access.onGroupMembershipChanged(
+        userId,
+        change.groupId,
+        change.deleted,
+      );
+    }
     this.conversations.purgeUser(userId);
     this.posts.purgeUser(userId);
     await this.articles.purgeUser(userId);
