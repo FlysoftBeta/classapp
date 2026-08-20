@@ -10,6 +10,7 @@ import {
 } from "@/server/runtime/eventBus";
 import { MediaRuntime } from "@/server/runtime/mediaRuntime";
 import { TeachDocumentsRuntime } from "@/server/runtime/teachDocumentsRuntime";
+import { ArticleUploadRuntime } from "@/server/runtime/articleUploadRuntime";
 import { PostImageRuntime } from "@/server/runtime/postImageRuntime";
 import { StorageRuntime } from "@/server/storage/storageRuntime";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";

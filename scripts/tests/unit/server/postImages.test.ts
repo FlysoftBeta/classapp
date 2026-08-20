@@ -25,7 +25,7 @@ function jpegFile(width: number, height: number): File {
     encoded.data instanceof Uint8Array
       ? encoded.data
       : new Uint8Array(encoded.data);
-  return new File([bytes], "photo.jpg", { type: "image/jpeg" });
+  return new File([Buffer.from(bytes)], "photo.jpg", { type: "image/jpeg" });
 }
 
 async function withImages<T>(

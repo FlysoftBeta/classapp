@@ -3,7 +3,7 @@ import jpegJs from "jpeg-js";
 import type { SmokeRuntime } from "../harness";
 import { isImagePost } from "@/shared/types/api";
 
-function jpegBytes(width: number, height: number): Uint8Array {
+function jpegBytes(width: number, height: number): Buffer {
   const data = new Uint8Array(width * height * 4);
   for (let i = 0; i < data.length; i += 4) {
     data[i] = 40;
@@ -12,9 +12,11 @@ function jpegBytes(width: number, height: number): Uint8Array {
     data[i + 3] = 255;
   }
   const encoded = jpegJs.encode({ data, width, height }, 80);
-  return encoded.data instanceof Uint8Array
-    ? encoded.data
-    : new Uint8Array(encoded.data);
+  return Buffer.from(
+    encoded.data instanceof Uint8Array
+      ? encoded.data
+      : new Uint8Array(encoded.data),
+  );
 }
 
 export async function smokePosts(runtime: SmokeRuntime): Promise<void> {
