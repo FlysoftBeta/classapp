@@ -17,14 +17,15 @@ export type AiExecuteInput = {
   config: AiModelsConfig;
 };
 
-/** Fire-and-forget work that must run on the Coordinator after an Executor job commits. */
+/** Fire-and-forget leftover applied after a job commits or an HTTP response is written. */
 export type StickyCommand =
   | { type: "ai.execute"; input: AiExecuteInput }
   | {
       type: "media.ensureMaterialized";
       track: MediaTrack;
       kind: "audio" | "cover";
-    };
+    }
+  | { type: "update.apply"; dbBackup: string };
 
 export interface MediaSticky {
   readonly available: boolean;

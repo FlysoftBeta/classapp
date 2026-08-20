@@ -65,8 +65,12 @@ export function createLiveStickyHost(input: {
       rollback: async () => {
         requireUpdate(input.update).requestRollback();
       },
-      deploy: async (zipBytes) =>
-        requireUpdate(input.update).deployUpdate(zipBytes),
+      deploy: async (zipBytes) => {
+        const dbBackup = await requireUpdate(input.update).stageDeployment(
+          zipBytes,
+        );
+        input.queueCommand({ type: "update.apply", dbBackup });
+      },
     },
   };
 }

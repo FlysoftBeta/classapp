@@ -11,7 +11,7 @@ import {
   runtimeController,
   type UpdateRuntimeConfig,
 } from "@/server/infra/runtimeConfig";
-import { extractZipToDir } from "@/server/infra/archive";
+import { extractDeployArchive } from "./archive";
 import {
   clearPendingUpdate,
   getCloudUpdateConfig,
@@ -71,6 +71,7 @@ export class UpdateRuntime {
   private initialCheckTimer: NodeJS.Timeout | null = null;
   private cloudChecking = false;
   private cloudInstalling = false;
+  private deploying = false;
   private latestManifest: CloudUpdateManifest | null = null;
   private lastCheckedAt: string | null = null;
   private lastError: string | null = null;
@@ -154,7 +155,8 @@ export class UpdateRuntime {
       cloud_last_checked_at: this.lastCheckedAt,
       cloud_last_error: this.lastError,
     };
-    if (this.state.status === "idle") {
+    const appliedAt = this.appliedPendingAt();
+    if (!appliedAt) {
       return {
         pending: false,
         applied_at: null,
@@ -163,10 +165,10 @@ export class UpdateRuntime {
         ...base,
       };
     }
-    const elapsed = Date.now() - new Date(this.state.appliedAt).getTime();
+    const elapsed = Date.now() - new Date(appliedAt).getTime();
     return {
       pending: true,
-      applied_at: this.state.appliedAt,
+      applied_at: appliedAt,
       seconds_remaining: Math.max(
         0,
         Math.ceil((UPDATE_CONFIRM_TIMEOUT_MS - elapsed) / 1000),
@@ -182,29 +184,51 @@ export class UpdateRuntime {
     this.state = { status: "pending", appliedAt: now };
   }
 
-  async deployUpdate(zipBytes: Uint8Array): Promise<void> {
+  /** Pending is only observable after the launcher has published backup/. */
+  private appliedPendingAt(): string | null {
+    if (this.state.status !== "pending") return null;
+    if (!fs.existsSync(this.config.backupDir)) return null;
+    return this.state.appliedAt;
+  }
+
+  /**
+   * Validate and stage a deployment. Does not talk to the launcher: HTTP must
+   * flush 202 before the leftover `update.apply` command asks for SIGTERM.
+   */
+  async stageDeployment(zipBytes: Uint8Array): Promise<string> {
     if (this.state.status === "pending") {
       throw new PublicError("上一更新仍待确认");
     }
+    if (this.cloudInstalling) throw new PublicError("正在安装云端更新");
+    if (this.deploying) throw new PublicError("正在准备更新");
+    this.deploying = true;
     fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
     fs.mkdirSync(this.config.stagingDir, { recursive: true });
     try {
-      extractZipToDir(zipBytes, this.config.stagingDir);
-    } catch (error) {
       try {
-        fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        attachSuppressedError(error, cleanupError);
+        extractDeployArchive(zipBytes, this.config.stagingDir);
+      } catch (error) {
+        try {
+          fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          attachSuppressedError(error, cleanupError);
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    const dbBackup = await createDbBackup(this.db);
-    if (!dbBackup) {
-      fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
-      throw new PublicError("数据库不存在，无法创建回滚备份");
+      const dbBackup = await createDbBackup(this.db);
+      if (!dbBackup) {
+        fs.rmSync(this.config.stagingDir, { recursive: true, force: true });
+        throw new PublicError("数据库不存在，无法创建回滚备份");
+      }
+      this.setPendingUpdate();
+      return dbBackup;
+    } finally {
+      this.deploying = false;
     }
-    this.setPendingUpdate();
+  }
+
+  applyStagedUpdate(dbBackup: string): void {
     const controller = runtimeController();
     if (controller) {
       controller.requestUpdate(dbBackup);
@@ -212,6 +236,11 @@ export class UpdateRuntime {
       return;
     }
     setTimeout(() => process.exit(0), 1000);
+  }
+
+  async deployUpdate(zipBytes: Uint8Array): Promise<void> {
+    const dbBackup = await this.stageDeployment(zipBytes);
+    this.applyStagedUpdate(dbBackup);
   }
 
   async checkCloudUpdate(): Promise<{
