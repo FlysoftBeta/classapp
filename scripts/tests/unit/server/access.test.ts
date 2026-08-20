@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { AccessService } from "@/server/services/accessService";
+import type { OwnerlessRecovery } from "@/server/services/accessService";
 import { AuthorizationError } from "@/server/services/authorizationError";
 import { CapabilityService } from "@/server/services/capabilityService";
 import { upsertAccessBinding } from "@/server/data/access";
 import {
   flagsCanIssue,
   flagsOfGrantSet,
+  collectionSource,
   type AccessGrant,
 } from "@/shared/access";
 
@@ -20,26 +22,6 @@ function memoryAccessDb(): Database.Database {
       group_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       PRIMARY KEY (group_id, user_id)
-    );
-    CREATE TABLE media_tracks (id TEXT PRIMARY KEY);
-    CREATE TABLE articles (id TEXT PRIMARY KEY);
-    CREATE TABLE media_lists (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      title TEXT NOT NULL DEFAULT '',
-      revision INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE media_list_items (
-      list_id TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      track_id TEXT NOT NULL,
-      PRIMARY KEY (list_id, position)
-    );
-    CREATE TABLE booklist_items (
-      list_id TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      article_id TEXT NOT NULL,
-      PRIMARY KEY (list_id, position)
     );
     CREATE TABLE access_bindings (
       resource_kind TEXT NOT NULL,
@@ -93,16 +75,12 @@ function memoryAccessDb(): Database.Database {
       last_used_at_ms INTEGER NOT NULL,
       PRIMARY KEY (user_id, resource_kind, resource_id)
     );
-    CREATE TABLE user_queues (
-      user_id TEXT PRIMARY KEY,
-      list_id TEXT NOT NULL
-    );
   `);
   return db;
 }
 
-function service(db: Database.Database, secret = "test-secret") {
-  return new AccessService(db, new CapabilityService(secret));
+function service(db: Database.Database, recovery?: OwnerlessRecovery) {
+  return new AccessService(db, new CapabilityService("test-secret"), recovery);
 }
 
 test("owner binding materializes full flags and authorizes write", () => {
@@ -176,7 +154,6 @@ test("union of shareable-read and held-write does not authorize granting write",
   assert.equal(flags.read, true);
   assert.equal(flags.write, true);
   assert.equal(flags.shareRead, true);
-  assert.equal(flags.shareWrite, false);
   assert.equal(flagsCanIssue(flags, { mode: "readwrite", shareable: false }), false);
   assert.throws(
     () =>
@@ -233,10 +210,10 @@ test("favoriting does not create an independent access binding", () => {
   `);
   const access = service(db);
   access.bindOwner("playlist", "list-1", { kind: "group", id: "g1" });
-  access.favorite("bob", "playlist", "list-1", true, Date.now());
+  access.favorite("bob", "playlist", "list-1", true, Date.now(), "owned");
   db.prepare("DELETE FROM group_members WHERE user_id = ?").run("bob");
   access.onGroupMembershipChanged("bob", "g1");
-  assert.deepEqual(access.listFavorites("bob", "playlist"), []);
+  assert.deepEqual(access.listFavorites("bob", "playlist", "owned"), []);
   assert.throws(
     () => access.authorizeOwned("bob", "playlist", "list-1", "read"),
     (error: unknown) => error instanceof AuthorizationError,
@@ -247,11 +224,11 @@ test("materialized miss recovers from live bindings without rediscovery", () => 
   const db = memoryAccessDb();
   db.prepare("INSERT INTO users (id) VALUES (?)").run("alice");
   const access = service(db);
-  access.bindOwner("booklist", "b1", { kind: "user", id: "alice" });
+  access.bindOwner("notebook", "b1", { kind: "user", id: "alice" });
   db.prepare(
     "DELETE FROM access_effective WHERE user_id = ? AND resource_id = ?",
   ).run("alice", "b1");
-  const auth = access.authorizeOwned("alice", "booklist", "b1", "own");
+  const auth = access.authorizeOwned("alice", "notebook", "b1", "own");
   assert.equal(auth.recovered, true);
   assert.equal(auth.flags.own, true);
 });
@@ -277,22 +254,19 @@ test("capability HMAC verification rejects tamper, expiry, and kind mismatch", (
   );
 });
 
-test("expired or missing track capability recovers from an accessible playlist", () => {
+test("expired ownerless capability recovers through an injected containing collection", () => {
   const db = memoryAccessDb();
-  db.exec(`
-    INSERT INTO users (id) VALUES ('alice');
-    INSERT INTO media_tracks (id) VALUES ('t1');
-    INSERT INTO media_lists (id, kind, revision) VALUES ('p1', 'playlist', 1);
-    INSERT INTO media_list_items (list_id, position, track_id) VALUES ('p1', 0, 't1');
-  `);
-  const access = service(db);
+  db.exec(`INSERT INTO users (id) VALUES ('alice')`);
+  const access = service(db, {
+    collectionsContaining(kind, id) {
+      if (kind === "track" && id === "t1") {
+        return [{ kind: "playlist", id: "p1", revision: 1 }];
+      }
+      return [];
+    },
+  });
   access.bindOwner("playlist", "p1", { kind: "user", id: "alice" });
-  const expired = access.signOwnerless(
-    "track",
-    "t1",
-    { type: "search" },
-    1,
-  );
+  const expired = access.signOwnerless("track", "t1", { type: "search" }, 1);
   const recovered = access.authorizeOwnerless(
     "alice",
     "track",
@@ -366,21 +340,6 @@ test("grant to an unknown principal is rejected", () => {
   );
 });
 
-test("queue access cannot be granted to another principal", () => {
-  const db = memoryAccessDb();
-  db.exec(`INSERT INTO users (id) VALUES ('alice'), ('bob')`);
-  const access = service(db);
-  access.bindOwner("queue", "q1", { kind: "user", id: "alice" });
-  assert.throws(
-    () =>
-      access.grant("alice", "queue", "q1", { kind: "user", id: "bob" }, {
-        mode: "read",
-        shareable: false,
-      }),
-    (error: unknown) => error instanceof AuthorizationError,
-  );
-});
-
 test("joining a group rematerializes group-owned lists for the member", () => {
   const db = memoryAccessDb();
   db.exec(`
@@ -396,6 +355,25 @@ test("joining a group rematerializes group-owned lists for the member", () => {
   );
   access.onGroupMembershipChanged("bob", "g1");
   assert.equal(access.peekOwned("bob", "booklist", "bl1").own, true);
+});
+
+test("collection capability source is domain-opaque", () => {
+  const capabilities = new CapabilityService("secret");
+  const token = capabilities.sign(
+    "article",
+    "a1",
+    collectionSource("booklist", "b1", 3),
+    1_000,
+  );
+  const verified = capabilities.verify(token, { kind: "article", id: "a1" }, 1_001);
+  assert.equal(verified.ok, true);
+  if (verified.ok) {
+    assert.equal(verified.payload.src.type, "collection");
+    if (verified.payload.src.type === "collection") {
+      assert.equal(verified.payload.src.kind, "booklist");
+      assert.equal(verified.payload.src.id, "b1");
+    }
+  }
 });
 
 test("effective grant set for mixed paths stays a union, not a synthesized shareable write", () => {

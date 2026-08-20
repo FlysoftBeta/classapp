@@ -1,12 +1,16 @@
 # Resource authorization
 
-ClassApp splits social access into two resource kinds. The split is a product
+ClassApp splits social access into two resource classes. The split is a product
 constraint, not a generic IAM framework: ownerless catalog objects must remain
 immutable and shareable without persisting every transient discovery set, while
 playlists and booklists are mutable collections whose authority comes from
 principal relationships.
 
-## Resource kinds
+Media and articles are separate domains. They share the **access subsystem**
+(grant algebra, bindings, materialization, HMAC capabilities) and similar UI
+shape. They do not share storage. A booklist is not a `media_lists` row.
+
+## Resource classes
 
 **Ownerless objective resources** — tracks and articles. They have no owner
 field. A client may read one only by presenting a capability token the server
@@ -17,9 +21,10 @@ search result sets.
 
 **Owned resources** — playlists, booklists, and a user's queue. They have no
 single `owner` column. Authority is a set of access bindings keyed by
-`(resource × principal)`, where a principal is a user or a group. There is no
-addressable access object ID. Effective authority is the union of every live
-path from the current user, including group memberships.
+`(resource_kind × resource_id × principal)`, where a principal is a user or a
+group and `resource_kind` is an opaque domain string. There is no addressable
+access object ID. Effective authority is the union of every live path from the
+current user, including group memberships.
 
 ```ts
 type AccessGrant =
@@ -37,13 +42,27 @@ Favoriting or bookmarking is a preference overlay. It does not create a
 personal binding. After leaving a group, access remains only if another live
 path still exists.
 
+Queue sharing is a media product rule: the media facade never offers grant on
+a queue. `AccessService` itself does not special-case queue.
+
 ## Capability tokens
 
 Tokens are `c1.<payload>.<hmac>` over a canonical signing input (version, kind,
-id, ops, times, source). Search tokens last 24 hours; list-derived tokens last
-30 days. Possession of an unexpired token authorizes `read` of that object.
-Leaving a group does not immediately revoke already-issued ownerless tokens;
-they expire. Owned-list access is revoked immediately through rematerialization.
+id, ops, times, source). Object `kind` and collection `kind` are opaque
+strings; HMAC verification does not enumerate playlist/booklist/track/article.
+Search tokens last 24 hours; collection-derived tokens last 30 days. Possession
+of an unexpired token authorizes `read` of that object. Leaving a group does
+not immediately revoke already-issued ownerless tokens; they expire. Owned-list
+access is revoked immediately through rematerialization.
+
+Capability source is generic:
+
+```ts
+type CapabilitySource =
+  | { type: "search" }
+  | { type: "collection"; kind: string; id: string; revision?: number }
+  | { type: "recovery"; kind: string; id: string };
+```
 
 ## Materialized effective access
 
@@ -52,8 +71,12 @@ provenance (which principal bindings contributed). The happy path reads that
 row. On miss or stale denial, `AccessService` recomputes from live bindings and
 rewrites the row so the UI does not have to rediscover the granting location.
 
-Ownerless recovery walks still-readable playlists, queues, or booklists that
-contain the object, then signs a `recovery` capability and stores possession.
+Ownerless recovery asks an injected domain port which collections currently
+contain the object, then checks whether the user can still read one of those
+collections, signs a `recovery` capability, and stores possession. Media
+answers for tracks (playlist/queue membership); articles answer for articles
+(booklist membership). Access SQL does not join `media_lists` or
+`booklist_items`.
 
 Fine-grained checks (`canDoSomething`) read the corresponding flag column
 (`can_read`, `can_write`, `can_own`, `can_share_*`) rather than walking the
@@ -72,16 +95,20 @@ Music Center and Article Center expose:
 - owned or shared lists (playlists / booklists)
 
 They do not expose a global “all music” or “all articles” collection. Group
-chat article views open that group's booklist. Existing group-chat articles
-migrated in schema v27 as ownerless objects inside a group-owned booklist.
+chat article views open that group's booklist via `group_booklists`. Existing
+group-chat articles migrated in schema v27 as ownerless objects inside a
+group-owned booklist. Articles do not store an origin group column; `group_id`
+on the article wire DTO is a view projection from that association.
 
 ## Module owners
 
 | Concern | Owner |
 | --- | --- |
 | Grant algebra, subset, union, flags | `shared/access` |
-| HMAC sign/verify | `CapabilityService` |
-| Bindings, materialization, possession, recovery | `AccessService` |
+| HMAC sign/verify over opaque kinds | `CapabilityService` |
+| Bindings, materialization, possession, recovery orchestration | `AccessService` |
+| Track containment for recovery | `server/data/media` (`collectionsContainingTrack`) |
+| Article containment and group association | `server/data/booklists` (`group_booklists`) |
 | Playlist/queue snapshots and track signing | `MediaPlaylistService` |
 | Booklist snapshots and article signing | `BooklistService` |
 | Actor paths | `MediaActorFacade`, `ArticleActorFacade` |

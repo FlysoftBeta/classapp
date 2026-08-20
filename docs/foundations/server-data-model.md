@@ -9,8 +9,8 @@ the reconstructible browser projection, server rows are not casually nuked.
 v26 drops reconstructible cache (media bytes, teach copies, bundle articles,
 old quota ledger) and switches remaining blobs to allocated `blob_id`s.
 v27 replaces playlist `owner_user_id` with principal access bindings, adds
-booklists, capability possession, and treats group-chat articles as ownerless
-objects.
+booklists as an articles-domain collection (`booklists` / `group_booklists`),
+capability possession, and treats group-chat articles as ownerless objects.
 
 ## Table families
 
@@ -20,9 +20,9 @@ objects.
 | authority           | `user_admin_roles`, feature bitset on `users`, `admin_audit_log`                            |
 | clients             | `clients`, `client_ips`, `client_associations`, `client_attempts`, `client_last_active`     |
 | community           | `groups`, `group_members`, `dms`, `posts`, `convs_user`                                     |
-| articles            | `articles` (origin_group_id is provenance, not ACL), `text_article_segments`, `article_read_progress` |
-| media               | `media_tracks`, `media_assets`, `media_lists` (`playlist` / `queue` / `booklist`), `media_list_items`, `booklist_items`, `media_stream_grants` |
-| access              | `access_bindings`, `access_effective`, `resource_possession`, `user_favorites`, `user_recents`, `user_queues` |
+| articles            | `articles`, `text_article_segments`, `article_read_progress`, `booklists`, `booklist_items`, `group_booklists` |
+| media               | `media_tracks`, `media_assets`, `media_lists` (`playlist` / `queue`), `media_list_items`, `user_queues`, `media_stream_grants` |
+| access              | `access_bindings`, `access_effective`, `resource_possession`, `user_favorites`, `user_recents` |
 | AI conversation     | `ai_conversations`, `ai_messages`, `ai_runs`, `ai_run_attempts`, tags and context snapshots |
 | AI workspace        | `ai_workspaces` (ready `blob_id` plus in-flight `staging_blob_id`)                          |
 | AI accounting/tools | policy, enrollments, accounts, reservations, usage, ledger, file operations                 |

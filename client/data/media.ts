@@ -177,7 +177,6 @@ export async function getMediaListSnapshot(
           updated_at: list.updated_at,
           track_count: items.length,
           cover_track_id: list.cover_track_id ?? null,
-          origin_group_id: null,
           access: EMPTY_ACCESS_FLAGS,
         },
         items,
@@ -217,7 +216,6 @@ export async function listMediaPlaylists(
           updated_at: row.updated_at,
           track_count: items.length,
           cover_track_id: row.cover_track_id ?? null,
-          origin_group_id: null,
           access: EMPTY_ACCESS_FLAGS,
         });
       }

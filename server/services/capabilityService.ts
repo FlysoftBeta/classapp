@@ -7,37 +7,29 @@ import {
   capabilitySigningInput,
   type CapabilityPayload,
   type CapabilitySource,
-  type OwnerlessKind,
 } from "@/shared/access";
 
 const payloadSchema = z
   .object({
     v: z.literal(CAPABILITY_VERSION),
-    kind: z.enum(["track", "article"]),
+    kind: z.string().min(1),
     id: z.string().min(1),
     ops: z.array(z.literal("read")).min(1),
     src: z.union([
       z.object({ type: z.literal("search") }).strict(),
-      z.object({ type: z.literal("queue"), list_id: z.string().min(1) }).strict(),
       z
         .object({
-          type: z.literal("playlist"),
-          list_id: z.string().min(1),
-          revision: z.number().int().nonnegative(),
-        })
-        .strict(),
-      z
-        .object({
-          type: z.literal("booklist"),
-          list_id: z.string().min(1),
-          revision: z.number().int().nonnegative(),
+          type: z.literal("collection"),
+          kind: z.string().min(1),
+          id: z.string().min(1),
+          revision: z.number().int().nonnegative().optional(),
         })
         .strict(),
       z
         .object({
           type: z.literal("recovery"),
-          via: z.enum(["queue", "playlist", "booklist"]),
-          list_id: z.string().min(1),
+          kind: z.string().min(1),
+          id: z.string().min(1),
         })
         .strict(),
     ]),
@@ -73,7 +65,7 @@ export class CapabilityService {
   constructor(private readonly secret: string) {}
 
   sign(
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     source: CapabilitySource,
     now = Date.now(),
@@ -98,7 +90,7 @@ export class CapabilityService {
 
   verify(
     token: string,
-    expected: { kind: OwnerlessKind; id: string },
+    expected: { kind: string; id: string },
     now = Date.now(),
   ): CapabilityVerifyResult {
     const parts = token.split(".");

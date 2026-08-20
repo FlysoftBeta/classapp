@@ -1,15 +1,16 @@
 import type { Database } from "better-sqlite3";
 import {
   EMPTY_ACCESS_FLAGS,
+  capabilitySourceId,
+  capabilitySourceKind,
   flagsSatisfy,
   mergeIncomingGrant,
+  recoverySource,
   unionFlagList,
   type AccessFlags,
   type AccessGrant,
   type AccessNeed,
   type CapabilitySource,
-  type OwnedResourceKind,
-  type OwnerlessKind,
   type PrincipalRef,
 } from "@/shared/access";
 import {
@@ -48,21 +49,42 @@ export interface OwnerlessAuthorization {
   recovered: boolean;
 }
 
-interface ContainingList {
-  kind: "queue" | "playlist" | "booklist";
-  listId: string;
-  revision: number;
+/** A still-readable owned collection that contains an ownerless object. */
+export interface ContainingCollection {
+  kind: string;
+  id: string;
+  revision?: number;
 }
+
+/**
+ * Domain port: find collections that currently contain an ownerless object.
+ * AccessService then checks whether the current user can still read them.
+ * Implementations live in media/articles data; this module does not query
+ * playlist or booklist tables.
+ */
+export interface OwnerlessRecovery {
+  collectionsContaining(
+    objectKind: string,
+    objectId: string,
+  ): ContainingCollection[];
+}
+
+export type FavoriteAccessClass = "owned" | "ownerless";
+
+const EMPTY_RECOVERY: OwnerlessRecovery = {
+  collectionsContaining: () => [],
+};
 
 export class AccessService {
   constructor(
     private readonly db: Database,
     private readonly capabilities: CapabilityService,
+    private readonly recovery: OwnerlessRecovery = EMPTY_RECOVERY,
   ) {}
 
   liveFlags(
     userId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
   ): { flags: AccessFlags; provenance: EffectiveAccessRow["provenance"] } {
     const groupIds = listUserGroupIds(this.db, userId);
@@ -85,7 +107,7 @@ export class AccessService {
    */
   rematerialize(
     userId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
   ): AccessFlags {
     const { flags, provenance } = this.liveFlags(
@@ -110,10 +132,7 @@ export class AccessService {
     return flags;
   }
 
-  rematerializeResource(
-    resourceKind: OwnedResourceKind,
-    resourceId: string,
-  ): void {
+  rematerializeResource(resourceKind: string, resourceId: string): void {
     const bindings = listBindingsForResource(this.db, resourceKind, resourceId);
     const users = new Set<string>();
     for (const binding of bindings) {
@@ -178,7 +197,7 @@ export class AccessService {
    */
   authorizeOwned(
     userId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
     need: AccessNeed,
   ): OwnedAuthorization {
@@ -205,7 +224,7 @@ export class AccessService {
 
   peekOwned(
     userId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
   ): AccessFlags {
     const materialized = readEffectiveAccess(
@@ -220,14 +239,11 @@ export class AccessService {
 
   grant(
     actorId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
     principal: PrincipalRef,
     grant: AccessGrant,
   ): AccessFlags {
-    if (resourceKind === "queue") {
-      throw new AuthorizationError("denied");
-    }
     this.authorizeOwned(actorId, resourceKind, resourceId, { share: grant });
     this.requirePrincipal(principal);
     const existing = listBindingsForResource(
@@ -258,13 +274,10 @@ export class AccessService {
 
   revoke(
     actorId: string,
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
     principal: PrincipalRef,
   ): void {
-    if (resourceKind === "queue") {
-      throw new AuthorizationError("denied");
-    }
     this.authorizeOwned(actorId, resourceKind, resourceId, "own");
     if (principal.kind === "user" && principal.id === actorId) {
       throw new AuthorizationError("denied");
@@ -274,7 +287,7 @@ export class AccessService {
   }
 
   bindOwner(
-    resourceKind: OwnedResourceKind,
+    resourceKind: string,
     resourceId: string,
     principal: PrincipalRef,
   ): void {
@@ -284,20 +297,20 @@ export class AccessService {
     this.rematerializeResource(resourceKind, resourceId);
   }
 
-  dropResource(resourceKind: OwnedResourceKind, resourceId: string): void {
+  dropResource(resourceKind: string, resourceId: string): void {
     deleteBindingsForResource(this.db, resourceKind, resourceId);
   }
 
-  listAccessibleIds(userId: string, resourceKind: OwnedResourceKind): string[] {
+  listAccessibleIds(userId: string, resourceKind: string): string[] {
     return listReadableResourceIds(this.db, userId, resourceKind);
   }
 
-  listBindings(resourceKind: OwnedResourceKind, resourceId: string) {
+  listBindings(resourceKind: string, resourceId: string) {
     return listBindingsForResource(this.db, resourceKind, resourceId);
   }
 
   signOwnerless(
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     source: CapabilitySource,
     now = Date.now(),
@@ -307,7 +320,7 @@ export class AccessService {
 
   rememberPossession(
     userId: string,
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     capability: string,
     now = Date.now(),
@@ -319,18 +332,15 @@ export class AccessService {
       resourceKind: kind,
       resourceId: id,
       capability,
-      sourceKind: verified.payload.src.type,
-      sourceId:
-        verified.payload.src.type === "search"
-          ? null
-          : verified.payload.src.list_id,
+      sourceKind: capabilitySourceKind(verified.payload.src),
+      sourceId: capabilitySourceId(verified.payload.src),
       expiresAtMs: verified.payload.exp,
     });
   }
 
   authorizeOwnerless(
     userId: string,
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     capability: string | undefined,
     now = Date.now(),
@@ -379,7 +389,7 @@ export class AccessService {
   /** Authorize without throwing; used when assembling library aggregations. */
   presentOwnerless(
     userId: string,
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     capability?: string,
     now = Date.now(),
@@ -395,80 +405,44 @@ export class AccessService {
 
   private recoverOwnerless(
     userId: string,
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
     now: number,
   ): OwnerlessAuthorization | null {
-    const containing = this.findContainingAccessibleList(userId, kind, id);
+    const containing = this.findReadableContainingCollection(userId, kind, id);
     if (!containing) return null;
     const token = this.capabilities.sign(
       kind,
       id,
-      {
-        type: "recovery",
-        via: containing.kind,
-        list_id: containing.listId,
-      },
+      recoverySource(containing.kind, containing.id),
       now,
     );
     this.rememberPossession(userId, kind, id, token, now);
     return { capability: token, recovered: true };
   }
 
-  private findContainingAccessibleList(
+  private findReadableContainingCollection(
     userId: string,
-    kind: OwnerlessKind,
+    kind: string,
     id: string,
-  ): ContainingList | null {
-    if (kind === "track") {
-      const rows = this.db
-        .prepare(
-          `SELECT l.id, l.kind, l.revision,
-                  CASE l.kind WHEN 'queue' THEN 'queue' ELSE 'playlist' END AS access_kind
-             FROM media_lists l
-             JOIN media_list_items i ON i.list_id = l.id AND i.track_id = ?
-            WHERE l.kind IN ('playlist', 'queue')`,
-        )
-        .all(id) as Array<{
-        id: string;
-        kind: "playlist" | "queue";
-        revision: number;
-        access_kind: "playlist" | "queue";
-      }>;
-      for (const row of rows) {
-        const flags = this.rematerialize(userId, row.access_kind, row.id);
-        if (flags.read) {
-          return { kind: row.kind, listId: row.id, revision: row.revision };
-        }
-      }
-      return null;
-    }
-    const rows = this.db
-      .prepare(
-        `SELECT l.id, l.revision
-           FROM media_lists l
-           JOIN booklist_items i ON i.list_id = l.id AND i.article_id = ?
-          WHERE l.kind = 'booklist'`,
-      )
-      .all(id) as Array<{ id: string; revision: number }>;
-    for (const row of rows) {
-      const flags = this.rematerialize(userId, "booklist", row.id);
-      if (flags.read) {
-        return { kind: "booklist", listId: row.id, revision: row.revision };
-      }
+  ): ContainingCollection | null {
+    for (const collection of this.recovery.collectionsContaining(kind, id)) {
+      const flags = this.rematerialize(userId, collection.kind, collection.id);
+      if (flags.read) return collection;
     }
     return null;
   }
 
   favorite(
     userId: string,
-    resourceKind: "track" | "article" | "playlist" | "booklist",
+    resourceKind: string,
     resourceId: string,
     favorited: boolean,
     updatedAtMs: number,
+    accessClass: FavoriteAccessClass,
     capability?: string,
   ): { value: boolean; updatedAt: number } {
-    if (resourceKind === "playlist" || resourceKind === "booklist") {
+    if (accessClass === "owned") {
       this.authorizeOwned(userId, resourceKind, resourceId, "read");
     } else {
       this.authorizeOwnerless(userId, resourceKind, resourceId, capability);
@@ -483,40 +457,39 @@ export class AccessService {
     );
   }
 
-  recordRecent(
-    userId: string,
-    resourceKind: "track" | "article" | "playlist" | "booklist",
-    resourceId: string,
-  ): void {
+  recordRecent(userId: string, resourceKind: string, resourceId: string): void {
     touchRecent(this.db, userId, resourceKind, resourceId);
   }
 
   listFavorites(
     userId: string,
-    resourceKind: "track" | "article" | "playlist" | "booklist",
+    resourceKind: string,
+    accessClass: FavoriteAccessClass,
   ): string[] {
     return listFavoriteIds(this.db, userId, resourceKind).filter((id) =>
-      this.stillReachable(userId, resourceKind, id),
+      this.stillReachable(userId, resourceKind, id, accessClass),
     );
   }
 
   listRecents(
     userId: string,
-    resourceKind: "track" | "article" | "playlist" | "booklist",
+    resourceKind: string,
+    accessClass: FavoriteAccessClass,
     limit = 50,
   ): string[] {
     return listRecentIds(this.db, userId, resourceKind, limit).filter((id) =>
-      this.stillReachable(userId, resourceKind, id),
+      this.stillReachable(userId, resourceKind, id, accessClass),
     );
   }
 
   private stillReachable(
     userId: string,
-    resourceKind: "track" | "article" | "playlist" | "booklist",
+    resourceKind: string,
     id: string,
+    accessClass: FavoriteAccessClass,
   ): boolean {
     try {
-      if (resourceKind === "playlist" || resourceKind === "booklist") {
+      if (accessClass === "owned") {
         this.authorizeOwned(userId, resourceKind, id, "read");
       } else {
         this.authorizeOwnerless(userId, resourceKind, id, undefined);
@@ -532,6 +505,7 @@ export class AccessService {
 export function createAccessService(
   db: Database,
   capabilities: CapabilityService,
+  recovery?: OwnerlessRecovery,
 ): AccessService {
-  return new AccessService(db, capabilities);
+  return new AccessService(db, capabilities, recovery);
 }

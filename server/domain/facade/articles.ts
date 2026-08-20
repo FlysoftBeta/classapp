@@ -17,6 +17,7 @@ import type { AuditService } from "@/server/services/auditService";
 import type { AccessService } from "@/server/services/accessService";
 import type { BooklistService } from "@/server/services/booklistService";
 import type { AccessGrant, PrincipalRef } from "@/shared/access";
+import { collectionSource } from "@/shared/access";
 
 export type { CreateArticleInput, CreateBundleArticleInput };
 
@@ -137,8 +138,8 @@ export class ArticleActorFacade {
     const view = input.view === "bookmarked" ? "bookmarked" : "recent";
     const ids =
       view === "bookmarked"
-        ? this.access.listFavorites(user.id, "article")
-        : this.access.listRecents(user.id, "article");
+        ? this.access.listFavorites(user.id, "article", "ownerless")
+        : this.access.listRecents(user.id, "article", "ownerless");
     const loaded = this.articles.byIds(user.id, ids);
     return this.pageArticles(
       this.withCapabilities(user.id, loaded.articles),
@@ -151,14 +152,14 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("articles");
     const recents = this.withCapabilities(
       user.id,
-      this.articles.byIds(user.id, this.access.listRecents(user.id, "article"))
+      this.articles.byIds(user.id, this.access.listRecents(user.id, "article", "ownerless"))
         .articles,
     );
     const favorites = this.withCapabilities(
       user.id,
       this.articles.byIds(
         user.id,
-        this.access.listFavorites(user.id, "article"),
+        this.access.listFavorites(user.id, "article", "ownerless"),
       ).articles,
     );
     const users = this.articles.byIds(user.id, [
@@ -198,11 +199,11 @@ export class ArticleActorFacade {
     articleId: string,
   ): string {
     const snapshot = this.booklistService.addArticle(userId, booklistId, articleId);
-    const capability = this.access.signOwnerless("article", articleId, {
-      type: "booklist",
-      list_id: booklistId,
-      revision: snapshot.list.revision,
-    });
+    const capability = this.access.signOwnerless(
+      "article",
+      articleId,
+      collectionSource("booklist", booklistId, snapshot.list.revision),
+    );
     this.access.rememberPossession(userId, "article", articleId, capability);
     return capability;
   }
@@ -215,7 +216,11 @@ export class ArticleActorFacade {
     const booklistId = this.resolvePublishBooklist(user, input.group_id);
     const result = this.articles.createText(user.id, input);
     const capability = this.attachToBooklist(user.id, booklistId, result.article.id);
-    return { ...result, capability };
+    return {
+      ...result,
+      article: { ...result.article, group_id: input.group_id, capability },
+      capability,
+    };
   }
 
   async createBundle(
@@ -226,7 +231,11 @@ export class ArticleActorFacade {
     const booklistId = this.resolvePublishBooklist(user, input.group_id);
     const result = this.articles.createBundle(user.id, input);
     const capability = this.attachToBooklist(user.id, booklistId, result.article.id);
-    return { ...result, capability };
+    return {
+      ...result,
+      article: { ...result.article, group_id: input.group_id, capability },
+      capability,
+    };
   }
 
   /** Authorize the multipart target before the HTTP adapter renders the file. */
@@ -334,6 +343,7 @@ export class ArticleActorFacade {
       articleId,
       bookmarked,
       updatedAt,
+      "ownerless",
       capability,
     );
     this.articles.notifyPreference(user.id, articleId);

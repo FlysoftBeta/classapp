@@ -28,6 +28,7 @@ import {
   upsertArticleProgressOffset,
   purgeArticlesForUser,
 } from "@/server/data/articles";
+import { groupIdsForArticle } from "@/server/data/booklists";
 import { userMetadataForIds } from "@/server/data/users";
 import {
   PublicError,
@@ -186,7 +187,6 @@ export class ArticleService {
       userId,
       requireTrimmed(input.title, "标题不能为空"),
       requireTrimmed(input.content, "内容不能为空"),
-      input.group_id,
     );
     this.notifyCreated(userId, article.id);
     return {
@@ -291,7 +291,6 @@ export class ArticleService {
         archiveSize: input.archive_size,
         originalFilename: input.original_filename,
         itemCount: input.item_count,
-        groupId: input.group_id,
       });
       if (input.upload_id) {
         const claimed = claimArticleUpload(
@@ -459,6 +458,7 @@ export class ArticleService {
 
   async delete(requestingUserId: string, articleId: string): Promise<void> {
     const record = findArticleRecord(this.db, articleId);
+    const groupIds = groupIdsForArticle(this.db, articleId);
     deleteArticleById(this.db, articleId);
     if (record?.content_kind === "bundle")
       await this.removeBundle(record.source_path, record.archive_path, articleId);
@@ -488,8 +488,8 @@ export class ArticleService {
         data: { removed: { article_id: articleId } },
       });
     }
-    if (record?.group_id) {
-      publishGroupArticle(record.group_id, {
+    for (const groupId of groupIds) {
+      publishGroupArticle(groupId, {
         kind: "article.list_updated",
         data: { refresh: true },
       });
@@ -510,10 +510,9 @@ export class ArticleService {
     userId: string,
     title: string,
     content: string,
-    groupId: string | null,
   ) {
     const id = crypto.randomUUID();
-    insertTextArticle(this.db, { id, userId, groupId, title, content });
+    insertTextArticle(this.db, { id, userId, title, content });
     return this.requireOwned(id, userId);
   }
 
@@ -609,8 +608,8 @@ export class ArticleService {
     this.publishList(userId, articleId, true);
     const article = findArticleRecord(this.db, articleId);
     if (!article) throw new PublicError("文章不存在");
-    if (article.group_id) {
-      publishGroupArticle(article.group_id, {
+    for (const groupId of groupIdsForArticle(this.db, articleId)) {
+      publishGroupArticle(groupId, {
         kind: "article.list_updated",
         data: { refresh: true },
       });

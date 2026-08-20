@@ -1,3 +1,4 @@
+import type { Database } from "better-sqlite3";
 import type { Scope } from "@/server/runtime/scope";
 import { scopeEntry } from "@/server/runtime/scope";
 import { PostActorFacade } from "@/server/domain/facade/posts";
@@ -71,7 +72,10 @@ import { MediaService } from "@/server/services/mediaService";
 import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
 import { BooklistService } from "@/server/services/booklistService";
 import { AccessService } from "@/server/services/accessService";
+import type { OwnerlessRecovery } from "@/server/services/accessService";
 import { CapabilityService } from "@/server/services/capabilityService";
+import { collectionsContainingTrack } from "@/server/data/media";
+import { collectionsContainingArticle } from "@/server/data/booklists";
 import { getCapabilitySecret } from "@/server/infra/db";
 import {
   createRoleService,
@@ -200,6 +204,16 @@ const authenticationFacade = scopeEntry<AuthenticationFacade>(
 );
 const incidentFacade = scopeEntry<IncidentFacade>("IncidentFacade");
 const mediaFacade = scopeEntry<MediaActorFacade>("MediaActorFacade");
+
+function ownerlessRecoveryFor(db: Database): OwnerlessRecovery {
+  return {
+    collectionsContaining(kind, id) {
+      if (kind === "track") return collectionsContainingTrack(db, id);
+      if (kind === "article") return collectionsContainingArticle(db, id);
+      return [];
+    },
+  };
+}
 
 /** Typed request composition. Every getter has Scope get-or-init semantics. */
 export class Composition {
@@ -550,6 +564,7 @@ export class Composition {
         new AccessService(
           this.scope.db,
           new CapabilityService(getCapabilitySecret(this.scope.db)),
+          ownerlessRecoveryFor(this.scope.db),
         ),
     );
   }

@@ -75,10 +75,13 @@ handles into historical content, membership, or operational rows.
 
 ## Articles
 
-Articles are ownerless immutable objects. `origin_group_id` records where they
-were published; it is not an ACL. Access is a signed capability issued when a
+Articles are ownerless immutable objects. They do not store a group column.
+A group chat publishes into that group's booklist (`group_booklists` plus a
+group owner binding). `group_id` on the article wire DTO is a view projection
+from that association, not ACL. Access is a signed capability issued when a
 booklist, recent/favorite aggregation, or other legitimate snapshot includes
-the article. Booklists are owned collections with principal access bindings.
+the article. Booklists are owned collections with principal access bindings,
+stored in `booklists` / `booklist_items`, not in `media_lists`.
 A group chat's article view opens that group's booklist. Schema v27 migrated
 existing group-chat articles as ownerless booklist items, not owned resources.
 

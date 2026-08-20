@@ -656,7 +656,7 @@ export async function fetchBooklist(
   rememberArticleCapabilities(result.data.articles);
   await reconcileArticleList(result.data.articles, result.data.users, {
     view: "all",
-    group_id: result.data.list.origin_group_id,
+    group_id: result.data.list.group_id,
   });
   return result.data;
 }

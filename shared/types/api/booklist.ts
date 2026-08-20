@@ -15,7 +15,7 @@ export const booklistSummarySchema = object({
   created_at: z.string(),
   updated_at: z.string(),
   item_count: z.number().int().nonnegative(),
-  origin_group_id: z.string().nullable(),
+  group_id: z.string().nullable(),
   access: accessFlagsSchema,
 });
 

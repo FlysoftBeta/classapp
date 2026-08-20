@@ -58,7 +58,6 @@ export const mediaPlaylistSummarySchema = object({
   updated_at: z.string(),
   track_count: z.number().int().nonnegative(),
   cover_track_id: z.string().nullable(),
-  origin_group_id: z.string().nullable(),
   access: accessFlagsSchema,
 });
 

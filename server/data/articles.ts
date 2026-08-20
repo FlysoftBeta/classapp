@@ -21,7 +21,12 @@ export type BundleProvider = {
 type ArticleProvider = TextProvider | BundleProvider;
 
 const META_COLUMNS = `
-  a.id, a.user_id, a.origin_group_id AS group_id, a.title, a.provider_json, a.created_at,
+  a.id, a.user_id,
+  (SELECT gb.group_id FROM booklist_items bi
+     JOIN group_booklists gb ON gb.booklist_id = bi.booklist_id
+    WHERE bi.article_id = a.id
+    LIMIT 1) AS group_id,
+  a.title, a.provider_json, a.created_at,
   CASE WHEN fav.favorited = 1 THEN 1 ELSE 0 END AS is_bookmarked,
   COALESCE(fav.updated_at_ms, 0) AS bookmark_updated_at_ms,
   rp.offset AS current_offset,
@@ -55,7 +60,6 @@ export interface ArticleRecord {
 
 export interface ArticleAccessRow {
   user_id: string | null;
-  group_id: string | null;
 }
 
 export type ArticleListView = "all" | "bookmarked" | "recent";
@@ -215,7 +219,12 @@ export function findArticleRecord(
 ): ArticleRecord | null {
   const row = db
     .prepare(
-      "SELECT id, user_id, origin_group_id AS group_id, title, provider_json, created_at FROM articles WHERE id = ?",
+      `SELECT id, user_id,
+              (SELECT gb.group_id FROM booklist_items bi
+                 JOIN group_booklists gb ON gb.booklist_id = bi.booklist_id
+                WHERE bi.article_id = articles.id
+                LIMIT 1) AS group_id,
+              title, provider_json, created_at FROM articles WHERE id = ?`,
     )
     .get(articleId) as Record<string, unknown> | undefined;
   if (!row) return null;
@@ -244,7 +253,7 @@ export function findArticleAccessRow(
 ): ArticleAccessRow | null {
   return (
     (db
-      .prepare("SELECT user_id, origin_group_id AS group_id FROM articles WHERE id = ?")
+      .prepare("SELECT user_id FROM articles WHERE id = ?")
       .get(articleId) as ArticleAccessRow | undefined) ?? null
   );
 }
@@ -254,7 +263,6 @@ export function insertTextArticle(
   input: {
     id: string;
     userId: string;
-    groupId: string | null;
     title: string;
     content: string;
   },
@@ -266,11 +274,10 @@ export function insertTextArticle(
   );
   db.transaction(() => {
     db.prepare(
-      "INSERT INTO articles (id, user_id, origin_group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO articles (id, user_id, title, provider_json) VALUES (?, ?, ?, ?)",
     ).run(
       input.id,
       input.userId,
-      input.groupId,
       input.title,
       JSON.stringify({
         type: "text",
@@ -295,7 +302,6 @@ export function insertBundleArticle(
   input: {
     id: string;
     userId: string;
-    groupId: string | null;
     title: string;
     sourcePath: string;
     archivePath: string;
@@ -307,11 +313,10 @@ export function insertBundleArticle(
   },
 ): void {
   db.prepare(
-    "INSERT INTO articles (id, user_id, origin_group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO articles (id, user_id, title, provider_json) VALUES (?, ?, ?, ?)",
   ).run(
     input.id,
     input.userId,
-    input.groupId,
     input.title,
     JSON.stringify({
       type: "bundle",
@@ -327,7 +332,13 @@ export function insertBundleArticle(
 }
 
 function accessCondition(view: ArticleListView, groupId?: string) {
-  if (groupId) return `a.origin_group_id = :groupId`;
+  if (groupId) {
+    return `EXISTS (
+      SELECT 1 FROM booklist_items bi
+      JOIN group_booklists gb ON gb.booklist_id = bi.booklist_id
+      WHERE bi.article_id = a.id AND gb.group_id = :groupId
+    )`;
+  }
   if (view === "bookmarked" || view === "recent") return "1 = 1";
   return "1 = 0";
 }

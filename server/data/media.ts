@@ -11,7 +11,6 @@ import {
   upsertQuotaPool,
   type QuotaPoolPolicy,
 } from "@/server/data/quota";
-import { findQueueListId, setUserQueue } from "@/server/data/access";
 import { EMPTY_ACCESS_FLAGS } from "@/shared/access";
 
 export interface TrackInput {
@@ -40,12 +39,11 @@ export interface MediaAssetRow {
 
 interface MediaListRow {
   id: string;
-  kind: "playlist" | "queue" | "booklist";
+  kind: "playlist" | "queue";
   title: string;
   revision: number;
   retention_days: number;
   expires_at: string | null;
-  origin_group_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -288,11 +286,48 @@ export function touchTrack(db: Database, trackId: string): void {
   ).run(trackId);
 }
 
+export function findQueueListId(db: Database, userId: string): string | null {
+  const row = db
+    .prepare("SELECT list_id FROM user_queues WHERE user_id = ?")
+    .get(userId) as { list_id: string } | undefined;
+  return row?.list_id ?? null;
+}
+
+export function setUserQueue(
+  db: Database,
+  userId: string,
+  listId: string,
+): void {
+  db.prepare(
+    `INSERT INTO user_queues (user_id, list_id) VALUES (?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET list_id = excluded.list_id`,
+  ).run(userId, listId);
+}
+
+export function collectionsContainingTrack(
+  db: Database,
+  trackId: string,
+): Array<{ kind: string; id: string; revision: number }> {
+  return (
+    db
+      .prepare(
+        `SELECT l.id, l.kind, l.revision
+           FROM media_lists l
+           JOIN media_list_items i ON i.list_id = l.id AND i.track_id = ?`,
+      )
+      .all(trackId) as Array<{
+      id: string;
+      kind: "playlist" | "queue";
+      revision: number;
+    }>
+  ).map((row) => ({ kind: row.kind, id: row.id, revision: row.revision }));
+}
+
 // ── Lists ────────────────────────────────────────────────────────────────────
 
 const LIST_SELECT = `
   SELECT l.id, l.kind, l.title, l.revision,
-         l.retention_days, l.expires_at, l.origin_group_id, l.created_at, l.updated_at,
+         l.retention_days, l.expires_at, l.created_at, l.updated_at,
          (SELECT t.id
             FROM media_list_items i
             JOIN media_tracks t ON t.id = i.track_id
@@ -343,8 +378,6 @@ function summaryFromRow(
     retention_days: Number(value.retention_days),
     created_at: String(value.created_at),
     updated_at: String(value.updated_at),
-    origin_group_id:
-      typeof value.origin_group_id === "string" ? value.origin_group_id : null,
     track_count: trackCount,
     cover_track_id:
       typeof value.cover_track_id === "string" ? value.cover_track_id : null,

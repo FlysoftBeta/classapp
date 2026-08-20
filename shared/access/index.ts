@@ -29,10 +29,13 @@ export {
   SEARCH_CAPABILITY_TTL_MS,
   capabilityAllowsRead,
   capabilitySigningInput,
+  capabilitySourceId,
+  capabilitySourceKind,
+  collectionSource,
+  recoverySource,
   type CapabilityOp,
   type CapabilityPayload,
   type CapabilitySource,
-  type OwnerlessKind,
 } from "./capability";
 
 export {
@@ -40,15 +43,10 @@ export {
   accessFlagsSchema,
   accessGrantSchema,
   capabilityTokenSchema,
-  favoriteKindSchema,
   ownedListAccessSchema,
-  ownedResourceKindSchema,
-  ownerlessKindSchema,
   principalRefSchema,
   type AccessBindingView,
   type AccessFlagsWire,
   type AccessGrantWire,
-  type FavoriteKind,
-  type OwnedResourceKind,
   type PrincipalRef,
 } from "./schemas";

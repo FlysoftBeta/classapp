@@ -4,6 +4,7 @@ import { AuthorizationError } from "@/server/services/authorizationError";
 import type { AccessService } from "@/server/services/accessService";
 import {
   addBooklistItem,
+  attachGroupBooklist,
   booklistContents,
   createBooklistRow,
   deleteBooklist,
@@ -13,8 +14,9 @@ import {
 } from "@/server/data/booklists";
 import { listArticlesByIds } from "@/server/data/articles";
 import { userMetadataForIds } from "@/server/data/users";
-import type { AccessGrant, PrincipalRef } from "@/shared/access";
+import { collectionSource, type AccessGrant, type PrincipalRef } from "@/shared/access";
 import type { BooklistSnapshot, BooklistSummary } from "@/shared/types/api";
+import { publishGroupArticle } from "@/server/runtime/eventBus";
 
 export class BooklistService {
   constructor(
@@ -29,13 +31,17 @@ export class BooklistService {
     const articleIds = contents.items.map((item) => item.article_id);
     const articles = listArticlesByIds(this.db, userId, articleIds).map(
       (article) => {
-        const capability = this.access.signOwnerless("article", article.id, {
-          type: "booklist",
-          list_id: listId,
-          revision: contents.list.revision,
-        });
+        const capability = this.access.signOwnerless(
+          "article",
+          article.id,
+          collectionSource("booklist", listId, contents.list.revision),
+        );
         this.access.rememberPossession(userId, "article", article.id, capability);
-        return { ...article, capability };
+        return {
+          ...article,
+          group_id: article.group_id ?? contents.list.group_id,
+          capability,
+        };
       },
     );
     return {
@@ -72,21 +78,10 @@ export class BooklistService {
     return this.fetch(userId, existing);
   }
 
-  create(
-    userId: string,
-    title: string,
-    originGroupId: string | null = null,
-  ): BooklistSnapshot {
+  create(userId: string, title: string): BooklistSnapshot {
     const snapshot = this.db.transaction(() => {
-      const id = createBooklistRow(this.db, title, originGroupId);
-      if (originGroupId) {
-        this.access.bindOwner("booklist", id, {
-          kind: "group",
-          id: originGroupId,
-        });
-      } else {
-        this.access.bindOwner("booklist", id, { kind: "user", id: userId });
-      }
+      const id = createBooklistRow(this.db, title);
+      this.access.bindOwner("booklist", id, { kind: "user", id: userId });
       return this.signed(userId, id);
     })();
     return snapshot;
@@ -99,7 +94,12 @@ export class BooklistService {
   ): BooklistSnapshot {
     const existing = findGroupBooklistId(this.db, groupId);
     if (existing) return this.fetch(userId, existing);
-    return this.create(userId, title, groupId);
+    return this.db.transaction(() => {
+      const id = createBooklistRow(this.db, title);
+      attachGroupBooklist(this.db, groupId, id);
+      this.access.bindOwner("booklist", id, { kind: "group", id: groupId });
+      return this.signed(userId, id);
+    })();
   }
 
   addArticle(
@@ -109,7 +109,14 @@ export class BooklistService {
   ): BooklistSnapshot {
     this.access.authorizeOwned(userId, "booklist", listId, "write");
     addBooklistItem(this.db, listId, articleId);
-    return this.signed(userId, listId);
+    const snapshot = this.signed(userId, listId);
+    if (snapshot.list.group_id) {
+      publishGroupArticle(snapshot.list.group_id, {
+        kind: "article.list_updated",
+        data: { refresh: true },
+      });
+    }
+    return snapshot;
   }
 
   removeArticle(

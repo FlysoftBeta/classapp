@@ -6,14 +6,13 @@ import {
   normalizeGrantSet,
   type AccessFlags,
   type AccessGrant,
-  type OwnedResourceKind,
   type PrincipalRef,
 } from "@/shared/access";
 
 const grantsJsonSchema = z.array(accessGrantSchema).min(1);
 
 export interface AccessBindingRow {
-  resourceKind: OwnedResourceKind;
+  resourceKind: string;
   resourceId: string;
   principal: PrincipalRef;
   grants: AccessGrant[];
@@ -22,7 +21,7 @@ export interface AccessBindingRow {
 
 export interface EffectiveAccessRow {
   userId: string;
-  resourceKind: OwnedResourceKind;
+  resourceKind: string;
   resourceId: string;
   flags: AccessFlags;
   provenance: readonly AccessBindingRow[];
@@ -61,7 +60,7 @@ function flagsFromIntegers(row: {
 
 export function upsertAccessBinding(
   db: Database,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
   principal: PrincipalRef,
   grants: AccessGrant[],
@@ -91,7 +90,7 @@ export function upsertAccessBinding(
 
 export function deleteAccessBinding(
   db: Database,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
   principal: PrincipalRef,
 ): boolean {
@@ -106,7 +105,7 @@ export function deleteAccessBinding(
 
 export function listBindingsForResource(
   db: Database,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
 ): AccessBindingRow[] {
   const rows = db
@@ -116,7 +115,7 @@ export function listBindingsForResource(
         WHERE resource_kind = ? AND resource_id = ?`,
     )
     .all(resourceKind, resourceId) as Array<{
-    resource_kind: OwnedResourceKind;
+    resource_kind: string;
     resource_id: string;
     principal_kind: PrincipalRef["kind"];
     principal_id: string;
@@ -137,7 +136,7 @@ export function listBindingsForResource(
 export function listBindingsForPrincipal(
   db: Database,
   principal: PrincipalRef,
-  resourceKind?: OwnedResourceKind,
+  resourceKind?: string,
 ): AccessBindingRow[] {
   const rows = resourceKind
     ? (db
@@ -147,7 +146,7 @@ export function listBindingsForPrincipal(
             WHERE principal_kind = ? AND principal_id = ? AND resource_kind = ?`,
         )
         .all(principal.kind, principal.id, resourceKind) as Array<{
-        resource_kind: OwnedResourceKind;
+        resource_kind: string;
         resource_id: string;
         principal_kind: PrincipalRef["kind"];
         principal_id: string;
@@ -160,7 +159,7 @@ export function listBindingsForPrincipal(
             WHERE principal_kind = ? AND principal_id = ?`,
         )
         .all(principal.kind, principal.id) as Array<{
-        resource_kind: OwnedResourceKind;
+        resource_kind: string;
         resource_id: string;
         principal_kind: PrincipalRef["kind"];
         principal_id: string;
@@ -191,7 +190,7 @@ export function deleteBindingsForPrincipal(
 
 export function deleteBindingsForResource(
   db: Database,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
 ): void {
   db.prepare(
@@ -205,7 +204,7 @@ export function deleteBindingsForResource(
 export function readEffectiveAccess(
   db: Database,
   userId: string,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
 ): EffectiveAccessRow | null {
   const row = db
@@ -220,7 +219,7 @@ export function readEffectiveAccess(
     .get(userId, resourceKind, resourceId) as
     | {
         user_id: string;
-        resource_kind: OwnedResourceKind;
+        resource_kind: string;
         resource_id: string;
         can_read: number;
         can_write: number;
@@ -266,7 +265,7 @@ export function upsertEffectiveAccess(
   db: Database,
   row: {
     userId: string;
-    resourceKind: OwnedResourceKind;
+    resourceKind: string;
     resourceId: string;
     flags: AccessFlags;
     provenance: readonly ProvenanceEntry[];
@@ -305,7 +304,7 @@ export function upsertEffectiveAccess(
 export function deleteEffectiveAccess(
   db: Database,
   userId: string,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
 ): void {
   db.prepare(
@@ -317,7 +316,7 @@ export function deleteEffectiveAccess(
 export function listReadableResourceIds(
   db: Database,
   userId: string,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
 ): string[] {
   return (
     db
@@ -331,7 +330,7 @@ export function listReadableResourceIds(
 
 export function listUsersWithEffectiveAccess(
   db: Database,
-  resourceKind: OwnedResourceKind,
+  resourceKind: string,
   resourceId: string,
 ): string[] {
   return (
@@ -346,7 +345,7 @@ export function listUsersWithEffectiveAccess(
 
 export interface PossessionRow {
   userId: string;
-  resourceKind: "track" | "article";
+  resourceKind: string;
   resourceId: string;
   capability: string;
   sourceKind: string;
@@ -380,7 +379,7 @@ export function upsertPossession(db: Database, row: PossessionRow): void {
 export function readPossession(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article",
+  resourceKind: string,
   resourceId: string,
 ): PossessionRow | null {
   const row = db
@@ -393,7 +392,7 @@ export function readPossession(
     .get(userId, resourceKind, resourceId) as
     | {
         user_id: string;
-        resource_kind: "track" | "article";
+        resource_kind: string;
         resource_id: string;
         capability: string;
         source_kind: string;
@@ -416,7 +415,7 @@ export function readPossession(
 export function deletePossession(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article",
+  resourceKind: string,
   resourceId: string,
 ): void {
   db.prepare(
@@ -428,7 +427,7 @@ export function deletePossession(
 export function upsertFavorite(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article" | "playlist" | "booklist",
+  resourceKind: string,
   resourceId: string,
   favorited: boolean,
   updatedAtMs: number,
@@ -466,7 +465,7 @@ export function upsertFavorite(
 export function listFavoriteIds(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article" | "playlist" | "booklist",
+  resourceKind: string,
 ): string[] {
   return (
     db
@@ -482,7 +481,7 @@ export function listFavoriteIds(
 export function isFavorited(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article" | "playlist" | "booklist",
+  resourceKind: string,
   resourceId: string,
 ): boolean {
   const row = db
@@ -497,7 +496,7 @@ export function isFavorited(
 export function touchRecent(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article" | "playlist" | "booklist",
+  resourceKind: string,
   resourceId: string,
   now = Date.now(),
 ): void {
@@ -514,7 +513,7 @@ export function touchRecent(
 export function listRecentIds(
   db: Database,
   userId: string,
-  resourceKind: "track" | "article" | "playlist" | "booklist",
+  resourceKind: string,
   limit = 50,
 ): string[] {
   return (
@@ -539,20 +538,3 @@ export function principalExists(
   return !!db.prepare("SELECT id FROM groups WHERE id = ?").get(principal.id);
 }
 
-export function findQueueListId(db: Database, userId: string): string | null {
-  const row = db
-    .prepare("SELECT list_id FROM user_queues WHERE user_id = ?")
-    .get(userId) as { list_id: string } | undefined;
-  return row?.list_id ?? null;
-}
-
-export function setUserQueue(
-  db: Database,
-  userId: string,
-  listId: string,
-): void {
-  db.prepare(
-    `INSERT INTO user_queues (user_id, list_id) VALUES (?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET list_id = excluded.list_id`,
-  ).run(userId, listId);
-}

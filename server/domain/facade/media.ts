@@ -161,8 +161,8 @@ export class MediaActorFacade {
 
   library() {
     const user = this.requireUser();
-    const recentIds = this.access.listRecents(user.id, "track");
-    const favoriteIds = this.access.listFavorites(user.id, "track");
+    const recentIds = this.access.listRecents(user.id, "track", "ownerless");
+    const favoriteIds = this.access.listFavorites(user.id, "track", "ownerless");
     return {
       recents: this.presentTracks(user.id, recentIds),
       favorites: this.presentTracks(user.id, favoriteIds),
@@ -198,6 +198,7 @@ export class MediaActorFacade {
       trackId,
       favorited,
       updatedAt,
+      "ownerless",
       capability,
     );
   }

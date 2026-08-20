@@ -21,16 +21,14 @@ import type {
   MediaPlaylistSummary,
   SignedMediaTrack,
 } from "@/shared/media/types";
-import type { AccessFlags } from "@/shared/access";
+import { collectionSource, type AccessFlags, type CapabilitySource } from "@/shared/access";
 import { AuthorizationError } from "@/server/services/authorizationError";
 
 function signContents(
   access: AccessService,
   userId: string,
   contents: MediaListContents,
-  source:
-    | { type: "queue"; list_id: string }
-    | { type: "playlist"; list_id: string; revision: number },
+  source: CapabilitySource,
   flags: AccessFlags,
 ): MediaListSnapshot {
   const tracks: SignedMediaTrack[] = contents.tracks.map((track) => {
@@ -87,7 +85,7 @@ export class MediaPlaylistService {
       this.access,
       userId,
       contents,
-      { type: "queue", list_id: contents.list.id },
+      collectionSource("queue", contents.list.id),
       auth.flags,
     );
   }
@@ -100,11 +98,7 @@ export class MediaPlaylistService {
       this.access,
       userId,
       contents,
-      {
-        type: "playlist",
-        list_id: playlistId,
-        revision: contents.list.revision,
-      },
+      collectionSource("playlist", playlistId, contents.list.revision),
       auth.flags,
     );
   }

@@ -24,21 +24,6 @@ export const principalRefSchema = object({
   id: z.string().min(1),
 });
 
-export const ownedResourceKindSchema = z.enum([
-  "playlist",
-  "booklist",
-  "queue",
-]);
-
-export const ownerlessKindSchema = z.enum(["track", "article"]);
-
-export const favoriteKindSchema = z.enum([
-  "track",
-  "article",
-  "playlist",
-  "booklist",
-]);
-
 export const capabilityTokenSchema = z
   .string()
   .min(16)
@@ -59,6 +44,4 @@ export const ownedListAccessSchema = object({
 export type AccessGrantWire = z.output<typeof accessGrantSchema>;
 export type AccessFlagsWire = z.output<typeof accessFlagsSchema>;
 export type PrincipalRef = z.output<typeof principalRefSchema>;
-export type OwnedResourceKind = z.output<typeof ownedResourceKindSchema>;
-export type FavoriteKind = z.output<typeof favoriteKindSchema>;
 export type AccessBindingView = z.output<typeof accessBindingSchema>;
