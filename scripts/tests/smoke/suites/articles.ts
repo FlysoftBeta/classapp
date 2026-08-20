@@ -14,8 +14,8 @@ export async function smokeArticles(runtime: SmokeRuntime): Promise<void> {
   ]);
   assert.equal(created.list.title, "测试文单");
   assert.equal(created.list.access.own, true);
-  const listed = await runtime.client.expectOk("booklistListAction", []);
-  assert.ok(listed.booklists.some((entry) => entry.id === created.list.id));
+  const booklists = await runtime.client.expectOk("booklistListAction", []);
+  assert.ok(booklists.booklists.some((entry) => entry.id === created.list.id));
   const sidebar = await runtime.client.expectOk("fetchArticleSidebarAction", []);
   assert.ok(Array.isArray(sidebar.articles));
   assert.ok(Array.isArray(sidebar.users));

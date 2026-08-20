@@ -70,6 +70,9 @@ import { MediaActorFacade } from "@/server/domain/facade/media";
 import { MediaService } from "@/server/services/mediaService";
 import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
 import { BooklistService } from "@/server/services/booklistService";
+import { AccessService } from "@/server/services/accessService";
+import { CapabilityService } from "@/server/services/capabilityService";
+import { getCapabilitySecret } from "@/server/infra/db";
 import {
   createRoleService,
   type RoleService,

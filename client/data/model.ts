@@ -82,7 +82,7 @@ export interface ObjectiveArticle {
     | "created_at"
     | "content_length"
   >;
-  group_id: string;
+  group_id: string | null;
   created_at: string;
   size: number;
   touched_at: number;

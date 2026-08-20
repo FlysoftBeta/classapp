@@ -21,6 +21,7 @@ import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import { PublicError } from "@/server/services/incidentService";
 import type { AuditService } from "@/server/services/auditService";
 import type { AccessService } from "@/server/services/accessService";
+import type { UnitOfWork } from "@/server/runtime/unitOfWork";
 
 export class UserActorFacade {
   constructor(

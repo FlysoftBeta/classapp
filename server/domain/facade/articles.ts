@@ -28,7 +28,7 @@ export class ArticleActorFacade {
     private readonly groups: GroupService,
     private readonly audit: AuditService,
     private readonly access: AccessService,
-    private readonly booklists: BooklistService,
+    private readonly booklistService: BooklistService,
   ) {}
 
   private requireMember(userId: string, groupId: string): void {
@@ -128,7 +128,7 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("articles");
     if (input.groupId) {
       this.requireMember(user.id, input.groupId);
-      const snapshot = this.booklists.fetchForGroup(user.id, input.groupId);
+      const snapshot = this.booklistService.fetchForGroup(user.id, input.groupId);
       if (!snapshot) {
         return { articles: [], users: [], hasMore: false };
       }
@@ -168,7 +168,7 @@ export class ArticleActorFacade {
     return {
       recents,
       favorites,
-      booklists: this.booklists.list(user.id),
+      booklists: this.booklistService.list(user.id),
       users,
     };
   }
@@ -189,7 +189,7 @@ export class ArticleActorFacade {
     this.requireCanPublish(user, groupId);
     const group = this.groups.get(groupId);
     const title = group ? `${group.name}的文单` : "群组文单";
-    return this.booklists.ensureGroupBooklist(user.id, groupId, title).list.id;
+    return this.booklistService.ensureGroupBooklist(user.id, groupId, title).list.id;
   }
 
   private attachToBooklist(
@@ -197,7 +197,7 @@ export class ArticleActorFacade {
     booklistId: string,
     articleId: string,
   ): string {
-    const snapshot = this.booklists.addArticle(userId, booklistId, articleId);
+    const snapshot = this.booklistService.addArticle(userId, booklistId, articleId);
     const capability = this.access.signOwnerless("article", articleId, {
       type: "booklist",
       list_id: booklistId,
@@ -403,28 +403,28 @@ export class ArticleActorFacade {
 
   async booklists() {
     const user = await this.actor.requireFeature("articles");
-    return { booklists: this.booklists.list(user.id) };
+    return { booklists: this.booklistService.list(user.id) };
   }
 
   async fetchBooklist(booklistId: string) {
     const user = await this.actor.requireFeature("articles");
-    return this.booklists.fetch(user.id, booklistId);
+    return this.booklistService.fetch(user.id, booklistId);
   }
 
   async booklistForGroup(groupId: string) {
     const user = await this.actor.requireFeature("articles");
     this.requireMember(user.id, groupId);
-    return this.booklists.fetchForGroup(user.id, groupId);
+    return this.booklistService.fetchForGroup(user.id, groupId);
   }
 
   async createBooklist(title: string) {
     const user = await this.actor.requireFeature("articles");
-    return this.booklists.create(user.id, title.trim() || "新文单");
+    return this.booklistService.create(user.id, title.trim() || "新文单");
   }
 
   async deleteBooklist(booklistId: string) {
     const user = await this.actor.requireFeature("articles");
-    this.booklists.delete(user.id, booklistId);
+    this.booklistService.delete(user.id, booklistId);
   }
 
   async addToBooklist(
@@ -434,12 +434,12 @@ export class ArticleActorFacade {
   ) {
     const user = await this.actor.requireFeature("articles");
     this.access.authorizeOwnerless(user.id, "article", articleId, capability);
-    return this.booklists.addArticle(user.id, booklistId, articleId);
+    return this.booklistService.addArticle(user.id, booklistId, articleId);
   }
 
   async removeFromBooklist(booklistId: string, articleId: string) {
     const user = await this.actor.requireFeature("articles");
-    return this.booklists.removeArticle(user.id, booklistId, articleId);
+    return this.booklistService.removeArticle(user.id, booklistId, articleId);
   }
 
   async grantBooklistAccess(
@@ -448,17 +448,17 @@ export class ArticleActorFacade {
     grant: AccessGrant,
   ) {
     const user = await this.actor.requireFeature("articles");
-    return this.booklists.grant(user.id, booklistId, principal, grant);
+    return this.booklistService.grant(user.id, booklistId, principal, grant);
   }
 
   async revokeBooklistAccess(booklistId: string, principal: PrincipalRef) {
     const user = await this.actor.requireFeature("articles");
-    return this.booklists.revoke(user.id, booklistId, principal);
+    return this.booklistService.revoke(user.id, booklistId, principal);
   }
 
   async booklistBindings(booklistId: string) {
     const user = await this.actor.requireFeature("articles");
     this.access.authorizeOwned(user.id, "booklist", booklistId, "read");
-    return { bindings: this.booklists.bindings(booklistId) };
+    return { bindings: this.booklistService.bindings(booklistId) };
   }
 }

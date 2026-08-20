@@ -10,6 +10,7 @@ import IconButton from "@mui/material/IconButton";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
+import MusicNoteIcon from "@mui/icons-material/MusicNote";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import GraphicEqIcon from "@mui/icons-material/GraphicEq";
 import QueueMusicIcon from "@mui/icons-material/QueueMusic";

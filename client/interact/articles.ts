@@ -688,6 +688,21 @@ export async function deleteBooklist(booklistId: string) {
   return result.ok;
 }
 
+export async function addArticleToBooklist(
+  booklistId: string,
+  articleId: string,
+) {
+  const result = await booklistAddArticleAction({
+    booklistId,
+    articleId,
+    capability: articleCapability(articleId),
+  });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  rememberArticleCapabilities(result.data.articles);
+  return result.data;
+}
+
 export async function removeArticleFromBooklist(
   booklistId: string,
   articleId: string,

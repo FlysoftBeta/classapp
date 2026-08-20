@@ -14,7 +14,7 @@ import AddIcon from "@mui/icons-material/Add";
 import type { Article, Conversation } from "@/client/interact/presentation";
 import type { BooklistSnapshot, BooklistSummary } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
-import { flexGap, vh } from "@/client/lib/css";
+import { vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
 import { AccessibleListRow } from "@/client/components/library/AccessibleListRow";
 import { LibrarySection } from "@/client/components/library/LibrarySection";

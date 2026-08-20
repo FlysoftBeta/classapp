@@ -1,7 +1,6 @@
 import type { Database } from "better-sqlite3";
 import {
   EMPTY_ACCESS_FLAGS,
-  flagsOfGrantSet,
   flagsSatisfy,
   mergeIncomingGrant,
   unionFlagList,
