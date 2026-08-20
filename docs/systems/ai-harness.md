@@ -97,6 +97,30 @@ File content is untrusted user data, never instructions that override the agent
 system prompt. SVG forbids scripts, event handlers, external references,
 `foreignObject`, entities, and JavaScript URLs.
 
+## Assistant markdown rendering
+
+Assistant message bodies are markdown rendered in the browser by Streamdown.
+Math goes through `@streamdown/math` → `rehype-katex` → KaTeX.
+
+Product constraints:
+
+- Production Shell installs only `app.js`. KaTeX layout CSS and its woff2 faces
+  must live inside that bundle. A normal Vite CSS import would emit a sibling
+  stylesheet and `url(fonts/...)` files that Shell never fetches, so math would
+  be unstyled or show missing glyphs after activation.
+- `@streamdown/math` and `rehype-katex` declare KaTeX `^0.16`. That series emits
+  unprefixed layout classes (`base`, `strut`). KaTeX 0.18 renamed those to
+  `katex-*`. HTML from one copy against CSS from the other leaves fractions and
+  scripts unreadable. Nested KaTeX copies are pinned to the root `katex`
+  dependency with npm `overrides`.
+- `$...$` inline math is enabled because school answers use it. Currency `$`
+  amounts can therefore be parsed as math; that is an accepted limitation.
+
+Current mechanism: `client/components/ai/markdown.ts` owns the Streamdown plugin
+set. `AiView` injects Streamdown CSS plus the KaTeX stylesheet into `document.head`
+once per bundle load. `scripts/builds/katexCss.ts` rewrites that stylesheet to
+woff2 data URLs before Vite inlines it.
+
 ## Streaming and restart
 
 `AiExecutionRuntime` owns active AbortControllers for process lifetime. A

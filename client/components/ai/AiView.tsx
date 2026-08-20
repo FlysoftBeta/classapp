@@ -22,11 +22,9 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import ImageOutlinedIcon from "@mui/icons-material/ImageOutlined";
 import Chip from "@mui/material/Chip";
 import { Streamdown } from "streamdown";
-import { mermaid } from "@streamdown/mermaid";
-import { math } from "@streamdown/math";
-import { cjk } from "@streamdown/cjk";
 import streamdownStyles from "streamdown/styles.css?inline";
 import katexStyles from "katex/dist/katex.min.css?inline";
+import { STREAMDOWN_PLUGINS } from "@/client/components/ai/markdown";
 
 import type {
   AiConversationDetail,
@@ -42,9 +40,9 @@ import {
 } from "@/client/interact/ai";
 import { flexGap, vh } from "@/client/lib/css";
 
-// The release Shell fetches only app.js, so styles that Vite would normally
-// emit as a separate CSS asset must be injected here. Install once per bundle
-// load; KaTeX math is unreadable without its fonts and layout rules.
+// The release Shell fetches only app.js, so Streamdown/KaTeX rules and the
+// KaTeX woff2 faces (inlined as data URLs by the Vite plugin) are injected
+// here. Install once per bundle load.
 const STREAMDOWN_STYLE_ID = "classapp-ai-streamdown-styles";
 if (!document.getElementById(STREAMDOWN_STYLE_ID)) {
   const style = document.createElement("style");
@@ -53,7 +51,6 @@ if (!document.getElementById(STREAMDOWN_STYLE_ID)) {
   document.head.appendChild(style);
 }
 
-const STREAMDOWN_PLUGINS = { mermaid, math, cjk } as const;
 type PendingImage = {
   name: string;
   mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif";

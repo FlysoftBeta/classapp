@@ -90,6 +90,9 @@ acknowledgement condition are satisfied.
   as streams, module workers, or PDF rendering reliably.
 - Large monolithic application bundles are acceptable because stable Shell
   activation and offline availability dominate initial download latency.
+- Application stylesheets that Vite would emit as extra CSS/font assets must be
+  inlined into `app.js`. The production Shell fetches only that bundle; see
+  [AI markdown rendering](./ai-harness.md#assistant-markdown-rendering).
 - Avoid PDF.js. The supported architecture consumes server-rendered document
   bundles through the offline binary pipeline.
 - Store binary payloads in the representation required by the local model;
