@@ -18,6 +18,11 @@ const {
   mediaAddToPlaylistAction,
   mediaRemoveFromPlaylistAction,
   mediaUpdatePlaylistRetentionAction,
+  mediaGrantPlaylistAccessAction,
+  mediaRevokePlaylistAccessAction,
+  mediaListPlaylistBindingsAction,
+  mediaLibraryAction,
+  mediaSetTrackFavoriteAction,
   mediaFetchConfigAction,
   mediaAdminUpdateConfigAction,
 } = client.actions;
@@ -44,8 +49,8 @@ export async function mediaFetchQueue() {
   return requireData(await mediaFetchQueueAction());
 }
 
-export async function mediaAddToQueue(trackId: string) {
-  return requireData(await mediaAddToQueueAction({ trackId }));
+export async function mediaAddToQueue(trackId: string, capability?: string) {
+  return requireData(await mediaAddToQueueAction({ trackId, capability }));
 }
 
 export async function mediaRemoveFromQueue(trackId: string) {
@@ -56,8 +61,8 @@ export async function mediaClearQueue() {
   return requireData(await mediaClearQueueAction());
 }
 
-export async function mediaPlay(trackId: string) {
-  return requireData(await mediaPlayAction({ trackId }));
+export async function mediaPlay(trackId: string, capability?: string) {
+  return requireData(await mediaPlayAction({ trackId, capability }));
 }
 
 export async function mediaListPlaylists() {
@@ -76,8 +81,14 @@ export async function mediaDeletePlaylist(playlistId: string) {
   return requireData(await mediaDeletePlaylistAction(playlistId));
 }
 
-export async function mediaAddToPlaylist(playlistId: string, trackId: string) {
-  return requireData(await mediaAddToPlaylistAction({ playlistId, trackId }));
+export async function mediaAddToPlaylist(
+  playlistId: string,
+  trackId: string,
+  capability?: string,
+) {
+  return requireData(
+    await mediaAddToPlaylistAction({ playlistId, trackId, capability }),
+  );
 }
 
 export async function mediaRemoveFromPlaylist(
@@ -94,6 +105,34 @@ export async function mediaUpdatePlaylistRetention(
   return requireData(
     await mediaUpdatePlaylistRetentionAction({ playlistId, days }),
   );
+}
+
+export async function mediaGrantPlaylistAccess(
+  input: ActionArgs<"mediaGrantPlaylistAccessAction">[0],
+) {
+  return requireData(await mediaGrantPlaylistAccessAction(input));
+}
+
+export async function mediaRevokePlaylistAccess(
+  input: ActionArgs<"mediaRevokePlaylistAccessAction">[0],
+) {
+  return requireData(await mediaRevokePlaylistAccessAction(input));
+}
+
+export async function mediaListPlaylistBindings(playlistId: string) {
+  return requireData(
+    await mediaListPlaylistBindingsAction({ playlistId }),
+  );
+}
+
+export async function mediaLibrary() {
+  return requireData(await mediaLibraryAction());
+}
+
+export async function mediaSetTrackFavorite(
+  input: ActionArgs<"mediaSetTrackFavoriteAction">[0],
+) {
+  return requireData(await mediaSetTrackFavoriteAction(input));
 }
 
 export async function mediaFetchConfig() {

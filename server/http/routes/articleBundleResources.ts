@@ -31,6 +31,8 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const capability =
+      new URL(req.url).searchParams.get("capability") ?? undefined;
     const parsed = bundleResourceRequestSchema.safeParse(await req.json());
     if (!parsed.success) throw new PublicError("资源请求无效");
     if (
@@ -41,7 +43,7 @@ export async function POST(
     const archive = await currentScope()
       .facades()
       .articles()
-      .storedBundle(id);
+      .storedBundle(id, capability);
     const resources = parsed.data.content_ids.map((contentId) => {
       const resource = archive.resources.get(contentId);
       if (!resource) throw new PublicError("文档资源不存在");

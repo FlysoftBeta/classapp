@@ -1,0 +1,355 @@
+import type { Database } from "better-sqlite3";
+import { z } from "zod";
+import {
+  accessGrantSchema,
+  flagsOfGrantSet,
+  normalizeGrantSet,
+  type AccessFlags,
+  type AccessGrant,
+  type PrincipalRef,
+} from "@/shared/access";
+
+const grantsJsonSchema = z.array(accessGrantSchema).min(1);
+
+export interface AccessBindingRow {
+  resourceKind: string;
+  resourceId: string;
+  principal: PrincipalRef;
+  grants: AccessGrant[];
+  flags: AccessFlags;
+}
+
+export interface EffectiveAccessRow {
+  userId: string;
+  resourceKind: string;
+  resourceId: string;
+  flags: AccessFlags;
+  provenance: readonly AccessBindingRow[];
+}
+
+export interface ProvenanceEntry {
+  principal: PrincipalRef;
+  grants: AccessGrant[];
+}
+
+function parseGrants(raw: string): AccessGrant[] {
+  const parsed = grantsJsonSchema.safeParse(JSON.parse(raw));
+  if (!parsed.success) {
+    throw new Error("access_bindings.grants_json is not a valid grant set");
+  }
+  return normalizeGrantSet(parsed.data);
+}
+
+function flagsFromIntegers(row: {
+  can_read: number;
+  can_write: number;
+  can_own: number;
+  can_share_read: number;
+  can_share_write: number;
+  can_share_own: number;
+}): AccessFlags {
+  return {
+    read: row.can_read === 1,
+    write: row.can_write === 1,
+    own: row.can_own === 1,
+    shareRead: row.can_share_read === 1,
+    shareWrite: row.can_share_write === 1,
+    shareOwn: row.can_share_own === 1,
+  };
+}
+
+export function upsertAccessBinding(
+  db: Database,
+  resourceKind: string,
+  resourceId: string,
+  principal: PrincipalRef,
+  grants: AccessGrant[],
+): AccessBindingRow {
+  const normalized = normalizeGrantSet(grants);
+  db.prepare(
+    `INSERT INTO access_bindings (
+       resource_kind, resource_id, principal_kind, principal_id, grants_json
+     ) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(resource_kind, resource_id, principal_kind, principal_id)
+     DO UPDATE SET grants_json = excluded.grants_json, updated_at = datetime('now')`,
+  ).run(
+    resourceKind,
+    resourceId,
+    principal.kind,
+    principal.id,
+    JSON.stringify(normalized),
+  );
+  return {
+    resourceKind,
+    resourceId,
+    principal,
+    grants: normalized,
+    flags: flagsOfGrantSet(normalized),
+  };
+}
+
+export function deleteAccessBinding(
+  db: Database,
+  resourceKind: string,
+  resourceId: string,
+  principal: PrincipalRef,
+): boolean {
+  const result = db
+    .prepare(
+      `DELETE FROM access_bindings
+        WHERE resource_kind = ? AND resource_id = ? AND principal_kind = ? AND principal_id = ?`,
+    )
+    .run(resourceKind, resourceId, principal.kind, principal.id);
+  return result.changes > 0;
+}
+
+export function listBindingsForResource(
+  db: Database,
+  resourceKind: string,
+  resourceId: string,
+): AccessBindingRow[] {
+  const rows = db
+    .prepare(
+      `SELECT resource_kind, resource_id, principal_kind, principal_id, grants_json
+         FROM access_bindings
+        WHERE resource_kind = ? AND resource_id = ?`,
+    )
+    .all(resourceKind, resourceId) as Array<{
+    resource_kind: string;
+    resource_id: string;
+    principal_kind: PrincipalRef["kind"];
+    principal_id: string;
+    grants_json: string;
+  }>;
+  return rows.map((row) => {
+    const grants = parseGrants(row.grants_json);
+    return {
+      resourceKind: row.resource_kind,
+      resourceId: row.resource_id,
+      principal: { kind: row.principal_kind, id: row.principal_id },
+      grants,
+      flags: flagsOfGrantSet(grants),
+    };
+  });
+}
+
+export function listBindingsForPrincipal(
+  db: Database,
+  principal: PrincipalRef,
+  resourceKind?: string,
+): AccessBindingRow[] {
+  const rows = resourceKind
+    ? (db
+        .prepare(
+          `SELECT resource_kind, resource_id, principal_kind, principal_id, grants_json
+             FROM access_bindings
+            WHERE principal_kind = ? AND principal_id = ? AND resource_kind = ?`,
+        )
+        .all(principal.kind, principal.id, resourceKind) as Array<{
+        resource_kind: string;
+        resource_id: string;
+        principal_kind: PrincipalRef["kind"];
+        principal_id: string;
+        grants_json: string;
+      }>)
+    : (db
+        .prepare(
+          `SELECT resource_kind, resource_id, principal_kind, principal_id, grants_json
+             FROM access_bindings
+            WHERE principal_kind = ? AND principal_id = ?`,
+        )
+        .all(principal.kind, principal.id) as Array<{
+        resource_kind: string;
+        resource_id: string;
+        principal_kind: PrincipalRef["kind"];
+        principal_id: string;
+        grants_json: string;
+      }>);
+  return rows.map((row) => {
+    const grants = parseGrants(row.grants_json);
+    return {
+      resourceKind: row.resource_kind,
+      resourceId: row.resource_id,
+      principal: { kind: row.principal_kind, id: row.principal_id },
+      grants,
+      flags: flagsOfGrantSet(grants),
+    };
+  });
+}
+
+export function deleteBindingsForPrincipal(
+  db: Database,
+  principal: PrincipalRef,
+): number {
+  return db
+    .prepare(
+      `DELETE FROM access_bindings WHERE principal_kind = ? AND principal_id = ?`,
+    )
+    .run(principal.kind, principal.id).changes;
+}
+
+export function deleteBindingsForResource(
+  db: Database,
+  resourceKind: string,
+  resourceId: string,
+): void {
+  db.prepare(
+    `DELETE FROM access_bindings WHERE resource_kind = ? AND resource_id = ?`,
+  ).run(resourceKind, resourceId);
+  db.prepare(
+    `DELETE FROM access_effective WHERE resource_kind = ? AND resource_id = ?`,
+  ).run(resourceKind, resourceId);
+}
+
+export function readEffectiveAccess(
+  db: Database,
+  userId: string,
+  resourceKind: string,
+  resourceId: string,
+): EffectiveAccessRow | null {
+  const row = db
+    .prepare(
+      `SELECT user_id, resource_kind, resource_id,
+              can_read, can_write, can_own,
+              can_share_read, can_share_write, can_share_own,
+              provenance_json
+         FROM access_effective
+        WHERE user_id = ? AND resource_kind = ? AND resource_id = ?`,
+    )
+    .get(userId, resourceKind, resourceId) as
+    | {
+        user_id: string;
+        resource_kind: string;
+        resource_id: string;
+        can_read: number;
+        can_write: number;
+        can_own: number;
+        can_share_read: number;
+        can_share_write: number;
+        can_share_own: number;
+        provenance_json: string;
+      }
+    | undefined;
+  if (!row) return null;
+  const provenance = z
+    .array(
+      z
+        .object({
+          principal: z
+            .object({
+              kind: z.enum(["user", "group"]),
+              id: z.string(),
+            })
+            .strict(),
+          grants: z.array(accessGrantSchema).min(1),
+        })
+        .strict(),
+    )
+    .parse(JSON.parse(row.provenance_json));
+  return {
+    userId: row.user_id,
+    resourceKind: row.resource_kind,
+    resourceId: row.resource_id,
+    flags: flagsFromIntegers(row),
+    provenance: provenance.map((entry) => ({
+      resourceKind,
+      resourceId,
+      principal: entry.principal,
+      grants: entry.grants,
+      flags: flagsOfGrantSet(entry.grants),
+    })),
+  };
+}
+
+export function upsertEffectiveAccess(
+  db: Database,
+  row: {
+    userId: string;
+    resourceKind: string;
+    resourceId: string;
+    flags: AccessFlags;
+    provenance: readonly ProvenanceEntry[];
+  },
+): void {
+  db.prepare(
+    `INSERT INTO access_effective (
+       user_id, resource_kind, resource_id,
+       can_read, can_write, can_own,
+       can_share_read, can_share_write, can_share_own,
+       provenance_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, resource_kind, resource_id) DO UPDATE SET
+       can_read = excluded.can_read,
+       can_write = excluded.can_write,
+       can_own = excluded.can_own,
+       can_share_read = excluded.can_share_read,
+       can_share_write = excluded.can_share_write,
+       can_share_own = excluded.can_share_own,
+       provenance_json = excluded.provenance_json,
+       updated_at = datetime('now')`,
+  ).run(
+    row.userId,
+    row.resourceKind,
+    row.resourceId,
+    row.flags.read ? 1 : 0,
+    row.flags.write ? 1 : 0,
+    row.flags.own ? 1 : 0,
+    row.flags.shareRead ? 1 : 0,
+    row.flags.shareWrite ? 1 : 0,
+    row.flags.shareOwn ? 1 : 0,
+    JSON.stringify(row.provenance),
+  );
+}
+
+export function deleteEffectiveAccess(
+  db: Database,
+  userId: string,
+  resourceKind: string,
+  resourceId: string,
+): void {
+  db.prepare(
+    `DELETE FROM access_effective
+      WHERE user_id = ? AND resource_kind = ? AND resource_id = ?`,
+  ).run(userId, resourceKind, resourceId);
+}
+
+export function listReadableResourceIds(
+  db: Database,
+  userId: string,
+  resourceKind: string,
+): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT resource_id FROM access_effective
+          WHERE user_id = ? AND resource_kind = ? AND can_read = 1`,
+      )
+      .all(userId, resourceKind) as Array<{ resource_id: string }>
+  ).map((row) => row.resource_id);
+}
+
+export function listUsersWithEffectiveAccess(
+  db: Database,
+  resourceKind: string,
+  resourceId: string,
+): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT user_id FROM access_effective
+          WHERE resource_kind = ? AND resource_id = ? AND can_read = 1`,
+      )
+      .all(resourceKind, resourceId) as Array<{ user_id: string }>
+  ).map((row) => row.user_id);
+}
+
+export function principalExists(
+  db: Database,
+  principal: PrincipalRef,
+): boolean {
+  if (principal.kind === "user") {
+    return !!db.prepare("SELECT id FROM users WHERE id = ?").get(principal.id);
+  }
+  return !!db.prepare("SELECT id FROM groups WHERE id = ?").get(principal.id);
+}
+

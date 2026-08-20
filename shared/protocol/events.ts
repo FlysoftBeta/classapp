@@ -51,13 +51,13 @@ export const eventContracts = {
   "article.created": z
     .object({
       article_id: z.string(),
-      group_id: z.string(),
+      group_id: z.string().nullable(),
     })
     .strict(),
   "article.deleted": z
     .object({
       article_id: z.string(),
-      group_id: z.string(),
+      group_id: z.string().nullable(),
     })
     .strict(),
   "article.bookmark_changed": z

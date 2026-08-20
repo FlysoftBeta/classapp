@@ -20,6 +20,7 @@ import type { AiService } from "@/server/services/ai/aiService";
 import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import { PublicError } from "@/server/services/incidentService";
 import type { AuditService } from "@/server/services/auditService";
+import type { AccessService } from "@/server/services/accessService";
 import type { UnitOfWork } from "@/server/runtime/unitOfWork";
 
 export class UserActorFacade {
@@ -37,6 +38,7 @@ export class UserActorFacade {
     private readonly ai: AiService,
     private readonly aiBilling: AiBillingService,
     private readonly audit: AuditService,
+    private readonly access: AccessService,
     private readonly unitOfWork: UnitOfWork,
   ) {}
 
@@ -150,7 +152,13 @@ export class UserActorFacade {
     this.roles.assertRemovable(userId);
     if (userId === admin.id) throw new PublicError("不能删除自己");
     if (mode === "deactivate") {
-      this.groups.removeUserFromAllGroups(userId);
+      for (const change of this.groups.removeUserFromAllGroups(userId)) {
+        this.access.onGroupMembershipChanged(
+          userId,
+          change.groupId,
+          change.deleted,
+        );
+      }
       this.users.deactivate(userId);
       this.audit.record({
         actorId: admin.id,
@@ -162,7 +170,13 @@ export class UserActorFacade {
     }
 
     // Each mechanism removes its own state; the identity row is deleted last.
-    this.groups.purgeUser(userId);
+    for (const change of this.groups.purgeUser(userId)) {
+      this.access.onGroupMembershipChanged(
+        userId,
+        change.groupId,
+        change.deleted,
+      );
+    }
     this.conversations.purgeUser(userId);
     this.posts.purgeUser(userId);
     await this.articles.purgeUser(userId);
@@ -171,6 +185,7 @@ export class UserActorFacade {
     this.userConfig.purgeUser(userId);
     await this.ai.purgeUser(userId);
     this.aiBilling.purgeUser(userId);
+    this.access.onUserPurged(userId);
     this.users.purgeIdentity(userId);
     this.audit.record({
       actorId: admin.id,

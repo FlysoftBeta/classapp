@@ -20,14 +20,21 @@ import {
   insertBundleArticle,
   insertTextArticle,
   listArticleHistoryRows,
+  listArticlesByIds,
   listArticlesForUser,
   listBookmarkedArticleRows,
   rowToArticle,
-  setArticleBookmarkValue,
   touchArticleProgress,
   upsertArticleProgressOffset,
   purgeArticlesForUser,
 } from "@/server/data/articles";
+import {
+  listFavoriteIds,
+  listRecentIds,
+  touchRecent,
+  upsertFavorite,
+} from "@/server/data/preferences";
+import { groupIdsForArticle } from "@/server/data/booklists";
 import { userMetadataForIds } from "@/server/data/users";
 import {
   PublicError,
@@ -129,6 +136,53 @@ export class ArticleService {
     };
   }
 
+  byIds(
+    userId: string,
+    ids: string[],
+  ): { articles: ArticleWithMeta[]; users: UserMetadata[] } {
+    const articles = listArticlesByIds(this.db, userId, ids);
+    return {
+      articles,
+      users: userMetadataForIds(
+        this.db,
+        articles.map((article) => article.user_id),
+      ),
+    };
+  }
+
+  notifyPreference(userId: string, articleId: string): void {
+    this.publishSidebar(userId, articleId);
+    this.publishList(userId, articleId);
+  }
+
+  recordRecent(userId: string, articleId: string): void {
+    touchRecent(this.db, userId, "article", articleId);
+  }
+
+  listRecents(userId: string): string[] {
+    return listRecentIds(this.db, userId, "article");
+  }
+
+  listFavorites(userId: string): string[] {
+    return listFavoriteIds(this.db, userId, "article");
+  }
+
+  setFavorite(
+    userId: string,
+    articleId: string,
+    favorited: boolean,
+    updatedAt: number,
+  ): { value: boolean; updatedAt: number } {
+    return upsertFavorite(
+      this.db,
+      userId,
+      "article",
+      articleId,
+      favorited,
+      updatedAt,
+    );
+  }
+
   sidebar(userId: string): ArticleSidebarPayload {
     const currentArticleId = getUserConfig(
       this.db,
@@ -167,7 +221,6 @@ export class ArticleService {
       userId,
       requireTrimmed(input.title, "标题不能为空"),
       requireTrimmed(input.content, "内容不能为空"),
-      input.group_id,
     );
     this.notifyCreated(userId, article.id);
     return {
@@ -184,7 +237,7 @@ export class ArticleService {
    */
   async storeBundle(
     file: File,
-    owner: { userId: string; groupId: string },
+    owner: { userId: string; booklistId: string },
   ): Promise<StoredArticleBundle & { upload_id: string }> {
     if (!file.size) throw new PublicError("文件不能为空");
     if (file.size > MAX_ARTICLE_SOURCE_BYTES) {
@@ -200,7 +253,7 @@ export class ArticleService {
     insertArticleUpload(this.db, {
       id: uploadId,
       userId: owner.userId,
-      groupId: owner.groupId,
+      booklistId: owner.booklistId,
       sourceBlobId: sourceSlot.id,
       archiveBlobId: archiveSlot.id,
     });
@@ -272,7 +325,6 @@ export class ArticleService {
         archiveSize: input.archive_size,
         originalFilename: input.original_filename,
         itemCount: input.item_count,
-        groupId: input.group_id,
       });
       if (input.upload_id) {
         const claimed = claimArticleUpload(
@@ -389,24 +441,6 @@ export class ArticleService {
     );
   }
 
-  setBookmark(
-    userId: string,
-    articleId: string,
-    bookmarked: boolean,
-    updatedAt: number,
-  ) {
-    const value = setArticleBookmarkValue(
-      this.db,
-      userId,
-      articleId,
-      bookmarked,
-      updatedAt,
-    );
-    this.publishSidebar(userId, articleId);
-    this.publishList(userId, articleId);
-    return value;
-  }
-
   saveProgress(
     userId: string,
     articleId: string,
@@ -458,6 +492,7 @@ export class ArticleService {
 
   async delete(requestingUserId: string, articleId: string): Promise<void> {
     const record = findArticleRecord(this.db, articleId);
+    const groupIds = groupIdsForArticle(this.db, articleId);
     deleteArticleById(this.db, articleId);
     if (record?.content_kind === "bundle")
       await this.removeBundle(record.source_path, record.archive_path, articleId);
@@ -487,8 +522,8 @@ export class ArticleService {
         data: { removed: { article_id: articleId } },
       });
     }
-    if (record?.group_id) {
-      publishGroupArticle(record.group_id, {
+    for (const groupId of groupIds) {
+      publishGroupArticle(groupId, {
         kind: "article.list_updated",
         data: { refresh: true },
       });
@@ -509,10 +544,9 @@ export class ArticleService {
     userId: string,
     title: string,
     content: string,
-    groupId: string,
   ) {
     const id = crypto.randomUUID();
-    insertTextArticle(this.db, { id, userId, groupId, title, content });
+    insertTextArticle(this.db, { id, userId, title, content });
     return this.requireOwned(id, userId);
   }
 
@@ -608,10 +642,12 @@ export class ArticleService {
     this.publishList(userId, articleId, true);
     const article = findArticleRecord(this.db, articleId);
     if (!article) throw new PublicError("文章不存在");
-    publishGroupArticle(article.group_id, {
-      kind: "article.list_updated",
-      data: { refresh: true },
-    });
+    for (const groupId of groupIdsForArticle(this.db, articleId)) {
+      publishGroupArticle(groupId, {
+        kind: "article.list_updated",
+        data: { refresh: true },
+      });
+    }
   }
   private publishReading(userId: string, articleId: string) {
     this.publishSidebar(userId, articleId);

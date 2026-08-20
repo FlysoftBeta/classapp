@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { capabilityTokenSchema } from "@/shared/access";
 
 export const BUNDLE_STREAM_MAGIC = "CABSTRM1";
 export const BUNDLE_STREAM_VERSION = 1;
@@ -58,6 +59,7 @@ export const bundleOpenInputSchema = z
     cursor: z.number().int().nonnegative().nullable(),
     before: z.number().int().min(0).max(32),
     after: z.number().int().min(1).max(64),
+    capability: capabilityTokenSchema.optional(),
   })
   .strict();
 
@@ -67,6 +69,7 @@ export const bundleFetchInputSchema = z
     cursor: z.number().int().nonnegative(),
     direction: z.enum(["before", "after"]),
     limit: z.number().int().min(1).max(64),
+    capability: capabilityTokenSchema.optional(),
   })
   .strict();
 

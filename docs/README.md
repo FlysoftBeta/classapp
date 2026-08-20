@@ -69,6 +69,7 @@ For any product change, start with:
 - [Community, conversations, posts, and articles](./systems/community-and-content.md)
 - [Document rendering and bundle reading](./systems/document-rendering.md)
 - [Music and media runtime](./systems/music.md)
+- [Resource authorization](./systems/resource-authorization.md)
 - [Server object storage and quota](./systems/server-storage.md)
 - [AI harness and workspace](./systems/ai-harness.md)
 - [AI billing](./systems/ai-billing.md)

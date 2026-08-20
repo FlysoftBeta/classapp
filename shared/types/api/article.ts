@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { TEXT_ARTICLE_SEGMENT_SIZE } from "@/shared/articles/segments";
+import { capabilityTokenSchema } from "@/shared/access";
 import { userMetadataSchema } from "./user";
 
 const articleBaseShape = {
   id: z.string(),
   user_id: z.string().nullable(),
-  /** Group conversation that owns this article. */
-  group_id: z.string(),
+  group_id: z.string().nullable(),
   title: z.string(),
   provider: z.discriminatedUnion("type", [
     z.object({
@@ -44,6 +44,8 @@ export const articleWithMetaSchema = z
     last_read_at: z.string().nullable().optional(),
     /** Opaque server ordering value for cursor pagination. */
     list_sort_at: z.string().optional(),
+    /** Present when this article was returned from a signed discovery snapshot. */
+    capability: capabilityTokenSchema.optional(),
   })
   .strict();
 export type ArticleWithMeta = z.infer<typeof articleWithMetaSchema>;

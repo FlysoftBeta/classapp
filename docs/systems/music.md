@@ -68,7 +68,7 @@ hidden locator and otherwise performs one bounded `--dump-single-json` parse.
 Rate limiting, staging, hashing, and quota belong to `MediaRuntime`, so the
 provider itself has no download, storage, or throttle API.
 
-## Data model (server schema v26)
+## Data model (server schema v27)
 
 `media_tracks` keeps identity and basic metadata. `media_assets` has one row per
 `(track_id, kind)` with states `queued | downloading | ready | failed`; the
@@ -81,10 +81,15 @@ advanced_metadata = cover asset ready
 dead              = no ready assets; legal when ref_count = 0
 ```
 
-`media_lists` is one table with `kind = 'playlist' | 'queue'`. A partial unique
-index allows one queue per user. `media_list_items` positions are contiguous
-integers; inserts and deletes renumber in the same Service transaction.
-`media_list_items` triggers increment/decrement `media_tracks.ref_count`.
+`media_lists` is playlist or queue only. Booklists are an articles-domain
+table. Lists have no owner column; `access_bindings` stores principal grants
+and `access_effective` materializes per-user flags. Queues are bound through
+`user_queues` plus a user owner binding; the media facade does not offer
+sharing a queue. `media_list_items`
+positions are contiguous integers; inserts and deletes renumber in the same
+Service transaction. `media_list_items` triggers increment/decrement
+`media_tracks.ref_count`. Track snapshots are signed capabilities; see
+[resource authorization](./resource-authorization.md).
 
 ## Streaming protocol
 

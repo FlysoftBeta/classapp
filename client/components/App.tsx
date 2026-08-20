@@ -18,6 +18,7 @@ import Settings from "./settings/Settings";
 import AdminPanel from "./admin/AdminPanel";
 import ArticleList from "./articles/ArticleList";
 import ArticleReader from "./articles/ArticleReader";
+import { BooklistPage } from "./articles/BooklistPage";
 import Learning from "./learning/Learning";
 import WordLearningPage from "./learning/WordLearningPage";
 import WrongWordsPage from "./learning/WrongWordsPage";
@@ -154,7 +155,9 @@ function AppShell({
   const mediaPlayer = useMediaPlayer();
   const articleConversation = useMemo(() => {
     const key =
-      route.view === "articles" || route.view === "reader"
+      route.view === "articles" ||
+      route.view === "reader" ||
+      route.view === "booklist"
         ? route.conversation
         : undefined;
     if (!key) return undefined;
@@ -232,6 +235,21 @@ function AppShell({
     [mediaEnabled, isMobile, navigate],
   );
 
+  const handleOpenBooklist = useCallback(
+    (booklistId: string) => {
+      if (!articlesEnabled) return;
+      const conversation =
+        route.view === "articles" ||
+        route.view === "booklist" ||
+        route.view === "reader"
+          ? route.conversation
+          : undefined;
+      navigate({ view: "booklist", booklistId, conversation });
+      if (isMobile) setMobileShowContent(true);
+    },
+    [articlesEnabled, isMobile, navigate, route],
+  );
+
   const handleNewAi = useCallback(() => {
     if (!aiEnabled) return;
     navigate({ view: "ai", conversationId: null });
@@ -242,13 +260,15 @@ function AppShell({
     (articleId: string) => {
       if (!articlesEnabled) return;
       const from =
-        route.view === "articles"
+        route.view === "articles" || route.view === "booklist"
           ? "articles"
           : route.view === "reader"
             ? route.from
             : "chat";
       const conversation =
-        route.view === "articles" || route.view === "reader"
+        route.view === "articles" ||
+        route.view === "reader" ||
+        route.view === "booklist"
           ? route.conversation
           : undefined;
       navigate({ view: "reader", articleId, from, conversation });
@@ -449,7 +469,9 @@ function AppShell({
           initialMode={
             route.view === "ai"
               ? "ai"
-              : route.view === "articles" || route.view === "reader"
+              : route.view === "articles" ||
+                  route.view === "reader" ||
+                  route.view === "booklist"
                 ? "reading"
                 : mediaRouteOpen
                   ? "media"
@@ -583,6 +605,7 @@ function AppShell({
             sidebarArticles={articleSidebar.articles}
             currentArticleId={articleSidebar.current_article_id}
             onOpenArticle={handleOpenArticle}
+            onOpenBooklist={handleOpenBooklist}
             refreshKey={articleListRevision}
             onBack={isMobile ? handleMobileBack : undefined}
             token={token}
@@ -590,10 +613,20 @@ function AppShell({
             conversation={articleConversation}
           />
         )}
+        {route.view === "booklist" && articlesEnabled && (
+          <BooklistPage
+            booklistId={route.booklistId}
+            onOpenArticle={handleOpenArticle}
+            onBack={() =>
+              navigate({ view: "articles", conversation: route.conversation })
+            }
+          />
+        )}
         {route.view === "media" && online && mediaEnabled && (
           <MediaView
             playerApi={mediaPlayer}
             onBack={isMobile ? handleMobileBack : undefined}
+            onOpenPlaylist={handleOpenPlaylist}
           />
         )}
         {route.view === "media-playlist" && online && mediaEnabled && (

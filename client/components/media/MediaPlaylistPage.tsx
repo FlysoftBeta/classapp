@@ -8,15 +8,21 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import DeleteIcon from "@mui/icons-material/Delete";
 import MusicNoteIcon from "@mui/icons-material/MusicNote";
 import ScheduleIcon from "@mui/icons-material/Schedule";
+import ShareIcon from "@mui/icons-material/Share";
 import type { MediaPlayerApi } from "@/client/hooks/useMediaPlayer";
 import {
   addTrackToQueue,
+  grantPlaylistAccess,
+  listPlaylistBindings,
   openMediaPlaylist,
   removeTrackFromPlaylist,
+  revokePlaylistAccess,
 } from "@/client/interact/media";
 import { useApplicationStore } from "@/client/interact/appStore";
 import { useMediaStore } from "@/client/interact/mediaStore";
 import { flexGap } from "@/client/lib/css";
+import { ShareAccessDialog } from "@/client/components/library/ShareAccessDialog";
+import type { AccessBindingView } from "@/shared/access";
 import { playlistCoverUrl } from "./coverUrl";
 import {
   DeletePlaylistDialog,
@@ -38,8 +44,14 @@ export function MediaPlaylistPage({
   const [loadedPlaylistId, setLoadedPlaylistId] = useState<string | null>(null);
   const [retentionOpen, setRetentionOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [bindings, setBindings] = useState<AccessBindingView[]>([]);
   const playlist =
     currentPlaylist?.list.id === playlistId ? currentPlaylist : null;
+  const access = playlist?.list.access;
+  const canWrite = access?.write === true;
+  const canOwn = access?.own === true;
+  const canShare = access?.shareRead === true;
   const coverUrl = playlistCoverUrl(
     playlist?.list.cover_track_id ?? null,
     token,
@@ -127,22 +139,41 @@ export function MediaPlaylistPage({
         </Box>
         {playlist && (
           <>
-            <IconButton
-              size="small"
-              title="设置缓存天数"
-              aria-label="设置缓存天数"
-              onClick={() => setRetentionOpen(true)}
-            >
-              <ScheduleIcon fontSize="small" />
-            </IconButton>
-            <IconButton
-              size="small"
-              title="删除歌单"
-              aria-label="删除歌单"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <DeleteIcon fontSize="small" />
-            </IconButton>
+            {canShare && (
+              <IconButton
+                size="small"
+                title="分享"
+                aria-label="分享播放列表"
+                onClick={() => {
+                  void listPlaylistBindings(playlistId).then((result) => {
+                    setBindings(result.bindings);
+                    setShareOpen(true);
+                  });
+                }}
+              >
+                <ShareIcon fontSize="small" />
+              </IconButton>
+            )}
+            {canWrite && (
+              <IconButton
+                size="small"
+                title="设置缓存天数"
+                aria-label="设置缓存天数"
+                onClick={() => setRetentionOpen(true)}
+              >
+                <ScheduleIcon fontSize="small" />
+              </IconButton>
+            )}
+            {canOwn && (
+              <IconButton
+                size="small"
+                title="删除歌单"
+                aria-label="删除歌单"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            )}
           </>
         )}
       </Box>
@@ -197,8 +228,10 @@ export function MediaPlaylistPage({
                   playerApi={playerApi}
                   playlistId={playlistId}
                   onQueueAdd={(id) => void addTrackToQueue(id)}
-                  onRemove={(id) =>
-                    void removeTrackFromPlaylist(playlistId, id)
+                  onRemove={
+                    canWrite
+                      ? (id) => void removeTrackFromPlaylist(playlistId, id)
+                      : undefined
                   }
                   removeTitle="从歌单移除"
                 />
@@ -219,6 +252,24 @@ export function MediaPlaylistPage({
           playlist={playlist.list}
           onClose={() => setDeleteOpen(false)}
           onDeleted={onBack}
+        />
+      )}
+      {shareOpen && playlist && (
+        <ShareAccessDialog
+          title="分享播放列表"
+          flags={playlist.list.access}
+          bindings={bindings}
+          onGrant={async (principal, grant) => {
+            await grantPlaylistAccess(playlistId, principal, grant);
+            const result = await listPlaylistBindings(playlistId);
+            setBindings(result.bindings);
+          }}
+          onRevoke={async (principal) => {
+            await revokePlaylistAccess(playlistId, principal);
+            const result = await listPlaylistBindings(playlistId);
+            setBindings(result.bindings);
+          }}
+          onClose={() => setShareOpen(false)}
         />
       )}
     </Box>

@@ -1,3 +1,4 @@
+import type { Database } from "better-sqlite3";
 import type { Scope } from "@/server/runtime/scope";
 import { scopeEntry } from "@/server/runtime/scope";
 import { PostActorFacade } from "@/server/domain/facade/posts";
@@ -69,6 +70,16 @@ import { VersionedUserConfigService } from "@/server/services/versionedUserConfi
 import { MediaActorFacade } from "@/server/domain/facade/media";
 import { MediaService } from "@/server/services/mediaService";
 import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
+import { BooklistService } from "@/server/services/booklistService";
+import { AccessService } from "@/server/services/accessService";
+import {
+  OwnerlessCapabilityService,
+  type OwnerlessRecovery,
+} from "@/server/services/ownerlessCapability";
+import { CapabilityService } from "@/server/services/capabilityService";
+import { collectionsContainingTrack } from "@/server/data/media";
+import { collectionsContainingArticle } from "@/server/data/booklists";
+import { getCapabilitySecret } from "@/server/infra/db";
 import {
   createRoleService,
   type RoleService,
@@ -162,6 +173,10 @@ const mediaService = scopeEntry<MediaService>("MediaService");
 const mediaPlaylistService = scopeEntry<MediaPlaylistService>(
   "MediaPlaylistService",
 );
+const accessService = scopeEntry<AccessService>("AccessService");
+const ownerlessCapabilityService = scopeEntry<OwnerlessCapabilityService>(
+  "OwnerlessCapabilityService",
+);
 
 const postFacade = scopeEntry<PostActorFacade>("PostActorFacade");
 const groupFacade = scopeEntry<GroupActorFacade>("GroupActorFacade");
@@ -195,6 +210,16 @@ const authenticationFacade = scopeEntry<AuthenticationFacade>(
 );
 const incidentFacade = scopeEntry<IncidentFacade>("IncidentFacade");
 const mediaFacade = scopeEntry<MediaActorFacade>("MediaActorFacade");
+
+function ownerlessRecoveryFor(db: Database): OwnerlessRecovery {
+  return {
+    collectionsContaining(kind, id) {
+      if (kind === "track") return collectionsContainingTrack(db, id);
+      if (kind === "article") return collectionsContainingArticle(db, id);
+      return [];
+    },
+  };
+}
 
 /** Typed request composition. Every getter has Scope get-or-init semantics. */
 export class Composition {
@@ -231,6 +256,7 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
         ),
     );
   }
@@ -285,6 +311,7 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
           this.scope.unitOfWork,
         ),
     );
@@ -324,6 +351,9 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
+          this.ownerless(),
+          new BooklistService(this.scope.db, this.access(), this.ownerless()),
         ),
     );
   }
@@ -534,6 +564,26 @@ export class Composition {
     );
   }
 
+  access(): AccessService {
+    return this.scope.getOrInit(
+      accessService,
+      () => new AccessService(this.scope.db),
+    );
+  }
+
+  ownerless(): OwnerlessCapabilityService {
+    return this.scope.getOrInit(
+      ownerlessCapabilityService,
+      () =>
+        new OwnerlessCapabilityService(
+          this.scope.db,
+          new CapabilityService(getCapabilitySecret(this.scope.db)),
+          this.access(),
+          ownerlessRecoveryFor(this.scope.db),
+        ),
+    );
+  }
+
   media(): MediaActorFacade {
     return this.scope.getOrInit(
       mediaFacade,
@@ -546,11 +596,18 @@ export class Composition {
           ),
           this.scope.getOrInit(
             mediaPlaylistService,
-            () => new MediaPlaylistService(this.scope.db),
+            () =>
+              new MediaPlaylistService(
+                this.scope.db,
+                this.access(),
+                this.ownerless(),
+              ),
           ),
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
+          this.ownerless(),
         ),
     );
   }

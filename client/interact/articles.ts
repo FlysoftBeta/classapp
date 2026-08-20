@@ -1,3 +1,4 @@
+import { client } from "@/client/interact/remote/client";
 import type { ArticleWithMeta, UserMetadata } from "@/shared/types/api";
 import type { Article } from "@/client/interact/presentation";
 import {
@@ -6,21 +7,6 @@ import {
   authHeaders,
   parseJson,
 } from "@/client/api/runtime";
-const {
-  createArticleAction,
-  deleteArticleAction,
-  fetchArticleAction,
-  fetchArticleSegmentAction,
-  fetchArticleSidebarAction,
-  listArticlesAction,
-  reportArticleReadingAction,
-  saveArticleProgressAction,
-  setArticleBookmarkAction,
-  searchNetworkArticlesAction,
-  startNetworkArticleDownloadAction,
-  listNetworkArticleDownloadsAction,
-} = client.actions;
-import { client } from "@/client/interact/remote/client";
 import { ResultTools } from "@/shared/protocol/result";
 import { currentActorRepository as offlineRepository } from "@/client/interact/actorContext";
 import { purgeArticleBundle } from "@/client/interact/bundles";
@@ -29,6 +15,38 @@ import {
   cacheUserMetadata,
   userMetadataById,
 } from "@/client/interact/users";
+import {
+  rememberArticleCapabilities,
+  rememberArticleCapability,
+  articleCapability,
+} from "./capabilities";
+import type { AccessGrant, PrincipalRef } from "@/shared/access";
+import type { BooklistSnapshot, BooklistSummary } from "@/shared/types/api";
+
+const {
+  createArticleAction,
+  deleteArticleAction,
+  fetchArticleAction,
+  fetchArticleSegmentAction,
+  fetchArticleSidebarAction,
+  listArticlesAction,
+  articlesLibraryAction,
+  booklistFetchAction,
+  booklistForGroupAction,
+  booklistCreateAction,
+  booklistDeleteAction,
+  booklistAddArticleAction,
+  booklistRemoveArticleAction,
+  booklistGrantAccessAction,
+  booklistRevokeAccessAction,
+  booklistListBindingsAction,
+  reportArticleReadingAction,
+  saveArticleProgressAction,
+  setArticleBookmarkAction,
+  searchNetworkArticlesAction,
+  startNetworkArticleDownloadAction,
+  listNetworkArticleDownloadsAction,
+} = client.actions;
 
 export interface ArticleSegmentPayload {
   offset: number;
@@ -150,6 +168,7 @@ async function fetchRemoteArticlePage(
       result.data.users,
       { view: "all", group_id: groupId ?? null },
     );
+    rememberArticleCapabilities(result.data.articles ?? []);
     try {
       await offlineRepository.reconcileArticlePage(articles, {
         view: "all",
@@ -295,6 +314,7 @@ export async function reportArticleReading(
       articleId,
       seconds: body.seconds,
       active: body.active,
+      capability: articleCapability(articleId),
     }),
   );
 }
@@ -316,7 +336,11 @@ export async function fetchArticle(articleId: string) {
         }
       : null;
   }
-  const result = await fetchArticleAction(articleId);
+  const result = await fetchArticleAction({
+    articleId,
+    capability: articleCapability(articleId),
+  });
+  if (result.ok) rememberArticleCapability(articleId, result.data.article.capability);
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
@@ -390,7 +414,11 @@ export async function fetchArticleSegment(
   // Article bodies are immutable. A cached segment is authoritative and can
   // warm-start the reader even while the remote connection is available.
   if (cached || !client.isConnected()) return cached;
-  const result = await fetchArticleSegmentAction({ articleId, offset });
+  const result = await fetchArticleSegmentAction({
+    articleId,
+    offset,
+    capability: articleCapability(articleId),
+  });
   observeActionResult(result);
   if (!result.ok) return null;
   const data = result.data;
@@ -415,9 +443,10 @@ export async function createArticle(body: {
   const result = await createArticleAction(body);
   const res = observeActionResult(result);
   if (result.ok) {
+    rememberArticleCapability(result.data.article.id, result.data.capability);
     await cacheUserMetadata(result.data.users);
     result.data.article = materializeArticle(
-      result.data.article,
+      { ...result.data.article, capability: result.data.capability },
       result.data.users,
     );
   }
@@ -493,6 +522,7 @@ export async function toggleArticleBookmark(
     articleId,
     bookmarked: local.value,
     updatedAt: local.updatedAt,
+    capability: articleCapability(articleId),
   });
   observeActionResult(result);
   if (!result.ok) return null;
@@ -517,6 +547,7 @@ export async function syncPendingArticleConfig() {
         articleId,
         bookmarked: value,
         updatedAt,
+        capability: articleCapability(articleId),
       });
       observeActionResult(result);
       if (!result.ok) continue;
@@ -542,6 +573,7 @@ export async function saveArticleProgress(articleId: string, offset: number) {
     offset: local.offset,
     updatedAt: local.updatedAt,
     merge: "override",
+    capability: articleCapability(articleId),
   });
   const response = observeActionResult(result);
   if (result.ok) {
@@ -569,6 +601,7 @@ export async function flushPendingArticleProgress(
     offset,
     updatedAt,
     merge: "furthest",
+    capability: articleCapability(articleId),
   });
   observeActionResult(result);
   if (result.ok) {
@@ -581,13 +614,20 @@ export async function flushPendingArticleProgress(
 }
 
 export function fetchArticleSource(token: string, articleId: string) {
-  return apiFetch(`/api/articles/${articleId}/source`, {
+  const capability = articleCapability(articleId);
+  const query = capability
+    ? `?capability=${encodeURIComponent(capability)}`
+    : "";
+  return apiFetch(`/api/articles/${articleId}/source${query}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function deleteArticle(articleId: string) {
-  const result = await deleteArticleAction(articleId);
+  const result = await deleteArticleAction({
+    articleId,
+    capability: articleCapability(articleId),
+  });
   const res = observeActionResult(result);
   const data = result.ok ? result.data : { error: result.error.message };
   if (result.ok) {
@@ -595,4 +635,126 @@ export async function deleteArticle(articleId: string) {
     await offlineRepository.purgeArticle(articleId);
   }
   return { res, data };
+}
+
+export async function fetchArticlesLibrary(): Promise<{
+  recents: Article[];
+  favorites: Article[];
+  booklists: BooklistSummary[];
+} | null> {
+  const result = await articlesLibraryAction();
+  observeActionResult(result);
+  if (!result.ok) return null;
+  rememberArticleCapabilities(result.data.recents);
+  rememberArticleCapabilities(result.data.favorites);
+  const recents = await reconcileArticleList(
+    result.data.recents,
+    result.data.users,
+    { view: "sidebar", group_id: null },
+  );
+  const favorites = await reconcileArticleList(
+    result.data.favorites,
+    result.data.users,
+    { view: "bookmarked", group_id: null },
+  );
+  return { recents, favorites, booklists: result.data.booklists };
+}
+
+export async function fetchBooklist(
+  booklistId: string,
+): Promise<BooklistSnapshot | null> {
+  const result = await booklistFetchAction(booklistId);
+  observeActionResult(result);
+  if (!result.ok) return null;
+  rememberArticleCapabilities(result.data.articles);
+  await reconcileArticleList(result.data.articles, result.data.users, {
+    view: "all",
+    group_id: result.data.list.group_id,
+  });
+  return result.data;
+}
+
+export async function fetchGroupBooklist(
+  groupId: string,
+): Promise<BooklistSnapshot | null> {
+  const result = await booklistForGroupAction({ groupId });
+  observeActionResult(result);
+  if (!result.ok || !result.data) return null;
+  rememberArticleCapabilities(result.data.articles);
+  await reconcileArticleList(result.data.articles, result.data.users, {
+    view: "all",
+    group_id: groupId,
+  });
+  return result.data;
+}
+
+export async function createBooklist(title: string) {
+  const result = await booklistCreateAction({ title });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  return result.data;
+}
+
+export async function deleteBooklist(booklistId: string) {
+  const result = await booklistDeleteAction(booklistId);
+  observeActionResult(result);
+  return result.ok;
+}
+
+export async function addArticleToBooklist(
+  booklistId: string,
+  articleId: string,
+) {
+  const result = await booklistAddArticleAction({
+    booklistId,
+    articleId,
+    capability: articleCapability(articleId),
+  });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  rememberArticleCapabilities(result.data.articles);
+  return result.data;
+}
+
+export async function removeArticleFromBooklist(
+  booklistId: string,
+  articleId: string,
+) {
+  const result = await booklistRemoveArticleAction({ booklistId, articleId });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  rememberArticleCapabilities(result.data.articles);
+  return result.data;
+}
+
+export async function grantBooklistAccess(
+  booklistId: string,
+  principal: PrincipalRef,
+  grant: AccessGrant,
+) {
+  const result = await booklistGrantAccessAction({
+    booklistId,
+    principal,
+    grant,
+  });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  return result.data;
+}
+
+export async function revokeBooklistAccess(
+  booklistId: string,
+  principal: PrincipalRef,
+) {
+  const result = await booklistRevokeAccessAction({ booklistId, principal });
+  observeActionResult(result);
+  if (!result.ok) return null;
+  return result.data;
+}
+
+export async function listBooklistBindings(booklistId: string) {
+  const result = await booklistListBindingsAction({ booklistId });
+  observeActionResult(result);
+  if (!result.ok) return { bindings: [] };
+  return result.data;
 }

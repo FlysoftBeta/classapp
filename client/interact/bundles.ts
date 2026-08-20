@@ -25,6 +25,7 @@ import {
 } from "@/client/interact/quota";
 import { client } from "@/client/interact/remote/client";
 import { session } from "@/client/interact/remote/session";
+import { articleCapability } from "@/client/interact/capabilities";
 import initZstd, {
   decompress,
   decompress_with_dictionary,
@@ -289,8 +290,12 @@ async function fetchResourceBatch(
   articleId: string,
   resources: BundleResource[],
 ): Promise<void> {
+  const capability = articleCapability(articleId);
+  const query = capability
+    ? `?capability=${encodeURIComponent(capability)}`
+    : "";
   const response = await apiFetch(
-    `/api/articles/${encodeURIComponent(articleId)}/bundle/resources`,
+    `/api/articles/${encodeURIComponent(articleId)}/bundle/resources${query}`,
     {
       method: "POST",
       headers: {
@@ -447,6 +452,7 @@ export async function openArticleBundle(
     cursor,
     before: 4,
     after: 6,
+    capability: articleCapability(articleId),
   });
   if (!result.ok) return null;
   return acceptSlice(articleId, result.data, cursor);
@@ -473,6 +479,7 @@ export async function fetchArticleBundleItems(
     cursor,
     direction,
     limit: 12,
+    capability: articleCapability(articleId),
   });
   if (!result.ok) return null;
   return acceptSlice(

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { accessFlagsSchema, capabilityTokenSchema } from "@/shared/access";
 
 const object = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
 
@@ -43,6 +44,11 @@ export const mediaListItemSchema = object({
   added_at: z.string(),
 });
 
+export const signedMediaTrackSchema = object({
+  track: mediaTrackSchema,
+  capability: capabilityTokenSchema,
+});
+
 export const mediaPlaylistSummarySchema = object({
   id: z.string(),
   title: z.string(),
@@ -52,12 +58,13 @@ export const mediaPlaylistSummarySchema = object({
   updated_at: z.string(),
   track_count: z.number().int().nonnegative(),
   cover_track_id: z.string().nullable(),
+  access: accessFlagsSchema,
 });
 
 export const mediaListSnapshotSchema = object({
   list: mediaPlaylistSummarySchema,
   items: z.array(mediaListItemSchema),
-  tracks: z.array(mediaTrackSchema),
+  tracks: z.array(signedMediaTrackSchema),
 });
 
 export const mediaQueueSnapshotSchema = mediaListSnapshotSchema;
@@ -94,7 +101,30 @@ export const mediaMaterializationChangedEventSchema = object({
 
 export type MediaAsset = z.output<typeof mediaAssetSchema>;
 export type MediaTrack = z.output<typeof mediaTrackSchema>;
+export type SignedMediaTrack = z.output<typeof signedMediaTrackSchema>;
 export type MediaListItem = z.output<typeof mediaListItemSchema>;
 export type MediaListSnapshot = z.output<typeof mediaListSnapshotSchema>;
 export type MediaPlaylistSummary = z.output<typeof mediaPlaylistSummarySchema>;
 export type MediaConfig = z.output<typeof mediaConfigSchema>;
+
+/** Local/presentation view of a signed list snapshot after capabilities are cached. */
+export interface MediaListView {
+  list: MediaPlaylistSummary;
+  items: MediaListItem[];
+  tracks: MediaTrack[];
+}
+
+export function mediaListView(snapshot: MediaListSnapshot): MediaListView {
+  return {
+    list: snapshot.list,
+    items: snapshot.items,
+    tracks: snapshot.tracks.map((row) => row.track),
+  };
+}
+
+export function findSnapshotTrack(
+  snapshot: MediaListView,
+  trackId: string,
+): MediaTrack | undefined {
+  return snapshot.tracks.find((track) => track.id === trackId);
+}

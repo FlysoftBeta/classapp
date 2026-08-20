@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type {
   MediaConfig,
-  MediaListSnapshot,
+  MediaListView,
   MediaPlaylistSummary,
   MediaTrack,
 } from "@/shared/media/types";
@@ -17,23 +17,29 @@ interface MediaPlayerState {
 }
 
 interface MediaStore {
-  queue: MediaListSnapshot | null;
+  queue: MediaListView | null;
   playlists: MediaPlaylistSummary[];
-  currentPlaylist: MediaListSnapshot | null;
+  currentPlaylist: MediaListView | null;
   searchResults: MediaTrack[];
   searchLoading: boolean;
   searchError: string | null;
+  libraryRecents: MediaTrack[];
+  libraryFavorites: MediaTrack[];
+  favoriteTrackIds: Set<string>;
   config: MediaConfig | null;
   player: MediaPlayerState;
   queueDrawerOpen: boolean;
   playlistLastPlayed: Record<string, string>;
 
-  setQueue(value: MediaListSnapshot | null): void;
+  setQueue(value: MediaListView | null): void;
   setPlaylists(value: MediaPlaylistSummary[]): void;
-  setCurrentPlaylist(value: MediaListSnapshot | null): void;
+  setCurrentPlaylist(value: MediaListView | null): void;
   setSearchResults(value: MediaTrack[]): void;
   setSearchLoading(value: boolean): void;
   setSearchError(value: string | null): void;
+  setLibraryRecents(value: MediaTrack[]): void;
+  setLibraryFavorites(value: MediaTrack[]): void;
+  setFavoriteTrackIds(value: Set<string>): void;
   setConfig(value: MediaConfig): void;
   patchPlayer(value: Partial<MediaPlayerState>): void;
   setQueueDrawerOpen(value: boolean): void;
@@ -48,6 +54,9 @@ export const useMediaStore = create<MediaStore>((set) => ({
   searchResults: [],
   searchLoading: false,
   searchError: null,
+  libraryRecents: [],
+  libraryFavorites: [],
+  favoriteTrackIds: new Set<string>(),
   config: null,
   queueDrawerOpen: false,
   playlistLastPlayed: {},
@@ -66,6 +75,9 @@ export const useMediaStore = create<MediaStore>((set) => ({
   setSearchResults: (searchResults) => set({ searchResults }),
   setSearchLoading: (searchLoading) => set({ searchLoading }),
   setSearchError: (searchError) => set({ searchError }),
+  setLibraryRecents: (libraryRecents) => set({ libraryRecents }),
+  setLibraryFavorites: (libraryFavorites) => set({ libraryFavorites }),
+  setFavoriteTrackIds: (favoriteTrackIds) => set({ favoriteTrackIds }),
   setConfig: (config) => set({ config }),
   patchPlayer: (value) =>
     set((state) => ({ player: { ...state.player, ...value } })),
@@ -78,6 +90,9 @@ export const useMediaStore = create<MediaStore>((set) => ({
       currentPlaylist: null,
       searchResults: [],
       searchError: null,
+      libraryRecents: [],
+      libraryFavorites: [],
+      favoriteTrackIds: new Set<string>(),
       queueDrawerOpen: false,
       playlistLastPlayed: {},
       player: {

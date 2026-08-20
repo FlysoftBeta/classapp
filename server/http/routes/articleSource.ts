@@ -11,6 +11,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const capability =
+      new URL(req.url).searchParams.get("capability") ?? undefined;
     const range = parseRange(req.headers.get("range"));
     if (range === "unsatisfiable") {
       return new Response(null, {
@@ -21,7 +23,7 @@ export async function GET(
     const selected = await currentScope()
       .facades()
       .articles()
-      .streamBundleSource(id, range ?? undefined);
+      .streamBundleSource(id, range ?? undefined, capability);
     const size = selected.size;
     const length = rangeLength(range, size);
     const status = range ? 206 : 200;
