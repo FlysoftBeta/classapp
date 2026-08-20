@@ -23,11 +23,15 @@ export {
   postSchema,
   textPostSchema,
   stickerPostSchema,
+  imagePostSchema,
   type PostEntity,
   type TextPostEntity,
   type StickerPostEntity,
+  type ImagePostEntity,
+  type PostImageThumb,
+  type PostImageThumbState,
 } from "./post";
-export { isTextPost, isStickerPost, postPreview } from "./post";
+export { isTextPost, isStickerPost, isImagePost, postPreview } from "./post";
 export {
   articleWithMetaSchema,
   articleSidebarPayloadSchema,

@@ -13,6 +13,8 @@ import { GET as downloadTeachDocument } from "@/server/http/routes/teachDocument
 import { GET as downloadIncidentLogs } from "@/server/http/routes/incidentLogsDownload";
 import { GET as mediaAudio } from "@/server/http/routes/mediaAudio";
 import { GET as mediaCover } from "@/server/http/routes/mediaCover";
+import { POST as uploadPostImage } from "@/server/http/routes/postImageUpload";
+import { GET as postImage } from "@/server/http/routes/postImage";
 import { renderServiceWorker } from "@/server/http/serviceWorker";
 import { handleHttpError } from "@/server/http/errorResponse";
 import {
@@ -350,6 +352,25 @@ export function createHttpHandler(
               await mediaCover(request(), {
                 params: Promise.resolve({
                   id: decodeURIComponent(mediaCoverMatch[1]),
+                }),
+              }),
+              res,
+            );
+            return;
+          }
+          if (req.method === "POST" && url.pathname === "/api/posts/images") {
+            await sendResponse(await uploadPostImage(request()), res);
+            return;
+          }
+          const postImageMatch = url.pathname.match(
+            /^\/api\/posts\/images\/([^/]+)\/(original|thumb)$/,
+          );
+          if (req.method === "GET" && postImageMatch) {
+            await sendResponse(
+              await postImage(request(), {
+                params: Promise.resolve({
+                  id: decodeURIComponent(postImageMatch[1]),
+                  variant: postImageMatch[2],
                 }),
               }),
               res,

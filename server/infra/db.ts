@@ -7,7 +7,7 @@ import { createWordsService } from "@/server/services/wordsService";
 import { AccessService } from "@/server/services/accessService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
-import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
+import { DEFAULT_FEATURE_BITSET, featureBit } from "@/server/data/featureBitset";
 import { ADMIN_ROLES } from "@/shared/authority";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
@@ -56,7 +56,7 @@ export function openExecutorDatabase(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 27;
+const CURRENT_SCHEMA_VERSION = 28;
 
 interface SchemaMigration {
   /** Schema version after this migration commits. */
@@ -417,6 +417,36 @@ const STORAGE_QUOTA_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_storage_quota_items_pool_class
     ON storage_quota_items(pool, class, weight);
+`;
+
+const POST_IMAGE_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS post_images (
+    id          TEXT PRIMARY KEY,
+    post_id     TEXT UNIQUE REFERENCES posts(id),
+    blob_id     TEXT NOT NULL,
+    mime        TEXT NOT NULL,
+    bytes       INTEGER NOT NULL CHECK (bytes > 0),
+    width       INTEGER NOT NULL CHECK (width > 0),
+    height      INTEGER NOT NULL CHECK (height > 0),
+    sha256      TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_post_images_post ON post_images(post_id);
+  CREATE INDEX IF NOT EXISTS idx_post_images_staging
+    ON post_images(created_at) WHERE post_id IS NULL;
+
+  CREATE TABLE IF NOT EXISTS post_image_thumbs (
+    image_id    TEXT PRIMARY KEY REFERENCES post_images(id) ON DELETE CASCADE,
+    blob_id     TEXT,
+    mime        TEXT,
+    bytes       INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+    width       INTEGER NOT NULL DEFAULT 0 CHECK (width >= 0),
+    height      INTEGER NOT NULL DEFAULT 0 CHECK (height >= 0),
+    sha256      TEXT,
+    state       TEXT NOT NULL CHECK (state IN ('absent', 'staging', 'ready', 'failed')),
+    generation  INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
 
 const ARTICLE_UPLOADS_SCHEMA = `
@@ -941,11 +971,20 @@ function migrateV26ToV27(db: Database): void {
   }
 }
 
+function migrateV27ToV28(db: Database): void {
+  db.exec(POST_IMAGE_SCHEMA);
+  // Enabled by default for existing accounts; new users use DEFAULT_FEATURE_BITSET.
+  db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
+    featureBit("post_images"),
+  );
+}
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, { nextVersion: 18, run: migrateV17ToV18 }],
   [18, { nextVersion: 25, run: consolidatePostV18Schema }],
   [25, { nextVersion: 26, run: migrateV25ToV26 }],
-  [26, { nextVersion: CURRENT_SCHEMA_VERSION, run: migrateV26ToV27 }],
+  [26, { nextVersion: 27, run: migrateV26ToV27 }],
+  [27, { nextVersion: CURRENT_SCHEMA_VERSION, run: migrateV27ToV28 }],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -1265,6 +1304,7 @@ function installSchema(db: Database): void {
   db.exec(STORAGE_QUOTA_SCHEMA);
   db.exec(BOOKLIST_SCHEMA);
   db.exec(ARTICLE_UPLOADS_SCHEMA);
+  db.exec(POST_IMAGE_SCHEMA);
   db.exec(ACCESS_SCHEMA);
   // Worktree/dev databases created while schema v23 was being developed may
   // already have media_lists without retention_days. Production upgrades from

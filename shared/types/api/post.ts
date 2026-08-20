@@ -39,6 +39,40 @@ export const stickerPostSchema = z
   })
   .strict();
 
+export const postImageThumbStateSchema = z.enum([
+  "absent",
+  "staging",
+  "ready",
+  "failed",
+]);
+export type PostImageThumbState = z.infer<typeof postImageThumbStateSchema>;
+
+export const postImageThumbSchema = z
+  .object({
+    state: postImageThumbStateSchema,
+    mime: z.string().nullable(),
+    bytes: z.number().int().nonnegative(),
+    width: z.number().int().nonnegative(),
+    height: z.number().int().nonnegative(),
+    sha256: z.string().nullable(),
+  })
+  .strict();
+export type PostImageThumb = z.infer<typeof postImageThumbSchema>;
+
+export const imagePostSchema = z
+  .object({
+    ...postCommonShape,
+    type: z.literal("image"),
+    image_id: z.string(),
+    mime: z.string(),
+    bytes: z.number().int().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    sha256: z.string(),
+    thumb: postImageThumbSchema,
+  })
+  .strict();
+
 export const deletedPostSchema = z
   .object({
     ...postCommonShape,
@@ -49,11 +83,13 @@ export const deletedPostSchema = z
 export const postSchema = z.discriminatedUnion("type", [
   textPostSchema,
   stickerPostSchema,
+  imagePostSchema,
   deletedPostSchema,
 ]);
 export type PostEntity = z.infer<typeof postSchema>;
 export type TextPostEntity = Extract<PostEntity, { type: "text" }>;
 export type StickerPostEntity = Extract<PostEntity, { type: "sticker" }>;
+export type ImagePostEntity = Extract<PostEntity, { type: "image" }>;
 
 export function isTextPost(post: PostEntity): post is TextPostEntity {
   return post.type === "text";
@@ -63,7 +99,12 @@ export function isStickerPost(post: PostEntity): post is StickerPostEntity {
   return post.type === "sticker";
 }
 
+export function isImagePost(post: PostEntity): post is ImagePostEntity {
+  return post.type === "image";
+}
+
 export function postPreview(post: PostEntity): string {
   if (post.type === "deleted") return "消息已删除";
-  return post.type === "text" ? post.text : post.brief;
+  if (post.type === "text") return post.text;
+  return post.brief;
 }

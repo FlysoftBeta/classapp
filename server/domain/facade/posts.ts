@@ -7,12 +7,15 @@ import type {
 import type { GroupService } from "@/server/services/groupsService";
 import { PublicError } from "@/server/services/incidentService";
 import { parseConvId } from "@/shared/conversations/id";
-import type { User } from "@/shared/types/api";
+import type { PostEntity, User } from "@/shared/types/api";
 import {
   isStoredEditable,
   parseStoredPostContent,
 } from "@/server/services/postContent";
 import type { AuditService } from "@/server/services/auditService";
+import type { PostImageService } from "@/server/services/postImagesService";
+import type { StickyHost } from "@/server/runtime/sticky";
+import { isImagePost } from "@/shared/types/api";
 
 export class PostActorFacade {
   constructor(
@@ -20,6 +23,8 @@ export class PostActorFacade {
     private readonly posts: PostService,
     private readonly groups: GroupService,
     private readonly audit: AuditService,
+    private readonly images: PostImageService,
+    private readonly sticky: StickyHost,
   ) {}
 
   private requireGroupAccess(user: User, groupId: string): void {
@@ -64,26 +69,39 @@ export class PostActorFacade {
     return post;
   }
 
+  private prepareImageThumbs(posts: readonly PostEntity[]): void {
+    for (const post of posts) {
+      if (!isImagePost(post)) continue;
+      this.sticky.postImages.prepare(post.image_id);
+    }
+  }
+
   async list(input: PostListInput) {
     const user = await this.actor.requireUser();
     if (input.type === "conversation") {
       if (!input.conv_id) throw new PublicError("缺少会话 ID");
       this.requireConversationAccess(user, input.conv_id);
     }
-    return this.posts.list(user.id, input);
+    const result = this.posts.list(user.id, input);
+    this.prepareImageThumbs(result.posts);
+    return result;
   }
 
   async get(postId: string) {
     const user = await this.actor.requireUser();
     this.requirePostAccess(user, postId);
-    return this.posts.get(postId);
+    const result = this.posts.get(postId);
+    this.prepareImageThumbs([result.post]);
+    return result;
   }
 
-  async create(raw: CreatePostInput, opts?: { deferNotify?: boolean }) {
+  private async authorizeCreate(raw: {
+    conv_id: string;
+    reply_to?: string | null;
+  }) {
     const user = await this.actor.requireUser();
     if (user.is_muted) throw new PublicError("你已被禁言");
-    const input = this.posts.normalizeCreate(raw);
-    const conversation = parseConvId(input.conv_id);
+    const conversation = parseConvId(raw.conv_id);
     if (!conversation) throw new PublicError("会话 ID 无效");
     let authorizedDirectPeerId: string | undefined;
     if (conversation.type === "group") {
@@ -98,17 +116,49 @@ export class PostActorFacade {
           : conversation.peerA;
       authorizedDirectPeerId = peerId;
     }
-    if (input.reply_to) {
-      const reply = this.requirePostAccess(user, input.reply_to);
+    if (raw.reply_to) {
+      const reply = this.requirePostAccess(user, raw.reply_to);
       if (reply.deleted_at) throw new PublicError("被引用的帖子已删除");
-      if (reply.conv_id !== input.conv_id) {
+      if (reply.conv_id !== raw.conv_id) {
         throw new PublicError("引用帖与目标会话不匹配");
       }
     }
+    return { user, authorizedDirectPeerId };
+  }
+
+  async create(raw: CreatePostInput, opts?: { deferNotify?: boolean }) {
+    const input = this.posts.normalizeCreate(raw);
+    const { user, authorizedDirectPeerId } = await this.authorizeCreate(input);
     return this.posts.create(user.id, input, {
       ...opts,
       authorizedDirectPeerId,
     });
+  }
+
+  async createImage(input: {
+    file: File;
+    conv_id: string;
+    reply_to?: string | null;
+  }) {
+    const { user, authorizedDirectPeerId } = await this.authorizeCreate(input);
+    this.actor.requireFeature("post_images");
+    const ingested = await this.images.ingest(input.file);
+    try {
+      const result = this.posts.createImage(
+        user.id,
+        {
+          conv_id: input.conv_id,
+          reply_to: input.reply_to?.trim() || null,
+          imageId: ingested.id,
+        },
+        { authorizedDirectPeerId },
+      );
+      this.sticky.postImages.prepare(ingested.id);
+      return result;
+    } catch (error) {
+      await this.images.abandon(ingested.id);
+      throw error;
+    }
   }
 
   async update(postId: string, text: string) {
@@ -127,6 +177,13 @@ export class PostActorFacade {
     return this.posts.update(postId, text);
   }
 
+  private async reclaimImageFromPost(contentJson: string): Promise<void> {
+    const stored = parseStoredPostContent(contentJson);
+    if (stored?.type !== "image") return;
+    const image = this.images.lookup(stored.image_id);
+    if (image) await this.images.reclaim(image);
+  }
+
   async softDelete(postId: string) {
     const user = await this.actor.requireUser();
     const target = this.requirePostAccess(user, postId);
@@ -139,8 +196,28 @@ export class PostActorFacade {
         targetKind: "post",
         targetId: postId,
       });
+      await this.reclaimImageFromPost(target.content_json);
       return result;
     }
-    return this.posts.softDelete(postId);
+    const result = this.posts.softDelete(postId);
+    await this.reclaimImageFromPost(target.content_json);
+    return result;
+  }
+
+  async streamOriginal(imageId: string) {
+    const user = await this.actor.requireUser();
+    const image = this.images.get(imageId);
+    if (!image.postId) throw new PublicError("图片不存在");
+    this.requirePostAccess(user, image.postId);
+    return this.images.openOriginal(imageId);
+  }
+
+  async streamThumb(imageId: string) {
+    const user = await this.actor.requireUser();
+    const image = this.images.get(imageId);
+    if (!image.postId) throw new PublicError("图片不存在");
+    this.requirePostAccess(user, image.postId);
+    this.sticky.postImages.prepare(imageId);
+    return this.images.openThumb(imageId);
   }
 }

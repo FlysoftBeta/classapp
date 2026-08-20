@@ -33,7 +33,7 @@ name and spell out its alternatives. Do not hide meaning in
 - authentication: which stable user is bound to the request;
 - client admission: whether the physical/logical device may proceed;
 - account state: deactivated, banned, muted, locked;
-- product feature: AI, article creation, group creation, and similar access;
+- product feature: AI, article creation, image-post upload, and similar access;
 - administrative responsibility: named roles;
 - relationship: owner, group member, visible peer, creator;
 - resource state: exists, immutable, already deleted, pending;

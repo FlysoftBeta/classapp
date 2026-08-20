@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
@@ -15,10 +15,14 @@ import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import ReplyIcon from "@mui/icons-material/Reply";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { User } from "@/shared/types/api";
-import type { Post, TextPost } from "@/client/interact/presentation";
+import type { Post, TextPost, ImagePost } from "@/client/interact/presentation";
 import { isTextPost } from "@/shared/types/api";
 import { LONG_TEXT_THRESHOLD } from "@/shared/validation/posts";
 import { fetchPost, updatePost, deletePost } from "@/client/interact/posts";
+import {
+  loadPostImageOriginal,
+  loadPostImageThumb,
+} from "@/client/interact/postImages";
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
 import { flexGap } from "@/client/lib/css";
 
@@ -128,6 +132,165 @@ function ContentText({ post, online }: { post: TextPost; online: boolean }) {
               sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
             >
               {dialogText}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+function objectUrlFromBytes(buffer: ArrayBuffer, mime: string): string {
+  return URL.createObjectURL(
+    new Blob([new Uint8Array(buffer)], { type: mime || "image/webp" }),
+  );
+}
+
+function ImageContent({ post, online }: { post: ImagePost; online: boolean }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [thumbLoading, setThumbLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [originalLoading, setOriginalLoading] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: string | null = null;
+    void (async () => {
+      const buffer = await loadPostImageThumb(post);
+      if (cancelled) return;
+      if (!buffer) {
+        setThumbLoading(false);
+        return;
+      }
+      created = objectUrlFromBytes(buffer, post.thumb.mime ?? "image/webp");
+      if (cancelled) {
+        URL.revokeObjectURL(created);
+        created = null;
+        return;
+      }
+      setThumbUrl(created);
+      setThumbLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [post.image_id]); // eslint-disable-line react-hooks/exhaustive-deps -- image_id is the cache identity
+
+  useEffect(() => {
+    return () => {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+    };
+  }, [originalUrl]);
+
+  const handleOpen = () => {
+    setOpen(true);
+    if (originalUrl || originalLoading) return;
+    setOriginalLoading(true);
+    void (async () => {
+      const buffer = await loadPostImageOriginal(post);
+      if (!mountedRef.current) return;
+      if (buffer) setOriginalUrl(objectUrlFromBytes(buffer, post.mime));
+      setOriginalLoading(false);
+    })();
+  };
+
+  const thumbWidth = post.thumb.width || post.width;
+  const thumbHeight = post.thumb.height || post.height;
+
+  return (
+    <Box sx={{ mt: 1 }}>
+      <Box
+        component="button"
+        type="button"
+        onClick={handleOpen}
+        aria-label="查看原图"
+        sx={{
+          display: "block",
+          p: 0,
+          border: "none",
+          bgcolor: "transparent",
+          cursor: "pointer",
+          maxWidth: 240,
+        }}
+      >
+        {thumbUrl ? (
+          <Box
+            component="img"
+            src={thumbUrl}
+            alt="图片"
+            sx={{
+              display: "block",
+              maxWidth: 240,
+              maxHeight: 240,
+              width: thumbWidth >= thumbHeight ? "100%" : "auto",
+              height: "auto",
+              objectFit: "contain",
+              borderRadius: 1,
+            }}
+          />
+        ) : (
+          <Box
+            sx={{
+              width: 160,
+              height: 120,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "action.hover",
+              borderRadius: 1,
+              ...flexGap(1),
+            }}
+          >
+            {thumbLoading ? <CircularProgress size={18} /> : null}
+            <Typography variant="caption" color="text.secondary">
+              {thumbLoading
+                ? "加载缩略图…"
+                : online
+                  ? "图片"
+                  : "离线无缩略图"}
+            </Typography>
+          </Box>
+        )}
+      </Box>
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ pb: 1 }}>原图</DialogTitle>
+        <DialogContent dividers>
+          {originalLoading && !originalUrl ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : originalUrl ? (
+            <Box
+              component="img"
+              src={originalUrl}
+              alt="原图"
+              sx={{
+                display: "block",
+                maxWidth: "100%",
+                height: "auto",
+              }}
+            />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {online ? "无法加载原图" : "离线且本地没有原图"}
             </Typography>
           )}
         </DialogContent>
@@ -315,6 +478,10 @@ export default function ChatPostCard({
                 </Typography>
               )}
             </Box>
+          )}
+
+          {post.type === "image" && !editing && (
+            <ImageContent key={post.image_id} post={post} online={online} />
           )}
 
           {post.type === "text" && editLoading ? (

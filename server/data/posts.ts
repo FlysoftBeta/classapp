@@ -3,6 +3,11 @@ import type { PostEntity, UserMetadata } from "@/shared/types/api";
 import { userMetadataForIds } from "@/server/data/users";
 import { getStickerEntry } from "@/server/infra/stickerLoader";
 import {
+  listPostImagesByIds,
+  thumbToWire,
+  type PostImageRecord,
+} from "@/server/data/postImages";
+import {
   loadStoredContent,
   parseStoredPostContent,
   resolveStoredText,
@@ -41,7 +46,7 @@ export const POST_WITH_REPLY_SQL = `
   LEFT JOIN posts r ON p.reply_to = r.id
 `;
 
-export function hydratePost(row: PostRow): PostEntity {
+function hydratePost(row: PostRow, images: Map<string, PostImageRecord>): PostEntity {
   const stored = loadStoredContent(row);
   const base = {
     id: row.id,
@@ -77,7 +82,51 @@ export function hydratePost(row: PostRow): PostEntity {
         name: entry?.name ?? stored.sticker_id,
       };
     }
+    case "image": {
+      const image = images.get(stored.image_id);
+      if (!image) {
+        return {
+          ...base,
+          type: "image",
+          image_id: stored.image_id,
+          mime: "application/octet-stream",
+          bytes: 1,
+          width: 1,
+          height: 1,
+          sha256: "",
+          thumb: {
+            state: "failed",
+            mime: null,
+            bytes: 0,
+            width: 0,
+            height: 0,
+            sha256: null,
+          },
+        };
+      }
+      return {
+        ...base,
+        type: "image",
+        image_id: image.id,
+        mime: image.mime,
+        bytes: image.bytes,
+        width: image.width,
+        height: image.height,
+        sha256: image.sha256,
+        thumb: thumbToWire(image.thumb),
+      };
+    }
   }
+}
+
+function hydratePosts(db: Database, rows: PostRow[]): PostEntity[] {
+  const imageIds: string[] = [];
+  for (const row of rows) {
+    const stored = loadStoredContent(row);
+    if (stored.type === "image") imageIds.push(stored.image_id);
+  }
+  const images = listPostImagesByIds(db, imageIds);
+  return rows.map((row) => hydratePost(row, images));
 }
 
 export function postUserMetadata(
@@ -157,7 +206,7 @@ export function getPostRowid(db: Database, id: string): number | null {
 export function getPostById(db: Database, id: string): PostEntity | null {
   const row = db.prepare(`${POST_WITH_REPLY_SQL} WHERE p.id = ?`).get(id) as
     PostRow | undefined;
-  return row ? hydratePost(row) : null;
+  return row ? (hydratePosts(db, [row])[0] ?? null) : null;
 }
 
 interface PageQuery {
@@ -183,7 +232,7 @@ function queryPostsForConv(
        LIMIT ? OFFSET ?`,
     )
     .all(convId, ...input.args, input.limit, input.offset) as PostRow[];
-  return truncatePosts(rows.map(hydratePost));
+  return truncatePosts(hydratePosts(db, rows));
 }
 
 export function queryFeedPosts(
@@ -211,7 +260,7 @@ export function queryFeedPosts(
       input.limit,
       input.offset,
     ) as PostRow[];
-  return truncatePosts(rows.map(hydratePost));
+  return truncatePosts(hydratePosts(db, rows));
 }
 
 export function queryGroupPosts(
@@ -287,16 +336,29 @@ export function markPostDeleted(db: Database, postId: string): void {
 export function purgePostsByUser(
   db: Database,
   userId: string,
-): { posts: Array<{ id: string; conv_id: string }>; convIds: string[] } {
+): {
+  posts: Array<{ id: string; conv_id: string }>;
+  convIds: string[];
+  imageIds: string[];
+} {
   const posts = db
-    .prepare("SELECT id, conv_id FROM posts WHERE author_id = ?")
-    .all(userId) as Array<{ id: string; conv_id: string }>;
+    .prepare("SELECT id, conv_id, content_json FROM posts WHERE author_id = ?")
+    .all(userId) as Array<{ id: string; conv_id: string; content_json: string }>;
+  const imageIds: string[] = [];
+  for (const post of posts) {
+    const stored = parsePostStoredContent(post.content_json);
+    if (stored?.type === "image") imageIds.push(stored.image_id);
+  }
   db.prepare(
     `UPDATE posts SET brief = '', content_json = '{"type":"deleted"}',
        deleted_at = COALESCE(deleted_at, datetime('now')), edited_at = NULL
      WHERE author_id = ?`,
   ).run(userId);
-  return { posts, convIds: [...new Set(posts.map((post) => post.conv_id))] };
+  return {
+    posts: posts.map(({ id, conv_id }) => ({ id, conv_id })),
+    convIds: [...new Set(posts.map((post) => post.conv_id))],
+    imageIds,
+  };
 }
 
 export function listAdminPosts(
@@ -327,7 +389,7 @@ export function listAdminPosts(
       n: number;
     }
   ).n;
-  return { posts: truncatePosts(rows.map(hydratePost)), total };
+  return { posts: truncatePosts(hydratePosts(db, rows)), total };
 }
 
 export function parsePostStoredContent(contentJson: string | null | undefined) {

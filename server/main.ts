@@ -31,6 +31,7 @@ export async function bootstrap(
   const coordinator = new Coordinator(db, config.buildId);
   await coordinator.storage.start();
   await coordinator.articleUploads.reconcile();
+  await coordinator.postImages.reconcile();
   await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
   await coordinator.media.start();
   coordinator.teachDocuments.start();

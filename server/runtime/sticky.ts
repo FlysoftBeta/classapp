@@ -25,7 +25,12 @@ export type StickyCommand =
       track: MediaTrack;
       kind: "audio" | "cover";
     }
+  | { type: "postImage.ensureThumbnail"; imageId: string }
   | { type: "update.apply"; dbBackup: string };
+
+export interface PostImageSticky {
+  prepare(imageId: string): void;
+}
 
 export interface MediaSticky {
   readonly available: boolean;
@@ -81,4 +86,5 @@ export interface StickyHost {
   readonly teachDocuments: TeachSticky;
   readonly ai: AiSticky;
   readonly update: UpdateSticky;
+  readonly postImages: PostImageSticky;
 }

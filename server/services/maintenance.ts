@@ -67,6 +67,7 @@ async function runMaintenance(
   coordinator.media.reconcileTransient();
   await coordinator.storage.reconcileStorage();
   await coordinator.articleUploads.reconcile();
+  await coordinator.postImages.reconcile();
   await reconcileStaleAiWorkspaces(db, coordinator.storage.blobs);
 }
 

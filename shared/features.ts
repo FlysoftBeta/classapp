@@ -9,6 +9,7 @@ export const FEATURES = [
   "article_download",
   "ai",
   "media",
+  "post_images",
 ] as const;
 
 export type Feature = (typeof FEATURES)[number];
@@ -22,6 +23,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   article_download: "文章下载",
   ai: "AI 对话",
   media: "多媒体",
+  post_images: "图片上传",
 };
 
 const featureShape = Object.fromEntries(

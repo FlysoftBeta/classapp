@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /** Assemble the target-specific external Node runtime used by a release. */
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -18,7 +20,15 @@ const runtimePackages = [
   "ws",
   "playwright",
   "playwright-core",
+  "sharp",
+  "detect-libc",
+  "@img/colour",
 ];
+
+function sharpNativePackages(runtimePlatform) {
+  if (runtimePlatform === "windows") return ["@img/sharp-win32-x64"];
+  return ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64"];
+}
 
 function packagePath(base, name) {
   return path.join(base, ...name.split("/"));
@@ -32,6 +42,48 @@ function copyPackage(name, destination) {
   const output = packagePath(destination, name);
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.cpSync(source, output, { recursive: true });
+}
+
+function lockedPackage(lock, name) {
+  const entry = lock.packages?.[`node_modules/${name}`];
+  if (!entry?.version || !entry.integrity) {
+    throw new Error(`Missing locked runtime package metadata: ${name}`);
+  }
+  return {
+    version: entry.version,
+    integrity: entry.integrity,
+    resolved: entry.resolved,
+  };
+}
+
+function ensurePackage(name, destination, lock) {
+  const source = packagePath(sourceModules, name);
+  if (fs.existsSync(source)) {
+    copyPackage(name, destination);
+    return;
+  }
+  const meta = lockedPackage(lock, name);
+  const spec = meta.resolved ?? `${name}@${meta.version}`;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "classapp-pack-"));
+  try {
+    execFileSync("npm", ["pack", spec, "--pack-destination", tmp], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    const tarball = fs.readdirSync(tmp).find((file) => file.endsWith(".tgz"));
+    if (!tarball) throw new Error(`npm pack produced no tarball for ${name}`);
+    const output = packagePath(destination, name);
+    fs.mkdirSync(output, { recursive: true });
+    execFileSync("tar", [
+      "-xzf",
+      path.join(tmp, tarball),
+      "--strip-components=1",
+      "-C",
+      output,
+    ]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 function retainEntries(directory, retained) {
@@ -53,17 +105,11 @@ function retainEntries(directory, retained) {
   }
 }
 
-function cacheKey(runtimePlatform) {
-  const lock = JSON.parse(
-    fs.readFileSync(path.join(root, "package-lock.json"), "utf8"),
-  );
+function cacheKey(runtimePlatform, lock) {
   const packages = Object.fromEntries(
-    runtimePackages.map((name) => {
-      const entry = lock.packages?.[`node_modules/${name}`];
-      if (!entry?.version || !entry.integrity) {
-        throw new Error(`Missing locked runtime package metadata: ${name}`);
-      }
-      return [name, { version: entry.version, integrity: entry.integrity }];
+    [...runtimePackages, ...sharpNativePackages(runtimePlatform)].map((name) => {
+      const meta = lockedPackage(lock, name);
+      return [name, { version: meta.version, integrity: meta.integrity }];
     }),
   );
   return crypto
@@ -79,9 +125,12 @@ function cacheKey(runtimePlatform) {
     .slice(0, 20);
 }
 
-function assemble(destination, runtimePlatform) {
+function assemble(destination, runtimePlatform, lock) {
   fs.mkdirSync(destination, { recursive: true });
   for (const name of runtimePackages) copyPackage(name, destination);
+  for (const name of sharpNativePackages(runtimePlatform)) {
+    ensurePackage(name, destination, lock);
+  }
 
   const sqlitePrebuild =
     runtimePlatform === "windows" ? "win32-x64.node" : "linux-x64.node";
@@ -102,18 +151,21 @@ export function prepareRuntimeDependencies({ targetName, output, cacheRoot }) {
   }
   const { runtimePlatform } = resolveBuildTarget(targetName);
   const destination = path.resolve(root, output);
+  const lock = JSON.parse(
+    fs.readFileSync(path.join(root, "package-lock.json"), "utf8"),
+  );
   const runtimeCacheRoot =
     cacheRoot ?? path.join(resolveBuildCache(), "native-runtime");
   const cache = path.join(
     runtimeCacheRoot,
-    `${runtimePlatform}-${cacheKey(runtimePlatform)}`,
+    `${runtimePlatform}-${cacheKey(runtimePlatform, lock)}`,
   );
 
   if (!fs.existsSync(cache)) {
     fs.mkdirSync(runtimeCacheRoot, { recursive: true });
     const staging = fs.mkdtempSync(path.join(runtimeCacheRoot, ".staging-"));
     try {
-      assemble(staging, runtimePlatform);
+      assemble(staging, runtimePlatform, lock);
       try {
         fs.renameSync(staging, cache);
       } catch (error) {

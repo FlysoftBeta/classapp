@@ -18,6 +18,10 @@ import {
   type PostService,
 } from "@/server/services/postsService";
 import {
+  createPostImageService,
+  type PostImageService,
+} from "@/server/services/postImagesService";
+import {
   createGroupService,
   type GroupService,
 } from "@/server/services/groupsService";
@@ -129,6 +133,7 @@ import { BUILD_ID } from "@/server/infra/env";
 import { IncidentLogArchiveService } from "@/server/services/incidentLogArchiveService";
 
 const postService = scopeEntry<PostService>("PostService");
+const postImageService = scopeEntry<PostImageService>("PostImageService");
 const groupService = scopeEntry<GroupService>("GroupService");
 const userService = scopeEntry<UserService>("UserService");
 const ghostUserService = scopeEntry<GhostUserService>("GhostUserService");
@@ -225,21 +230,33 @@ function ownerlessRecoveryFor(db: Database): OwnerlessRecovery {
 export class Composition {
   constructor(private readonly scope: Scope) {}
 
+  private postImages(): PostImageService {
+    return this.scope.getOrInit(postImageService, () =>
+      createPostImageService(this.scope.db, this.scope.blobs),
+    );
+  }
+
+  private postServiceInstance(): PostService {
+    return this.scope.getOrInit(postService, () =>
+      createPostService(this.scope.db, this.postImages()),
+    );
+  }
+
   posts(): PostActorFacade {
     return this.scope.getOrInit(
       postFacade,
       () =>
         new PostActorFacade(
           this.scope.actor(),
-          this.scope.getOrInit(postService, () =>
-            createPostService(this.scope.db),
-          ),
+          this.postServiceInstance(),
           this.scope.getOrInit(groupService, () =>
             createGroupService(this.scope.db),
           ),
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.postImages(),
+          this.scope.sticky,
         ),
     );
   }
@@ -279,9 +296,7 @@ export class Composition {
           this.scope.getOrInit(conversationService, () =>
             createConversationService(this.scope.db),
           ),
-          this.scope.getOrInit(postService, () =>
-            createPostService(this.scope.db),
-          ),
+          this.postServiceInstance(),
           this.scope.getOrInit(articleService, () =>
             createArticleService(this.scope.db, this.scope.blobs),
           ),

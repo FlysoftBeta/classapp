@@ -13,6 +13,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `MediaRuntime`           | sticky materialization, search, stream grants, quota eviction          |
 | `ArticleImportRuntime`   | sticky external import pool, queue, long-running task occupancy        |
 | `TeachDocumentsRuntime`  | sticky Office/WPS monitor child, capture, quota policy/ledger          |
+| `PostImageRuntime`       | sticky thumbnail jobs, stream leases, thumbnail cache eviction         |
 | `ExecutorPool`           | worker_threads; one SQLite connection per worker                       |
 | launcher                | version directories, child restart, pending metadata, rollback watchdog                         |
 | `UpdateRuntime`         | Coordinator sticky occupancy: staging/cloud status and launcher IPC |
@@ -48,6 +49,7 @@ Cross-stack system documents remain authoritative for behavior.
 | `GroupService`         | aggregation, discovery routes, membership, Group policy                                  |
 | `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications                                 |
 | `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles                       |
+| `PostImageService`     | durable original ingest/attach/reclaim; thumbnail cache materialization and eviction             |
 | `ArticleService`       | objective text/bundle metadata, object publication, progress mechanisms and events |
 | `BooklistService`      | owned booklist mechanics and signed article snapshots |
 | `AccessService`        | owned principal bindings and materialized flags |
