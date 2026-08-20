@@ -46,6 +46,9 @@ type BackupFile = ActionData<"adminFetchBackupsAction">["backups"][number];
 type UpdateStatus = ActionData<"adminFetchUpdateStatusAction">;
 type HttpsStatus = ActionData<"adminFetchHttpsStatusAction">;
 
+const RESTART_POLL_MS = 3_000;
+const RESTART_WAIT_MS = 120_000;
+
 export function MaintainTab({ token }: { token: string }) {
   const [httpsRedirect, setHttpsRedirect] = useState(false);
   const [cloudDeploy, setCloudDeploy] = useState(false);
@@ -213,19 +216,60 @@ export function MaintainTab({ token }: { token: string }) {
     },
   ];
 
+  const finishDeploy = (status: UpdateStatus | null, message: string) => {
+    if (status) setUpdateStatus(status);
+    setDeploying(false);
+    setDeployMsg(message);
+  };
+
   const startRestartPoll = () => {
+    const startedAt = Date.now();
     const poll = setInterval(async () => {
       try {
-        const d = await adminFetchUpdateStatus();
-        if (d) {
+        const status = await adminFetchUpdateStatus();
+        if (!status) return;
+        if (status.pending) {
           clearInterval(poll);
-          setUpdateStatus(d);
-          setDeploying(false);
+          finishDeploy(status, "");
+          return;
+        }
+        if (Date.now() - startedAt >= RESTART_WAIT_MS) {
+          clearInterval(poll);
+          finishDeploy(
+            status,
+            status.disabled
+              ? "当前环境已禁用在线更新"
+              : "服务器已恢复，但未检测到待确认更新",
+          );
         }
       } catch {
         /* not ready yet */
       }
-    }, 3000);
+    }, RESTART_POLL_MS);
+  };
+
+  const beginRestartWait = () => {
+    setDeployFile(null);
+    setDeployMsg("服务器正在重启，请稍候…");
+    startRestartPoll();
+  };
+
+  const handleDeployTransportFailure = async () => {
+    try {
+      const status = await adminFetchUpdateStatus();
+      if (status?.pending) {
+        finishDeploy(status, "");
+        setDeployFile(null);
+        return;
+      }
+      if (status && !status.pending) {
+        finishDeploy(status, "部署失败：连接中断，服务器仍在运行");
+        return;
+      }
+    } catch {
+      /* server unreachable — likely restarting */
+    }
+    beginRestartWait();
   };
 
   const handleCloudCheck = async () => {
@@ -252,11 +296,9 @@ export function MaintainTab({ token }: { token: string }) {
         await fetchUpdateStatus();
         return;
       }
-      setDeployMsg("服务器正在重启，请稍候…");
-      startRestartPoll();
+      beginRestartWait();
     } catch {
-      setDeployMsg("服务器正在重启，请稍候…");
-      startRestartPoll();
+      await handleDeployTransportFailure();
     }
   };
 
@@ -267,18 +309,13 @@ export function MaintainTab({ token }: { token: string }) {
     try {
       const res = await adminDeployPackage(token, deployFile);
       if (res.ok) {
-        setDeployMsg("服务器正在重启，请稍候…");
-        setDeployFile(null);
-        startRestartPoll();
-      } else {
-        const d = await res.json().catch(() => ({ error: "请求失败" }));
-        setDeployMsg(d.error || "部署失败");
-        setDeploying(false);
+        beginRestartWait();
+        return;
       }
+      const d = await res.json().catch(() => ({ error: "请求失败" }));
+      finishDeploy(null, d.error || "部署失败");
     } catch {
-      setDeployMsg("服务器正在重启，请稍候…");
-      setDeployFile(null);
-      startRestartPoll();
+      await handleDeployTransportFailure();
     }
   };
 

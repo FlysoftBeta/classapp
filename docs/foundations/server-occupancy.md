@@ -162,21 +162,23 @@ Facade → Service → Data on its own connection. It returns outcome, events, a
 commands. Use this for ordinary domain reads and writes.
 
 The job must not need a socket. It must not need a process timer to compute its
-result. It may *ask* sticky occupancy (next two seams) but it does not *become*
+result. It may _ask_ sticky occupancy (next two seams) but it does not _become_
 it.
 
 ### Post-commit command
 
 After the job's write is durable, the composition root applies cloneable
 commands: “execute the AI run already reserved,” “ensure this track is
-materialized.” The command must not be required to compute the Action result.
-If the process dies between commit and command, sticky restart reconciliation
-must complete or fail the durable intent. Commands are not a second transaction
-protocol.
+materialized,” “apply the staged server update.” The command must not be
+required to compute the Action or HTTP result. Deployment HTTP stages on the
+Coordinator, writes 202, then applies `update.apply` so launcher SIGTERM cannot
+eat the success response. If the process dies between commit and command,
+sticky restart reconciliation must complete or fail the durable intent.
+Commands are not a second transaction protocol.
 
 ### Synchronous RPC
 
-The job needs a result from sticky occupancy *during* the job, while holding no
+The job needs a result from sticky occupancy _during_ the job, while holding no
 SQLite transaction: a bounded search, an update status, an abort. Arguments and
 results are cloneable. A public, actor-visible failure must remain a public
 failure after crossing the seam. An unexpected failure is still an Incident on
@@ -192,7 +194,7 @@ Wrong seam, typical cost:
   heartbeats and Range.
 
 HTTP is not a fourth seam. It is Coordinator-thread occupancy for work whose
-leftover *is* the byte lease. Authorize with a short Scope, then hold the
+leftover _is_ the byte lease. Authorize with a short Scope, then hold the
 stream here. Do not occupy a job for the transfer. HTTP status codes remain
 transport outcomes, not the domain error model.
 
@@ -248,8 +250,8 @@ protocol occupancy must not observe a fact the job rolled back.
 ## Request graphs must ask occupancy, not impersonate it
 
 `Scope` and Composition exist so one Action has one Actor, one UnitOfWork, and
-one object graph. They are allowed to *call* an explicit sticky port. They are
-not allowed to *be* the owner of process leftover.
+one object graph. They are allowed to _call_ an explicit sticky port. They are
+not allowed to _be_ the owner of process leftover.
 
 A hidden import of a global database handle, a module-global manager, or
 `currentScope()` from a process-bound mechanism conceals a second occupancy.

@@ -27,6 +27,12 @@ Commands cause an imperative transition and belong in an action surface:
 delete, deactivate, reset PIN, top up, assign plan, force membership, backup,
 deploy, rollback, kill WPS, shutdown.
 
+Deploy is not a fire-and-forget upload. The workbench must not treat every
+connection reset as “server restarting”: an invalid or interrupted package
+leaves the current process running. Show restart only after a successful
+stage, and replace that message with the pending-confirmation panel once
+`backup/` exists.
+
 Do not bury commands in a generic edit form. Confirmation names target and
 consequence. Destructive commands are visually distinct but do not rely on
 color alone.

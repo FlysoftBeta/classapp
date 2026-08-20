@@ -165,12 +165,18 @@ export class Coordinator {
   }
 
   private applyCommand(command: StickyCommand): void {
-    if (command.type === "ai.execute") {
-      void this.aiRunner.execute(command.input);
-      return;
+    switch (command.type) {
+      case "ai.execute":
+        void this.aiRunner.execute(command.input);
+        return;
+      case "update.apply":
+        this.updateRuntime?.applyStagedUpdate(command.dbBackup);
+        return;
+      case "media.ensureMaterialized":
+        void this.media
+          .ensureMaterialized(command.track, command.kind)
+          .catch(() => undefined);
+        return;
     }
-    void this.media
-      .ensureMaterialized(command.track, command.kind)
-      .catch(() => undefined);
   }
 }

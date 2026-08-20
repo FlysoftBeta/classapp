@@ -68,15 +68,16 @@ is [occupancy](../foundations/server-occupancy.md).
 
 ```text
 idle
-  → validate uploaded/cloud archive and manifest
+  → validate uploaded/cloud archive and required staged files
   → replace staging directory
   → create SQLite backup
   → persist pending marker
-  → ask launcher to stop child and apply update
+  → answer the HTTP/Action caller (deployment HTTP returns 202 first)
+  → leftover `update.apply` asks launcher to stop child and apply update
   → launcher renames current→backup, staging→current
   → launcher persists DB backup name + original appliedAt
   → start new child and arm remaining-time watchdog
-  → pending confirmation
+  → pending confirmation is visible only after backup/ exists
       ├─ confirm: clear backup + pending metadata
       └─ rollback/timeout/crash: restore app + DB and restart
 ```
@@ -86,6 +87,17 @@ reports remaining status and asks for confirm/rollback; it does not start a
 second rollback timer. `appliedAt` must survive launcher restart so the
 confirmation window does not reset. The DB backup identity must survive so
 rollback restores schema and application as a pair.
+
+The running child must not tell the launcher to SIGTERM before the deploy HTTP
+response is written. `UpdateRuntime.stageDeployment` validates and stages;
+`update.apply` is Coordinator leftover after `withHttpScope` flushes 202.
+Otherwise the browser treats a connection reset as “server restarting” even
+when staging failed, or shows a pending confirmation on the old process.
+
+Status `pending: true` requires the launcher `backup/` directory, not merely
+the SQLite marker. Staging writes the marker so the new child can recover it;
+the old child must not expose confirm/rollback until the directory switch
+exists.
 
 ## Validation before switch
 
