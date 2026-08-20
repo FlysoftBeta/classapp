@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
@@ -155,12 +155,18 @@ function ImageContent({ post, online }: { post: ImagePost; online: boolean }) {
   const [thumbLoading, setThumbLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [originalLoading, setOriginalLoading] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     let created: string | null = null;
-    setThumbLoading(true);
-    setThumbUrl(null);
     void (async () => {
       const buffer = await loadPostImageThumb(post);
       if (cancelled) return;
@@ -181,41 +187,25 @@ function ImageContent({ post, online }: { post: ImagePost; online: boolean }) {
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  },
-  // Image identity fields are the cache key; latest `post` is only read for those.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  [post.image_id, post.thumb.mime, post.thumb.sha256, post.thumb.state, post.thumb.bytes],
-  );
+  }, [post.image_id]); // eslint-disable-line react-hooks/exhaustive-deps -- image_id is the cache identity
 
   useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    let created: string | null = null;
+    return () => {
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+    };
+  }, [originalUrl]);
+
+  const handleOpen = () => {
+    setOpen(true);
+    if (originalUrl || originalLoading) return;
     setOriginalLoading(true);
-    setOriginalUrl(null);
     void (async () => {
       const buffer = await loadPostImageOriginal(post);
-      if (cancelled) return;
-      if (buffer) {
-        created = objectUrlFromBytes(buffer, post.mime);
-        if (cancelled) {
-          URL.revokeObjectURL(created);
-          created = null;
-          return;
-        }
-        setOriginalUrl(created);
-      }
+      if (!mountedRef.current) return;
+      if (buffer) setOriginalUrl(objectUrlFromBytes(buffer, post.mime));
       setOriginalLoading(false);
     })();
-    return () => {
-      cancelled = true;
-      if (created) URL.revokeObjectURL(created);
-      setOriginalUrl(null);
-    };
-  },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  [open, post.image_id, post.mime, post.sha256, post.bytes],
-  );
+  };
 
   const thumbWidth = post.thumb.width || post.width;
   const thumbHeight = post.thumb.height || post.height;
@@ -225,7 +215,7 @@ function ImageContent({ post, online }: { post: ImagePost; online: boolean }) {
       <Box
         component="button"
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={handleOpen}
         aria-label="查看原图"
         sx={{
           display: "block",
@@ -491,7 +481,7 @@ export default function ChatPostCard({
           )}
 
           {post.type === "image" && !editing && (
-            <ImageContent post={post} online={online} />
+            <ImageContent key={post.image_id} post={post} online={online} />
           )}
 
           {post.type === "text" && editLoading ? (

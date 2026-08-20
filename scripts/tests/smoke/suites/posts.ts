@@ -3,7 +3,7 @@ import jpegJs from "jpeg-js";
 import type { SmokeRuntime } from "../harness";
 import { isImagePost } from "@/shared/types/api";
 
-function jpegBytes(width: number, height: number): Buffer {
+function jpegFilePart(width: number, height: number): ArrayBuffer {
   const data = new Uint8Array(width * height * 4);
   for (let i = 0; i < data.length; i += 4) {
     data[i] = 40;
@@ -12,11 +12,13 @@ function jpegBytes(width: number, height: number): Buffer {
     data[i + 3] = 255;
   }
   const encoded = jpegJs.encode({ data, width, height }, 80);
-  return Buffer.from(
+  const source =
     encoded.data instanceof Uint8Array
       ? encoded.data
-      : new Uint8Array(encoded.data),
-  );
+      : new Uint8Array(encoded.data);
+  const copy = new ArrayBuffer(source.byteLength);
+  new Uint8Array(copy).set(source);
+  return copy;
 }
 
 export async function smokePosts(runtime: SmokeRuntime): Promise<void> {
@@ -52,7 +54,7 @@ export async function smokePosts(runtime: SmokeRuntime): Promise<void> {
     },
   ]);
 
-  const jpeg = jpegBytes(64, 48);
+  const jpeg = jpegFilePart(64, 48);
   const form = new FormData();
   form.set("file", new File([jpeg], "smoke.jpg", { type: "image/jpeg" }));
   form.set("conv_id", "group:wild");

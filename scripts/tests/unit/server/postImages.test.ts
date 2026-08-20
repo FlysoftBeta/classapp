@@ -21,11 +21,13 @@ function jpegFile(width: number, height: number): File {
     data[i + 3] = 255;
   }
   const encoded = jpegJs.encode({ data, width, height }, 80);
-  const bytes =
+  const source =
     encoded.data instanceof Uint8Array
       ? encoded.data
       : new Uint8Array(encoded.data);
-  return new File([Buffer.from(bytes)], "photo.jpg", { type: "image/jpeg" });
+  const copy = new ArrayBuffer(source.byteLength);
+  new Uint8Array(copy).set(source);
+  return new File([copy], "photo.jpg", { type: "image/jpeg" });
 }
 
 async function withImages<T>(
