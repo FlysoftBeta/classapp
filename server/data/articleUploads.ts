@@ -83,7 +83,7 @@ export function listStaleArticleUploads(
 ): ArticleUploadRecord[] {
   return db
     .prepare(
-      `SELECT id, user_id, group_id, status, source_blob_id, archive_blob_id,
+      `SELECT id, user_id, booklist_id, status, source_blob_id, archive_blob_id,
               source_bytes, archive_bytes
          FROM article_uploads
         WHERE status = 'staging' AND created_at < ?
