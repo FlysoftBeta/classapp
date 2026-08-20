@@ -2,6 +2,8 @@ import type { Database } from "better-sqlite3";
 import { PublicError } from "@/server/services/incidentService";
 import { AuthorizationError } from "@/server/services/authorizationError";
 import type { AccessService } from "@/server/services/accessService";
+import type { OwnerlessCapabilityService } from "@/server/services/ownerlessCapability";
+import { touchRecent } from "@/server/data/preferences";
 import {
   addBooklistItem,
   attachGroupBooklist,
@@ -22,21 +24,22 @@ export class BooklistService {
   constructor(
     private readonly db: Database,
     private readonly access: AccessService,
+    private readonly ownerless: OwnerlessCapabilityService,
   ) {}
 
   private signed(userId: string, listId: string): BooklistSnapshot {
-    const auth = this.access.authorizeOwned(userId, "booklist", listId, "read");
+    const auth = this.access.authorize(userId, "booklist", listId, "read");
     const contents = booklistContents(this.db, listId);
-    this.access.recordRecent(userId, "booklist", listId);
+    touchRecent(this.db, userId, "booklist", listId);
     const articleIds = contents.items.map((item) => item.article_id);
     const articles = listArticlesByIds(this.db, userId, articleIds).map(
       (article) => {
-        const capability = this.access.signOwnerless(
+        const capability = this.ownerless.issue(
           "article",
           article.id,
           collectionSource("booklist", listId, contents.list.revision),
         );
-        this.access.rememberPossession(userId, "article", article.id, capability);
+        this.ownerless.remember(userId, "article", article.id, capability);
         return {
           ...article,
           group_id: article.group_id ?? contents.list.group_id,
@@ -59,7 +62,7 @@ export class BooklistService {
     const ids = this.access.listAccessibleIds(userId, "booklist");
     return listBooklistsByIds(this.db, ids).map((list) => ({
       ...list,
-      access: this.access.peekOwned(userId, "booklist", list.id),
+      access: this.access.peek(userId, "booklist", list.id),
     }));
   }
 
@@ -107,7 +110,7 @@ export class BooklistService {
     listId: string,
     articleId: string,
   ): BooklistSnapshot {
-    this.access.authorizeOwned(userId, "booklist", listId, "write");
+    this.access.authorize(userId, "booklist", listId, "write");
     addBooklistItem(this.db, listId, articleId);
     const snapshot = this.signed(userId, listId);
     if (snapshot.list.group_id) {
@@ -124,13 +127,13 @@ export class BooklistService {
     listId: string,
     articleId: string,
   ): BooklistSnapshot {
-    this.access.authorizeOwned(userId, "booklist", listId, "write");
+    this.access.authorize(userId, "booklist", listId, "write");
     removeBooklistItem(this.db, listId, articleId);
     return this.signed(userId, listId);
   }
 
   delete(userId: string, listId: string): void {
-    this.access.authorizeOwned(userId, "booklist", listId, "own");
+    this.access.authorize(userId, "booklist", listId, "own");
     this.access.dropResource("booklist", listId);
     deleteBooklist(this.db, listId);
   }

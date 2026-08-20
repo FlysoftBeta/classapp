@@ -15,6 +15,7 @@ import { PublicError } from "@/server/services/incidentService";
 import type { User } from "@/shared/types/api";
 import type { AuditService } from "@/server/services/auditService";
 import type { AccessService } from "@/server/services/accessService";
+import type { OwnerlessCapabilityService } from "@/server/services/ownerlessCapability";
 import type { BooklistService } from "@/server/services/booklistService";
 import type { AccessGrant, PrincipalRef } from "@/shared/access";
 import { collectionSource } from "@/shared/access";
@@ -29,6 +30,7 @@ export class ArticleActorFacade {
     private readonly groups: GroupService,
     private readonly audit: AuditService,
     private readonly access: AccessService,
+    private readonly ownerless: OwnerlessCapabilityService,
     private readonly booklistService: BooklistService,
   ) {}
 
@@ -55,18 +57,18 @@ export class ArticleActorFacade {
     capability?: string,
   ) {
     const article = this.articles.access(articleId);
-    const auth = this.access.authorizeOwnerless(
+    const auth = this.ownerless.require(
       userId,
       "article",
       articleId,
       capability,
     );
-    this.access.recordRecent(userId, "article", articleId);
+    this.articles.recordRecent(userId, articleId);
     return { article, capability: auth.capability };
   }
 
   private requireBooklistWrite(userId: string, booklistId: string) {
-    return this.access.authorizeOwned(userId, "booklist", booklistId, "write");
+    return this.access.authorize(userId, "booklist", booklistId, "write");
   }
 
   private withCapabilities(
@@ -77,7 +79,7 @@ export class ArticleActorFacade {
     for (const article of articles) {
       const capability =
         article.capability ??
-        this.access.presentOwnerless(userId, "article", article.id);
+        this.ownerless.peek(userId, "article", article.id);
       if (!capability) continue;
       reachable.push({ ...article, capability });
     }
@@ -138,8 +140,8 @@ export class ArticleActorFacade {
     const view = input.view === "bookmarked" ? "bookmarked" : "recent";
     const ids =
       view === "bookmarked"
-        ? this.access.listFavorites(user.id, "article", "ownerless")
-        : this.access.listRecents(user.id, "article", "ownerless");
+        ? this.articles.listFavorites(user.id)
+        : this.articles.listRecents(user.id);
     const loaded = this.articles.byIds(user.id, ids);
     return this.pageArticles(
       this.withCapabilities(user.id, loaded.articles),
@@ -152,14 +154,14 @@ export class ArticleActorFacade {
     const user = await this.actor.requireFeature("articles");
     const recents = this.withCapabilities(
       user.id,
-      this.articles.byIds(user.id, this.access.listRecents(user.id, "article", "ownerless"))
+      this.articles.byIds(user.id, this.articles.listRecents(user.id))
         .articles,
     );
     const favorites = this.withCapabilities(
       user.id,
       this.articles.byIds(
         user.id,
-        this.access.listFavorites(user.id, "article", "ownerless"),
+        this.articles.listFavorites(user.id),
       ).articles,
     );
     const users = this.articles.byIds(user.id, [
@@ -199,12 +201,12 @@ export class ArticleActorFacade {
     articleId: string,
   ): string {
     const snapshot = this.booklistService.addArticle(userId, booklistId, articleId);
-    const capability = this.access.signOwnerless(
+    const capability = this.ownerless.issue(
       "article",
       articleId,
       collectionSource("booklist", booklistId, snapshot.list.revision),
     );
-    this.access.rememberPossession(userId, "article", articleId, capability);
+    this.ownerless.remember(userId, "article", articleId, capability);
     return capability;
   }
 
@@ -337,14 +339,11 @@ export class ArticleActorFacade {
   ): Promise<{ value: boolean; updatedAt: number }> {
     const user = await this.actor.requireFeature("articles");
     this.requireAccess(user.id, articleId, capability);
-    const value = this.access.favorite(
+    const value = this.articles.setFavorite(
       user.id,
-      "article",
       articleId,
       bookmarked,
       updatedAt,
-      "ownerless",
-      capability,
     );
     this.articles.notifyPreference(user.id, articleId);
     return value;
@@ -443,7 +442,7 @@ export class ArticleActorFacade {
     capability?: string,
   ) {
     const user = await this.actor.requireFeature("articles");
-    this.access.authorizeOwnerless(user.id, "article", articleId, capability);
+    this.ownerless.require(user.id, "article", articleId, capability);
     return this.booklistService.addArticle(user.id, booklistId, articleId);
   }
 
@@ -468,7 +467,7 @@ export class ArticleActorFacade {
 
   async booklistBindings(booklistId: string) {
     const user = await this.actor.requireFeature("articles");
-    this.access.authorizeOwned(user.id, "booklist", booklistId, "read");
+    this.access.authorize(user.id, "booklist", booklistId, "read");
     return { bindings: this.booklistService.bindings(booklistId) };
   }
 }

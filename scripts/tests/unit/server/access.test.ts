@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { AccessService } from "@/server/services/accessService";
-import type { OwnerlessRecovery } from "@/server/services/accessService";
+import {
+  OwnerlessCapabilityService,
+  type OwnerlessRecovery,
+} from "@/server/services/ownerlessCapability";
 import { AuthorizationError } from "@/server/services/authorizationError";
 import { CapabilityService } from "@/server/services/capabilityService";
 import { upsertAccessBinding } from "@/server/data/access";
+import { listFavoriteIds, upsertFavorite } from "@/server/data/preferences";
 import {
   flagsCanIssue,
   flagsOfGrantSet,
@@ -79,16 +83,28 @@ function memoryAccessDb(): Database.Database {
   return db;
 }
 
-function service(db: Database.Database, recovery?: OwnerlessRecovery) {
-  return new AccessService(db, new CapabilityService("test-secret"), recovery);
+function owned(db: Database.Database) {
+  return new AccessService(db);
+}
+
+function ownerless(
+  db: Database.Database,
+  recovery?: OwnerlessRecovery,
+) {
+  return new OwnerlessCapabilityService(
+    db,
+    new CapabilityService("test-secret"),
+    owned(db),
+    recovery,
+  );
 }
 
 test("owner binding materializes full flags and authorizes write", () => {
   const db = memoryAccessDb();
   db.prepare("INSERT INTO users (id) VALUES (?)").run("alice");
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "list-1", { kind: "user", id: "alice" });
-  const auth = access.authorizeOwned("alice", "playlist", "list-1", "write");
+  const auth = access.authorize("alice", "playlist", "list-1", "write");
   assert.equal(auth.flags.own, true);
   assert.equal(auth.flags.shareOwn, true);
   assert.equal(auth.recovered, false);
@@ -97,7 +113,7 @@ test("owner binding materializes full flags and authorizes write", () => {
 test("non-shareable holder cannot grant; shareable read cannot escalate", () => {
   const db = memoryAccessDb();
   db.exec(`INSERT INTO users (id) VALUES ('alice'), ('bob'), ('carol')`);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "list-1", { kind: "user", id: "alice" });
   access.grant("alice", "playlist", "list-1", { kind: "user", id: "bob" }, {
     mode: "readwrite",
@@ -127,7 +143,7 @@ test("non-shareable holder cannot grant; shareable read cannot escalate", () => 
     mode: "read",
     shareable: false,
   });
-  const carol = access.peekOwned("carol", "playlist", "list-1");
+  const carol = access.peek("carol", "playlist", "list-1");
   assert.equal(carol.read, true);
   assert.equal(carol.write, false);
   assert.equal(carol.shareRead, false);
@@ -140,7 +156,7 @@ test("union of shareable-read and held-write does not authorize granting write",
     INSERT INTO groups (id) VALUES ('g1');
     INSERT INTO group_members (group_id, user_id) VALUES ('g1', 'bob');
   `);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "list-1", { kind: "user", id: "alice" });
   access.grant("alice", "playlist", "list-1", { kind: "user", id: "bob" }, {
     mode: "readwrite",
@@ -150,7 +166,7 @@ test("union of shareable-read and held-write does not authorize granting write",
     mode: "read",
     shareable: true,
   });
-  const flags = access.peekOwned("bob", "playlist", "list-1");
+  const flags = access.peek("bob", "playlist", "list-1");
   assert.equal(flags.read, true);
   assert.equal(flags.write, true);
   assert.equal(flags.shareRead, true);
@@ -172,17 +188,17 @@ test("leaving a group drops group-derived access unless another path remains", (
     INSERT INTO groups (id) VALUES ('g1');
     INSERT INTO group_members (group_id, user_id) VALUES ('g1', 'bob');
   `);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "group-list", { kind: "group", id: "g1" });
-  assert.equal(access.peekOwned("bob", "playlist", "group-list").read, true);
+  assert.equal(access.peek("bob", "playlist", "group-list").read, true);
   db.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(
     "g1",
     "bob",
   );
   access.onGroupMembershipChanged("bob", "g1");
-  assert.equal(access.peekOwned("bob", "playlist", "group-list").read, false);
+  assert.equal(access.peek("bob", "playlist", "group-list").read, false);
   assert.throws(
-    () => access.authorizeOwned("bob", "playlist", "group-list", "read"),
+    () => access.authorize("bob", "playlist", "group-list", "read"),
     (error: unknown) => error instanceof AuthorizationError,
   );
 
@@ -197,8 +213,8 @@ test("leaving a group drops group-derived access unless another path remains", (
     "bob",
   );
   access.onGroupMembershipChanged("bob", "g1");
-  assert.equal(access.peekOwned("bob", "playlist", "personal").own, true);
-  assert.equal(access.peekOwned("bob", "playlist", "group-list").read, false);
+  assert.equal(access.peek("bob", "playlist", "personal").own, true);
+  assert.equal(access.peek("bob", "playlist", "group-list").read, false);
 });
 
 test("favoriting does not create an independent access binding", () => {
@@ -208,14 +224,15 @@ test("favoriting does not create an independent access binding", () => {
     INSERT INTO groups (id) VALUES ('g1');
     INSERT INTO group_members (group_id, user_id) VALUES ('g1', 'bob');
   `);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "list-1", { kind: "group", id: "g1" });
-  access.favorite("bob", "playlist", "list-1", true, Date.now(), "owned");
+  upsertFavorite(db, "bob", "playlist", "list-1", true, Date.now());
   db.prepare("DELETE FROM group_members WHERE user_id = ?").run("bob");
   access.onGroupMembershipChanged("bob", "g1");
-  assert.deepEqual(access.listFavorites("bob", "playlist", "owned"), []);
+  assert.deepEqual(listFavoriteIds(db, "bob", "playlist"), ["list-1"]);
+  assert.equal(access.peek("bob", "playlist", "list-1").read, false);
   assert.throws(
-    () => access.authorizeOwned("bob", "playlist", "list-1", "read"),
+    () => access.authorize("bob", "playlist", "list-1", "read"),
     (error: unknown) => error instanceof AuthorizationError,
   );
 });
@@ -223,12 +240,12 @@ test("favoriting does not create an independent access binding", () => {
 test("materialized miss recovers from live bindings without rediscovery", () => {
   const db = memoryAccessDb();
   db.prepare("INSERT INTO users (id) VALUES (?)").run("alice");
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("notebook", "b1", { kind: "user", id: "alice" });
   db.prepare(
     "DELETE FROM access_effective WHERE user_id = ? AND resource_id = ?",
   ).run("alice", "b1");
-  const auth = access.authorizeOwned("alice", "notebook", "b1", "own");
+  const auth = access.authorize("alice", "notebook", "b1", "own");
   assert.equal(auth.recovered, true);
   assert.equal(auth.flags.own, true);
 });
@@ -254,10 +271,30 @@ test("capability HMAC verification rejects tamper, expiry, and kind mismatch", (
   );
 });
 
-test("expired ownerless capability recovers through an injected containing collection", () => {
+test("held ownerless capability authorizes without owned access or recovery", () => {
   const db = memoryAccessDb();
   db.exec(`INSERT INTO users (id) VALUES ('alice')`);
-  const access = service(db, {
+  let recoveryAsked = false;
+  const capabilities = ownerless(db, {
+    collectionsContaining() {
+      recoveryAsked = true;
+      return [];
+    },
+  });
+  const token = capabilities.issue("track", "t1", { type: "search" });
+  capabilities.remember("alice", "track", "t1", token);
+  const held = capabilities.require("alice", "track", "t1");
+  assert.equal(held.recovered, false);
+  assert.equal(held.capability, token);
+  assert.equal(recoveryAsked, false);
+  assert.equal(owned(db).peek("alice", "track", "t1").read, false);
+});
+
+test("expired ownerless capability recovers through a still-readable collection", () => {
+  const db = memoryAccessDb();
+  db.exec(`INSERT INTO users (id) VALUES ('alice')`);
+  owned(db).bindOwner("playlist", "p1", { kind: "user", id: "alice" });
+  const capabilities = ownerless(db, {
     collectionsContaining(kind, id) {
       if (kind === "track" && id === "t1") {
         return [{ kind: "playlist", id: "p1", revision: 1 }];
@@ -265,9 +302,8 @@ test("expired ownerless capability recovers through an injected containing colle
       return [];
     },
   });
-  access.bindOwner("playlist", "p1", { kind: "user", id: "alice" });
-  const expired = access.signOwnerless("track", "t1", { type: "search" }, 1);
-  const recovered = access.authorizeOwnerless(
+  const expired = capabilities.issue("track", "t1", { type: "search" }, 1);
+  const recovered = capabilities.require(
     "alice",
     "track",
     "t1",
@@ -276,8 +312,25 @@ test("expired ownerless capability recovers through an injected containing colle
   );
   assert.equal(recovered.recovered, true);
   assert.match(recovered.capability, /^c1\./);
-  const again = access.authorizeOwnerless("alice", "track", "t1", undefined);
+  const again = capabilities.require("alice", "track", "t1");
   assert.equal(again.recovered, false);
+});
+
+test("expired ownerless capability does not recover from an unreadable collection", () => {
+  const db = memoryAccessDb();
+  db.exec(`INSERT INTO users (id) VALUES ('alice'), ('bob')`);
+  owned(db).bindOwner("playlist", "p1", { kind: "user", id: "bob" });
+  const capabilities = ownerless(db, {
+    collectionsContaining() {
+      return [{ kind: "playlist", id: "p1" }];
+    },
+  });
+  const expired = capabilities.issue("track", "t1", { type: "search" }, 1);
+  assert.throws(
+    () => capabilities.require("alice", "track", "t1", expired, Date.now()),
+    (error: unknown) =>
+      error instanceof AuthorizationError && error.code === "expired_capability",
+  );
 });
 
 test("leaving a group keeps access when a personal binding remains on the same list", () => {
@@ -287,7 +340,7 @@ test("leaving a group keeps access when a personal binding remains on the same l
     INSERT INTO groups (id) VALUES ('g1');
     INSERT INTO group_members (group_id, user_id) VALUES ('g1', 'bob');
   `);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "shared", { kind: "user", id: "alice" });
   access.grant("alice", "playlist", "shared", { kind: "group", id: "g1" }, {
     mode: "read",
@@ -297,21 +350,21 @@ test("leaving a group keeps access when a personal binding remains on the same l
     mode: "read",
     shareable: false,
   });
-  assert.equal(access.peekOwned("bob", "playlist", "shared").read, true);
+  assert.equal(access.peek("bob", "playlist", "shared").read, true);
   db.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(
     "g1",
     "bob",
   );
   access.onGroupMembershipChanged("bob", "g1");
-  const auth = access.authorizeOwned("bob", "playlist", "shared", "read");
+  const auth = access.authorize("bob", "playlist", "shared", "read");
   assert.equal(auth.flags.read, true);
   assert.equal(auth.flags.own, false);
 });
 
-test("authorizeOwned rematerializes on miss without the UI rediscovering the path", () => {
+test("authorize rematerializes on miss without the UI rediscovering the path", () => {
   const db = memoryAccessDb();
   db.exec(`INSERT INTO users (id) VALUES ('alice')`);
-  const access = service(db);
+  const access = owned(db);
   upsertAccessBinding(
     db,
     "playlist",
@@ -319,7 +372,7 @@ test("authorizeOwned rematerializes on miss without the UI rediscovering the pat
     { kind: "user", id: "alice" },
     [{ mode: "owner" }],
   );
-  const auth = access.authorizeOwned("alice", "playlist", "list-1", "own");
+  const auth = access.authorize("alice", "playlist", "list-1", "own");
   assert.equal(auth.flags.own, true);
   assert.equal(auth.recovered, true);
 });
@@ -327,7 +380,7 @@ test("authorizeOwned rematerializes on miss without the UI rediscovering the pat
 test("grant to an unknown principal is rejected", () => {
   const db = memoryAccessDb();
   db.exec(`INSERT INTO users (id) VALUES ('alice')`);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("playlist", "list-1", { kind: "user", id: "alice" });
   assert.throws(
     () =>
@@ -346,15 +399,15 @@ test("joining a group rematerializes group-owned lists for the member", () => {
     INSERT INTO users (id) VALUES ('alice'), ('bob');
     INSERT INTO groups (id) VALUES ('g1');
   `);
-  const access = service(db);
+  const access = owned(db);
   access.bindOwner("booklist", "bl1", { kind: "group", id: "g1" });
-  assert.equal(access.peekOwned("bob", "booklist", "bl1").read, false);
+  assert.equal(access.peek("bob", "booklist", "bl1").read, false);
   db.prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)").run(
     "g1",
     "bob",
   );
   access.onGroupMembershipChanged("bob", "g1");
-  assert.equal(access.peekOwned("bob", "booklist", "bl1").own, true);
+  assert.equal(access.peek("bob", "booklist", "bl1").own, true);
 });
 
 test("collection capability source is domain-opaque", () => {

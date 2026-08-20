@@ -50,7 +50,8 @@ Cross-stack system documents remain authoritative for behavior.
 | `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles                       |
 | `ArticleService`       | objective text/bundle metadata, object publication, progress mechanisms and events |
 | `BooklistService`      | owned booklist mechanics and signed article snapshots |
-| `AccessService`        | principal bindings, materialized flags, ownerless capabilities and recovery |
+| `AccessService`        | owned principal bindings and materialized flags |
+| `OwnerlessCapabilityService` | HMAC token possession and recovery from a still-readable collection |
 | `CapabilityService`    | HMAC sign/verify for ownerless resource tokens |
 | `ArticleImportService` | request view of process import runtime                                                           |
 | `StickerService`       | catalog/pack mechanism; Post creation still uses Post Facade                                     |

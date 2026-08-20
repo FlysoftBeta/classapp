@@ -28,6 +28,12 @@ import {
   upsertArticleProgressOffset,
   purgeArticlesForUser,
 } from "@/server/data/articles";
+import {
+  listFavoriteIds,
+  listRecentIds,
+  touchRecent,
+  upsertFavorite,
+} from "@/server/data/preferences";
 import { groupIdsForArticle } from "@/server/data/booklists";
 import { userMetadataForIds } from "@/server/data/users";
 import {
@@ -147,6 +153,34 @@ export class ArticleService {
   notifyPreference(userId: string, articleId: string): void {
     this.publishSidebar(userId, articleId);
     this.publishList(userId, articleId);
+  }
+
+  recordRecent(userId: string, articleId: string): void {
+    touchRecent(this.db, userId, "article", articleId);
+  }
+
+  listRecents(userId: string): string[] {
+    return listRecentIds(this.db, userId, "article");
+  }
+
+  listFavorites(userId: string): string[] {
+    return listFavoriteIds(this.db, userId, "article");
+  }
+
+  setFavorite(
+    userId: string,
+    articleId: string,
+    favorited: boolean,
+    updatedAt: number,
+  ): { value: boolean; updatedAt: number } {
+    return upsertFavorite(
+      this.db,
+      userId,
+      "article",
+      articleId,
+      favorited,
+      updatedAt,
+    );
   }
 
   sidebar(userId: string): ArticleSidebarPayload {

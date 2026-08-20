@@ -3,6 +3,7 @@ import type { AuditService } from "@/server/services/auditService";
 import type { MediaService } from "@/server/services/mediaService";
 import type { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
 import type { AccessService } from "@/server/services/accessService";
+import type { OwnerlessCapabilityService } from "@/server/services/ownerlessCapability";
 import { PublicError } from "@/server/services/incidentService";
 import type { AccessGrant, PrincipalRef } from "@/shared/access";
 import type { SignedMediaTrack } from "@/shared/media/types";
@@ -18,6 +19,7 @@ export class MediaActorFacade {
     private readonly lists: MediaPlaylistService,
     private readonly audit: AuditService,
     private readonly access: AccessService,
+    private readonly ownerless: OwnerlessCapabilityService,
   ) {}
 
   private requireUser() {
@@ -29,10 +31,10 @@ export class MediaActorFacade {
     const tracks = await this.media.search(query, limit);
     return {
       tracks: tracks.map((track) => {
-        const capability = this.access.signOwnerless("track", track.id, {
+        const capability = this.ownerless.issue("track", track.id, {
           type: "search",
         });
-        this.access.rememberPossession(user.id, "track", track.id, capability);
+        this.ownerless.remember(user.id, "track", track.id, capability);
         return { track, capability };
       }),
     };
@@ -56,10 +58,10 @@ export class MediaActorFacade {
       durationMs: 0,
       thumbnailUrl: null,
     });
-    const capability = this.access.signOwnerless("track", track.id, {
+    const capability = this.ownerless.issue("track", track.id, {
       type: "search",
     });
-    this.access.rememberPossession(user.id, "track", track.id, capability);
+    this.ownerless.remember(user.id, "track", track.id, capability);
     return { track, capability };
   }
 
@@ -71,7 +73,7 @@ export class MediaActorFacade {
   addToQueue(trackId: string, capability?: string) {
     const user = this.requireUser();
     if (!this.media.track(trackId)) throw new PublicError("曲目不存在");
-    this.access.authorizeOwnerless(user.id, "track", trackId, capability);
+    this.ownerless.require(user.id, "track", trackId, capability);
     const snapshot = this.lists.addToQueue(user.id, trackId);
     this.media.prepare(trackId);
     return snapshot;
@@ -89,8 +91,8 @@ export class MediaActorFacade {
 
   play(trackId: string, capability?: string) {
     const user = this.requireUser();
-    this.access.authorizeOwnerless(user.id, "track", trackId, capability);
-    this.access.recordRecent(user.id, "track", trackId);
+    this.ownerless.require(user.id, "track", trackId, capability);
+    this.media.recordRecent(user.id, trackId);
     return this.media.play(user.id, trackId);
   }
 
@@ -117,7 +119,7 @@ export class MediaActorFacade {
   addToPlaylist(playlistId: string, trackId: string, capability?: string) {
     const user = this.requireUser();
     if (!this.media.track(trackId)) throw new PublicError("曲目不存在");
-    this.access.authorizeOwnerless(user.id, "track", trackId, capability);
+    this.ownerless.require(user.id, "track", trackId, capability);
     return this.lists.addTrack(user.id, playlistId, trackId);
   }
 
@@ -149,7 +151,7 @@ export class MediaActorFacade {
 
   playlistBindings(playlistId: string) {
     const user = this.requireUser();
-    this.access.authorizeOwned(user.id, "playlist", playlistId, "read");
+    this.access.authorize(user.id, "playlist", playlistId, "read");
     return {
       bindings: this.access.listBindings("playlist", playlistId).map((row) => ({
         principal: row.principal,
@@ -161,8 +163,8 @@ export class MediaActorFacade {
 
   library() {
     const user = this.requireUser();
-    const recentIds = this.access.listRecents(user.id, "track", "ownerless");
-    const favoriteIds = this.access.listFavorites(user.id, "track", "ownerless");
+    const recentIds = this.media.listRecents(user.id);
+    const favoriteIds = this.media.listFavorites(user.id);
     return {
       recents: this.presentTracks(user.id, recentIds),
       favorites: this.presentTracks(user.id, favoriteIds),
@@ -178,7 +180,7 @@ export class MediaActorFacade {
     for (const id of ids) {
       const track = byId.get(id);
       if (!track) continue;
-      const capability = this.access.presentOwnerless(userId, "track", id);
+      const capability = this.ownerless.peek(userId, "track", id);
       if (!capability) continue;
       rows.push({ track, capability });
     }
@@ -192,15 +194,8 @@ export class MediaActorFacade {
     capability?: string,
   ) {
     const user = this.requireUser();
-    return this.access.favorite(
-      user.id,
-      "track",
-      trackId,
-      favorited,
-      updatedAt,
-      "ownerless",
-      capability,
-    );
+    this.ownerless.require(user.id, "track", trackId, capability);
+    return this.media.setFavorite(user.id, trackId, favorited, updatedAt);
   }
 
   config() {

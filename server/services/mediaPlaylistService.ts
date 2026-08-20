@@ -13,9 +13,11 @@ import {
   updatePlaylistRetentionById,
   type MediaListContents,
 } from "@/server/data/media";
+import { touchRecent } from "@/server/data/preferences";
 import { publishUser } from "@/server/runtime/eventBus";
 import { PublicError } from "@/server/services/incidentService";
 import type { AccessService } from "@/server/services/accessService";
+import type { OwnerlessCapabilityService } from "@/server/services/ownerlessCapability";
 import type {
   MediaListSnapshot,
   MediaPlaylistSummary,
@@ -25,15 +27,15 @@ import { collectionSource, type AccessFlags, type CapabilitySource } from "@/sha
 import { AuthorizationError } from "@/server/services/authorizationError";
 
 function signContents(
-  access: AccessService,
+  ownerless: OwnerlessCapabilityService,
   userId: string,
   contents: MediaListContents,
   source: CapabilitySource,
   flags: AccessFlags,
 ): MediaListSnapshot {
   const tracks: SignedMediaTrack[] = contents.tracks.map((track) => {
-    const capability = access.signOwnerless("track", track.id, source);
-    access.rememberPossession(userId, "track", track.id, capability);
+    const capability = ownerless.issue("track", track.id, source);
+    ownerless.remember(userId, "track", track.id, capability);
     return { track, capability };
   });
   return {
@@ -48,6 +50,7 @@ export class MediaPlaylistService {
   constructor(
     private readonly db: Database,
     private readonly access: AccessService,
+    private readonly ownerless: OwnerlessCapabilityService,
   ) {}
 
   private publishQueue(userId: string, snapshot: MediaListSnapshot): void {
@@ -75,14 +78,14 @@ export class MediaPlaylistService {
 
   private signedQueue(userId: string): MediaListSnapshot {
     const contents = this.ensureQueue(userId);
-    const auth = this.access.authorizeOwned(
+    const auth = this.access.authorize(
       userId,
       "queue",
       contents.list.id,
       "read",
     );
     return signContents(
-      this.access,
+      this.ownerless,
       userId,
       contents,
       collectionSource("queue", contents.list.id),
@@ -91,11 +94,11 @@ export class MediaPlaylistService {
   }
 
   private signedPlaylist(userId: string, playlistId: string): MediaListSnapshot {
-    const auth = this.access.authorizeOwned(userId, "playlist", playlistId, "read");
+    const auth = this.access.authorize(userId, "playlist", playlistId, "read");
     const contents = playlistSnapshotById(this.db, playlistId);
-    this.access.recordRecent(userId, "playlist", playlistId);
+    touchRecent(this.db, userId, "playlist", playlistId);
     return signContents(
-      this.access,
+      this.ownerless,
       userId,
       contents,
       collectionSource("playlist", playlistId, contents.list.revision),
@@ -109,7 +112,7 @@ export class MediaPlaylistService {
 
   addToQueue(userId: string, trackId: string): MediaListSnapshot {
     const snapshot = this.db.transaction(() => {
-      this.access.authorizeOwned(
+      this.access.authorize(
         userId,
         "queue",
         this.ensureQueue(userId).list.id,
@@ -124,7 +127,7 @@ export class MediaPlaylistService {
 
   removeFromQueue(userId: string, trackId: string): MediaListSnapshot {
     const snapshot = this.db.transaction(() => {
-      this.access.authorizeOwned(
+      this.access.authorize(
         userId,
         "queue",
         this.ensureQueue(userId).list.id,
@@ -139,7 +142,7 @@ export class MediaPlaylistService {
 
   clearQueue(userId: string): MediaListSnapshot {
     const snapshot = this.db.transaction(() => {
-      this.access.authorizeOwned(
+      this.access.authorize(
         userId,
         "queue",
         this.ensureQueue(userId).list.id,
@@ -156,7 +159,7 @@ export class MediaPlaylistService {
     const ids = this.access.listAccessibleIds(userId, "playlist");
     return listPlaylistsByIds(this.db, ids).map((list) => ({
       ...list,
-      access: this.access.peekOwned(userId, "playlist", list.id),
+      access: this.access.peek(userId, "playlist", list.id),
     }));
   }
 
@@ -186,7 +189,7 @@ export class MediaPlaylistService {
   ): MediaListSnapshot {
     try {
       const snapshot = this.db.transaction(() => {
-        this.access.authorizeOwned(userId, "playlist", playlistId, "write");
+        this.access.authorize(userId, "playlist", playlistId, "write");
         addPlaylistItemById(this.db, playlistId, trackId);
         return this.signedPlaylist(userId, playlistId);
       })();
@@ -208,7 +211,7 @@ export class MediaPlaylistService {
   ): MediaListSnapshot {
     try {
       const snapshot = this.db.transaction(() => {
-        this.access.authorizeOwned(userId, "playlist", playlistId, "write");
+        this.access.authorize(userId, "playlist", playlistId, "write");
         removePlaylistItemById(this.db, playlistId, trackId);
         return this.signedPlaylist(userId, playlistId);
       })();
@@ -230,7 +233,7 @@ export class MediaPlaylistService {
   ): MediaListSnapshot {
     try {
       const snapshot = this.db.transaction(() => {
-        this.access.authorizeOwned(userId, "playlist", playlistId, "write");
+        this.access.authorize(userId, "playlist", playlistId, "write");
         updatePlaylistRetentionById(this.db, playlistId, days);
         return this.signedPlaylist(userId, playlistId);
       })();
@@ -248,7 +251,7 @@ export class MediaPlaylistService {
   delete(userId: string, playlistId: string): void {
     try {
       this.db.transaction(() => {
-        this.access.authorizeOwned(userId, "playlist", playlistId, "own");
+        this.access.authorize(userId, "playlist", playlistId, "own");
         this.access.dropResource("playlist", playlistId);
         deletePlaylistById(this.db, playlistId);
       })();

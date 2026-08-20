@@ -14,6 +14,12 @@ import { MediaError } from "@/lib/media";
 import { PublicError } from "@/server/services/incidentService";
 import { publishSystem, publishUser } from "@/server/runtime/eventBus";
 import { QuotaService } from "@/server/storage/quotaService";
+import {
+  listFavoriteIds,
+  listRecentIds,
+  touchRecent,
+  upsertFavorite,
+} from "@/server/data/preferences";
 
 export function mapMediaError(error: unknown): PublicError {
   if (error instanceof MediaError) {
@@ -134,5 +140,33 @@ export class MediaService {
 
   config() {
     return { ...mediaConfig(this.db), enabled: this.media.available };
+  }
+
+  recordRecent(userId: string, trackId: string): void {
+    touchRecent(this.db, userId, "track", trackId);
+  }
+
+  listRecents(userId: string): string[] {
+    return listRecentIds(this.db, userId, "track");
+  }
+
+  listFavorites(userId: string): string[] {
+    return listFavoriteIds(this.db, userId, "track");
+  }
+
+  setFavorite(
+    userId: string,
+    trackId: string,
+    favorited: boolean,
+    updatedAt: number,
+  ): { value: boolean; updatedAt: number } {
+    return upsertFavorite(
+      this.db,
+      userId,
+      "track",
+      trackId,
+      favorited,
+      updatedAt,
+    );
   }
 }

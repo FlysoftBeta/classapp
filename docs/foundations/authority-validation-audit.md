@@ -8,8 +8,8 @@ or client trust. Those are independent facts that a public Facade composes.
 
 ClassApp deliberately does not implement a general capability *policy language*
 for roles, features, mute, or client admission. Those remain independent
-Facade checks. Resource access for ownerless catalog objects and owned lists
-uses a **narrow** capability/binding model described in
+Facade checks. Resource access is two mechanisms in one subsystem: owned lists
+use bindings; ownerless catalog objects use held HMAC tokens. See
 [resource authorization](../systems/resource-authorization.md). That model is
 not a substitute for the dimensions below.
 

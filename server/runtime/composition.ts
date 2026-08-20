@@ -72,7 +72,10 @@ import { MediaService } from "@/server/services/mediaService";
 import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
 import { BooklistService } from "@/server/services/booklistService";
 import { AccessService } from "@/server/services/accessService";
-import type { OwnerlessRecovery } from "@/server/services/accessService";
+import {
+  OwnerlessCapabilityService,
+  type OwnerlessRecovery,
+} from "@/server/services/ownerlessCapability";
 import { CapabilityService } from "@/server/services/capabilityService";
 import { collectionsContainingTrack } from "@/server/data/media";
 import { collectionsContainingArticle } from "@/server/data/booklists";
@@ -171,6 +174,9 @@ const mediaPlaylistService = scopeEntry<MediaPlaylistService>(
   "MediaPlaylistService",
 );
 const accessService = scopeEntry<AccessService>("AccessService");
+const ownerlessCapabilityService = scopeEntry<OwnerlessCapabilityService>(
+  "OwnerlessCapabilityService",
+);
 
 const postFacade = scopeEntry<PostActorFacade>("PostActorFacade");
 const groupFacade = scopeEntry<GroupActorFacade>("GroupActorFacade");
@@ -346,7 +352,8 @@ export class Composition {
             createAuditService(this.scope.db),
           ),
           this.access(),
-          new BooklistService(this.scope.db, this.access()),
+          this.ownerless(),
+          new BooklistService(this.scope.db, this.access(), this.ownerless()),
         ),
     );
   }
@@ -560,10 +567,18 @@ export class Composition {
   access(): AccessService {
     return this.scope.getOrInit(
       accessService,
+      () => new AccessService(this.scope.db),
+    );
+  }
+
+  ownerless(): OwnerlessCapabilityService {
+    return this.scope.getOrInit(
+      ownerlessCapabilityService,
       () =>
-        new AccessService(
+        new OwnerlessCapabilityService(
           this.scope.db,
           new CapabilityService(getCapabilitySecret(this.scope.db)),
+          this.access(),
           ownerlessRecoveryFor(this.scope.db),
         ),
     );
@@ -582,12 +597,17 @@ export class Composition {
           this.scope.getOrInit(
             mediaPlaylistService,
             () =>
-              new MediaPlaylistService(this.scope.db, this.access()),
+              new MediaPlaylistService(
+                this.scope.db,
+                this.access(),
+                this.ownerless(),
+              ),
           ),
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
           this.access(),
+          this.ownerless(),
         ),
     );
   }

@@ -1,16 +1,12 @@
 import type { Database } from "better-sqlite3";
 import {
   EMPTY_ACCESS_FLAGS,
-  capabilitySourceId,
-  capabilitySourceKind,
   flagsSatisfy,
   mergeIncomingGrant,
-  recoverySource,
   unionFlagList,
   type AccessFlags,
   type AccessGrant,
   type AccessNeed,
-  type CapabilitySource,
   type PrincipalRef,
 } from "@/shared/access";
 import {
@@ -18,25 +14,17 @@ import {
   deleteBindingsForPrincipal,
   deleteBindingsForResource,
   deleteEffectiveAccess,
-  deletePossession,
   listBindingsForPrincipal,
   listBindingsForResource,
-  listFavoriteIds,
   listReadableResourceIds,
-  listRecentIds,
   readEffectiveAccess,
-  readPossession,
   upsertAccessBinding,
   upsertEffectiveAccess,
-  upsertFavorite,
-  upsertPossession,
-  touchRecent,
   principalExists,
   type EffectiveAccessRow,
 } from "@/server/data/access";
 import { listGroupMemberIds, listUserGroupIds } from "@/server/data/groups";
 import { AuthorizationError } from "@/server/services/authorizationError";
-import { CapabilityService } from "@/server/services/capabilityService";
 
 export interface OwnedAuthorization {
   flags: AccessFlags;
@@ -44,43 +32,12 @@ export interface OwnedAuthorization {
   provenance: EffectiveAccessRow["provenance"];
 }
 
-export interface OwnerlessAuthorization {
-  capability: string;
-  recovered: boolean;
-}
-
-/** A still-readable owned collection that contains an ownerless object. */
-export interface ContainingCollection {
-  kind: string;
-  id: string;
-  revision?: number;
-}
-
 /**
- * Domain port: find collections that currently contain an ownerless object.
- * AccessService then checks whether the current user can still read them.
- * Implementations live in media/articles data; this module does not query
- * playlist or booklist tables.
+ * Owned-resource access: principal×resource bindings and materialized flags.
+ * Ownerless objects (tracks, articles) have no bindings; they use capabilities.
  */
-export interface OwnerlessRecovery {
-  collectionsContaining(
-    objectKind: string,
-    objectId: string,
-  ): ContainingCollection[];
-}
-
-export type FavoriteAccessClass = "owned" | "ownerless";
-
-const EMPTY_RECOVERY: OwnerlessRecovery = {
-  collectionsContaining: () => [],
-};
-
 export class AccessService {
-  constructor(
-    private readonly db: Database,
-    private readonly capabilities: CapabilityService,
-    private readonly recovery: OwnerlessRecovery = EMPTY_RECOVERY,
-  ) {}
+  constructor(private readonly db: Database) {}
 
   liveFlags(
     userId: string,
@@ -195,7 +152,7 @@ export class AccessService {
    * Happy path reads the materialized row. On miss or stale denial, recompute
    * from live bindings and retry so the UI does not have to rediscover a path.
    */
-  authorizeOwned(
+  authorize(
     userId: string,
     resourceKind: string,
     resourceId: string,
@@ -222,7 +179,7 @@ export class AccessService {
     throw new AuthorizationError("denied");
   }
 
-  peekOwned(
+  peek(
     userId: string,
     resourceKind: string,
     resourceId: string,
@@ -244,7 +201,7 @@ export class AccessService {
     principal: PrincipalRef,
     grant: AccessGrant,
   ): AccessFlags {
-    this.authorizeOwned(actorId, resourceKind, resourceId, { share: grant });
+    this.authorize(actorId, resourceKind, resourceId, { share: grant });
     this.requirePrincipal(principal);
     const existing = listBindingsForResource(
       this.db,
@@ -263,7 +220,7 @@ export class AccessService {
       mergeIncomingGrant(existing?.grants ?? [], grant),
     );
     this.rematerializeResource(resourceKind, resourceId);
-    return this.peekOwned(actorId, resourceKind, resourceId);
+    return this.peek(actorId, resourceKind, resourceId);
   }
 
   private requirePrincipal(principal: PrincipalRef): void {
@@ -278,7 +235,7 @@ export class AccessService {
     resourceId: string,
     principal: PrincipalRef,
   ): void {
-    this.authorizeOwned(actorId, resourceKind, resourceId, "own");
+    this.authorize(actorId, resourceKind, resourceId, "own");
     if (principal.kind === "user" && principal.id === actorId) {
       throw new AuthorizationError("denied");
     }
@@ -308,204 +265,8 @@ export class AccessService {
   listBindings(resourceKind: string, resourceId: string) {
     return listBindingsForResource(this.db, resourceKind, resourceId);
   }
-
-  signOwnerless(
-    kind: string,
-    id: string,
-    source: CapabilitySource,
-    now = Date.now(),
-  ): string {
-    return this.capabilities.sign(kind, id, source, now);
-  }
-
-  rememberPossession(
-    userId: string,
-    kind: string,
-    id: string,
-    capability: string,
-    now = Date.now(),
-  ): void {
-    const verified = this.capabilities.verify(capability, { kind, id }, now);
-    if (!verified.ok) return;
-    upsertPossession(this.db, {
-      userId,
-      resourceKind: kind,
-      resourceId: id,
-      capability,
-      sourceKind: capabilitySourceKind(verified.payload.src),
-      sourceId: capabilitySourceId(verified.payload.src),
-      expiresAtMs: verified.payload.exp,
-    });
-  }
-
-  authorizeOwnerless(
-    userId: string,
-    kind: string,
-    id: string,
-    capability: string | undefined,
-    now = Date.now(),
-  ): OwnerlessAuthorization {
-    if (capability) {
-      const presented = this.capabilities.verify(
-        capability,
-        { kind, id },
-        now,
-      );
-      if (presented.ok) {
-        this.rememberPossession(userId, kind, id, presented.token, now);
-        return { capability: presented.token, recovered: false };
-      }
-      if (
-        presented.reason === "kind_mismatch" ||
-        presented.reason === "id_mismatch" ||
-        presented.reason === "invalid"
-      ) {
-        const recovered = this.recoverOwnerless(userId, kind, id, now);
-        if (recovered) return recovered;
-        throw new AuthorizationError("invalid_capability");
-      }
-    }
-
-    const stored = readPossession(this.db, userId, kind, id);
-    if (stored) {
-      const verified = this.capabilities.verify(
-        stored.capability,
-        { kind, id },
-        now,
-      );
-      if (verified.ok) {
-        return { capability: verified.token, recovered: false };
-      }
-      deletePossession(this.db, userId, kind, id);
-    }
-
-    const recovered = this.recoverOwnerless(userId, kind, id, now);
-    if (recovered) return recovered;
-    throw new AuthorizationError(
-      capability || stored ? "expired_capability" : "denied",
-    );
-  }
-
-  /** Authorize without throwing; used when assembling library aggregations. */
-  presentOwnerless(
-    userId: string,
-    kind: string,
-    id: string,
-    capability?: string,
-    now = Date.now(),
-  ): string | null {
-    try {
-      return this.authorizeOwnerless(userId, kind, id, capability, now)
-        .capability;
-    } catch (error) {
-      if (error instanceof AuthorizationError) return null;
-      throw error;
-    }
-  }
-
-  private recoverOwnerless(
-    userId: string,
-    kind: string,
-    id: string,
-    now: number,
-  ): OwnerlessAuthorization | null {
-    const containing = this.findReadableContainingCollection(userId, kind, id);
-    if (!containing) return null;
-    const token = this.capabilities.sign(
-      kind,
-      id,
-      recoverySource(containing.kind, containing.id),
-      now,
-    );
-    this.rememberPossession(userId, kind, id, token, now);
-    return { capability: token, recovered: true };
-  }
-
-  private findReadableContainingCollection(
-    userId: string,
-    kind: string,
-    id: string,
-  ): ContainingCollection | null {
-    for (const collection of this.recovery.collectionsContaining(kind, id)) {
-      const flags = this.rematerialize(userId, collection.kind, collection.id);
-      if (flags.read) return collection;
-    }
-    return null;
-  }
-
-  favorite(
-    userId: string,
-    resourceKind: string,
-    resourceId: string,
-    favorited: boolean,
-    updatedAtMs: number,
-    accessClass: FavoriteAccessClass,
-    capability?: string,
-  ): { value: boolean; updatedAt: number } {
-    if (accessClass === "owned") {
-      this.authorizeOwned(userId, resourceKind, resourceId, "read");
-    } else {
-      this.authorizeOwnerless(userId, resourceKind, resourceId, capability);
-    }
-    return upsertFavorite(
-      this.db,
-      userId,
-      resourceKind,
-      resourceId,
-      favorited,
-      updatedAtMs,
-    );
-  }
-
-  recordRecent(userId: string, resourceKind: string, resourceId: string): void {
-    touchRecent(this.db, userId, resourceKind, resourceId);
-  }
-
-  listFavorites(
-    userId: string,
-    resourceKind: string,
-    accessClass: FavoriteAccessClass,
-  ): string[] {
-    return listFavoriteIds(this.db, userId, resourceKind).filter((id) =>
-      this.stillReachable(userId, resourceKind, id, accessClass),
-    );
-  }
-
-  listRecents(
-    userId: string,
-    resourceKind: string,
-    accessClass: FavoriteAccessClass,
-    limit = 50,
-  ): string[] {
-    return listRecentIds(this.db, userId, resourceKind, limit).filter((id) =>
-      this.stillReachable(userId, resourceKind, id, accessClass),
-    );
-  }
-
-  private stillReachable(
-    userId: string,
-    resourceKind: string,
-    id: string,
-    accessClass: FavoriteAccessClass,
-  ): boolean {
-    try {
-      if (accessClass === "owned") {
-        this.authorizeOwned(userId, resourceKind, id, "read");
-      } else {
-        this.authorizeOwnerless(userId, resourceKind, id, undefined);
-      }
-      return true;
-    } catch (error) {
-      if (error instanceof AuthorizationError) return false;
-      throw error;
-    }
-  }
 }
 
-export function createAccessService(
-  db: Database,
-  capabilities: CapabilityService,
-  recovery?: OwnerlessRecovery,
-): AccessService {
-  return new AccessService(db, capabilities, recovery);
+export function createAccessService(db: Database): AccessService {
+  return new AccessService(db);
 }

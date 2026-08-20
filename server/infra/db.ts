@@ -5,7 +5,6 @@ import { rmSync } from "node:fs";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
 import { AccessService } from "@/server/services/accessService";
-import { CapabilityService } from "@/server/services/capabilityService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
@@ -465,6 +464,7 @@ const BOOKLIST_SCHEMA = `
 `;
 
 const ACCESS_SCHEMA = `
+  -- Owned: principal×resource bindings and materialized flags.
   CREATE TABLE IF NOT EXISTS access_bindings (
     resource_kind  TEXT NOT NULL,
     resource_id    TEXT NOT NULL,
@@ -499,6 +499,7 @@ const ACCESS_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_access_effective_resource
     ON access_effective(resource_kind, resource_id);
 
+  -- Ownerless: per-user cache of held HMAC tokens. Not an access binding.
   CREATE TABLE IF NOT EXISTS resource_possession (
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     resource_kind  TEXT NOT NULL,
@@ -513,6 +514,7 @@ const ACCESS_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_resource_possession_expiry
     ON resource_possession(expires_at_ms);
 
+  -- Preference overlay. These rows are not authorization.
   CREATE TABLE IF NOT EXISTS user_favorites (
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     resource_kind  TEXT NOT NULL,
@@ -928,10 +930,7 @@ function migrateV26ToV27(db: Database): void {
   db.exec("DROP TABLE IF EXISTS article_uploads");
   db.exec(ARTICLE_UPLOADS_SCHEMA);
 
-  const access = new AccessService(
-    db,
-    new CapabilityService(getCapabilitySecret(db)),
-  );
+  const access = new AccessService(db);
   const resources = db
     .prepare(
       `SELECT DISTINCT resource_kind, resource_id FROM access_bindings`,
