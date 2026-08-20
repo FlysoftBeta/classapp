@@ -40,6 +40,19 @@ ClassApp's constraints favor one atomically installed bundle and one SQLite
 writer. Added distributed ownership is a net loss until a measured premise
 changes.
 
+## Extra CSS or font assets beside `app.js`
+
+**Trap:** importing a library stylesheet the usual way
+(`import "katex/dist/katex.min.css"`) and letting Vite emit a hashed `.css`
+file or leave `url(fonts/...)` as sibling assets.
+
+Production Shell loads one JS bundle from IndexedDB. Extra CSS and font files
+are never fetched, so math or diagrams render unstyled or as tofu glyphs.
+Inline the stylesheet into `app.js` and embed the fonts that stylesheet needs.
+Keep the renderer package and the injected stylesheet on the same version:
+KaTeX 0.18 renamed internal layout classes, so 0.16 HTML against 0.18 CSS
+looks like a font problem when it is actually a class mismatch.
+
 ## Layer-name reasoning
 
 **Trap:** “it is in a Service, therefore business logic belongs here.”

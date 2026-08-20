@@ -63,7 +63,9 @@ owner rather than depend on the caller's current directory.
 - `runtime-deps.mjs` prepares the pinned native Node runtime/dependencies;
 - `build-infini.mjs`, `build-wasm.mjs`, and `build-zstd-web.mjs` build browser
   Wasm compatible with the fixed target;
-- `build-cache.mjs` owns the configurable intermediate cache location.
+- `build-cache.mjs` owns the configurable intermediate cache location;
+- `katexCss.ts` rewrites the KaTeX stylesheet to woff2 data URLs so the
+  production Shell, which fetches only `app.js`, can still typeset math.
 
 Release assembly currently runs on Linux x64 and accepts `linux-redhat`,
 `linux-debian`, or `windows`. Final archives are written to `build/`; disposable
