@@ -127,8 +127,9 @@ Owner eviction:
 - **Conversations** — may be quota-accounted as durable logical weight without
   moving message bodies into BlobStore. Attachments that are blobs are durable.
 - **Post images** — the original is durable (`post-images`, `max_weight = 0`).
-  The JPEG thumbnail is cache (`post-image-thumbs`, 512 MB, seven-day
-  half-life). Loading a post queues rebuild; eviction returns the thumb row to
+  The lossy WebP thumbnail is cache (`post-image-thumbs`, 512 MB, seven-day
+  half-life), rebuilt by sharp. Loading a post queues rebuild; eviction returns
+  the thumb row to
   `absent` and drops only the thumb blob. Staging originals older than 30
   minutes and images of tombstoned posts are reclaimed by maintenance. SQLite
   and the filesystem still cannot share a transaction: the staging row is

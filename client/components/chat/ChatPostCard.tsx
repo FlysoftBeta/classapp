@@ -145,7 +145,7 @@ function ContentText({ post, online }: { post: TextPost; online: boolean }) {
 
 function objectUrlFromBytes(buffer: ArrayBuffer, mime: string): string {
   return URL.createObjectURL(
-    new Blob([new Uint8Array(buffer)], { type: mime || "image/jpeg" }),
+    new Blob([new Uint8Array(buffer)], { type: mime || "image/webp" }),
   );
 }
 
@@ -174,7 +174,7 @@ function ImageContent({ post, online }: { post: ImagePost; online: boolean }) {
         setThumbLoading(false);
         return;
       }
-      created = objectUrlFromBytes(buffer, post.thumb.mime ?? "image/jpeg");
+      created = objectUrlFromBytes(buffer, post.thumb.mime ?? "image/webp");
       if (cancelled) {
         URL.revokeObjectURL(created);
         created = null;

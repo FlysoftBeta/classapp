@@ -90,7 +90,7 @@ export async function smokePosts(runtime: SmokeRuntime): Promise<void> {
   if (!thumb.ok) {
     throw new Error(`thumb fetch failed: ${thumb.status} ${await thumb.text()}`);
   }
-  assert.equal(thumb.headers.get("content-type"), "image/jpeg");
+  assert.equal(thumb.headers.get("content-type"), "image/webp");
   const thumbBytes = Buffer.from(await thumb.arrayBuffer());
   assert.ok(thumbBytes.byteLength > 0);
 

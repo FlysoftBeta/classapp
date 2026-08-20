@@ -60,7 +60,10 @@ owner rather than depend on the caller's current directory.
 - `build-media.mjs` verifies and copies pinned media artifacts (yt-dlp, POT
   plugin, the ClassApp music-search extractor plugin, POT server cache) for
   the selected target;
-- `runtime-deps.mjs` prepares the pinned native Node runtime/dependencies;
+- `runtime-deps.mjs` prepares the pinned Node runtime that must stay outside
+  the Vite SSR bundle: native addons including `better-sqlite3`, `bufferutil`,
+  and `sharp` (with the target's `@img/sharp-*` prebuild, fetched from the
+  lockfile when the assembler host does not have that OS package);
 - `build-infini.mjs`, `build-wasm.mjs`, and `build-zstd-web.mjs` build browser
   Wasm compatible with the fixed target;
 - `build-cache.mjs` owns the configurable intermediate cache location;

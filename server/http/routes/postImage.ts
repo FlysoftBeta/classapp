@@ -29,7 +29,7 @@ export async function GET(
       if (existing) {
         return await blobResponse(
           existing.read.body,
-          existing.image.thumb.mime ?? "image/jpeg",
+          existing.image.thumb.mime ?? "image/webp",
           existing.image.thumb.bytes,
           releaseLease,
         );
@@ -40,7 +40,7 @@ export async function GET(
       if (!nowReady) throw new PublicError("缩略图尚未就绪");
       return await blobResponse(
         nowReady.read.body,
-        nowReady.image.thumb.mime ?? "image/jpeg",
+        nowReady.image.thumb.mime ?? "image/webp",
         nowReady.image.thumb.bytes,
         releaseLease,
       );

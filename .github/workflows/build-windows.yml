@@ -86,7 +86,7 @@ jobs:
           for name in launcher.js start.bat current/server.js current/build-id.txt; do
             require bootstrap "$name"
           done
-          for name in server.js build-id.txt server/media/yt-dlp.exe server/media/pot-server/main.js node_modules/better-sqlite3/prebuilds/win32-x64.node; do
+          for name in server.js build-id.txt server/media/yt-dlp.exe server/media/pot-server/main.js node_modules/better-sqlite3/prebuilds/win32-x64.node node_modules/@img/sharp-win32-x64/package.json; do
             require deploy "$name"
           done
 

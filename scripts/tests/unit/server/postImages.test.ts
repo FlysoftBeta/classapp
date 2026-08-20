@@ -137,6 +137,7 @@ test("thumbnail materialization is a rebuildable cache view", async () => {
     const ready = await images.openThumb(imageId);
     assert.ok(ready);
     assert.equal(ready.image.thumb.state, "ready");
+    assert.equal(ready.image.thumb.mime, "image/webp");
     assert.equal(ready.image.thumb.width, 320);
     assert.equal(ready.image.thumb.height, 160);
     const dropped = await images.evictThumb(imageId);

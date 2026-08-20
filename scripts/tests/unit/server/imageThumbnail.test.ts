@@ -61,21 +61,31 @@ test("inspects jpeg and png dimensions without decoding the full raster twice", 
   assert.equal(png.height, 9);
 });
 
-test("renders a jpeg thumbnail whose longest edge is at most 320", () => {
+test("renders a lossy webp thumbnail whose longest edge is at most 320", async () => {
   const original = jpegBytes(400, 200);
-  const thumb = renderPostImageThumbnail(original);
-  assert.equal(thumb.mime, "image/jpeg");
+  const thumb = await renderPostImageThumbnail(original);
+  assert.equal(thumb.mime, "image/webp");
   assert.equal(thumb.width, THUMBNAIL_MAX_EDGE);
   assert.equal(thumb.height, THUMBNAIL_MAX_EDGE / 2);
-  assert.equal(detectPostImageMime(thumb.bytes), "image/jpeg");
+  assert.equal(detectPostImageMime(thumb.bytes), "image/webp");
   assert.ok(thumb.bytes.byteLength > 0);
-  assert.ok(thumb.bytes.byteLength < original.byteLength);
+  assert.ok(thumb.bytes.byteLength < 64_000);
 });
 
-test("keeps already-small images inside the thumbnail bound", () => {
-  const thumb = renderPostImageThumbnail(pngBytes(40, 30));
+test("keeps already-small images inside the thumbnail bound", async () => {
+  const thumb = await renderPostImageThumbnail(pngBytes(40, 30));
+  assert.equal(thumb.mime, "image/webp");
   assert.equal(thumb.width, 40);
   assert.equal(thumb.height, 30);
   assert.equal(canRenderPostImageThumbnail("image/png"), true);
-  assert.equal(canRenderPostImageThumbnail("image/webp"), false);
+  assert.equal(canRenderPostImageThumbnail("image/webp"), true);
+});
+
+test("rebuilds a thumbnail from a webp original", async () => {
+  const webpOriginal = (await renderPostImageThumbnail(jpegBytes(80, 60))).bytes;
+  assert.equal(inspectPostImage(webpOriginal).mime, "image/webp");
+  const thumb = await renderPostImageThumbnail(webpOriginal);
+  assert.equal(thumb.mime, "image/webp");
+  assert.equal(thumb.width, 80);
+  assert.equal(thumb.height, 60);
 });

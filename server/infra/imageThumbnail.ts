@@ -1,7 +1,5 @@
 import { PublicError } from "@/server/services/incidentService";
-import jpegJs from "jpeg-js";
-import { GifReader } from "omggif";
-import { PNG } from "pngjs";
+import sharp from "sharp";
 
 export const POST_IMAGE_MIME = [
   "image/jpeg",
@@ -12,22 +10,9 @@ export const POST_IMAGE_MIME = [
 export type PostImageMime = (typeof POST_IMAGE_MIME)[number];
 
 export const THUMBNAIL_MAX_EDGE = 320;
-export const THUMBNAIL_JPEG_QUALITY = 72;
-export const THUMBNAIL_MIME = "image/jpeg";
+export const THUMBNAIL_WEBP_QUALITY = 75;
+export const THUMBNAIL_MIME = "image/webp";
 const MAX_DECODE_PIXELS = 40_000_000;
-
-interface JpegCodec {
-  decode: (
-    data: Uint8Array,
-    opts?: { useTArray?: boolean; maxResolutionInMP?: number },
-  ) => { width: number; height: number; data: Uint8Array };
-  encode: (
-    image: { data: Uint8Array; width: number; height: number },
-    quality?: number,
-  ) => { data: Uint8Array };
-}
-
-const jpeg = jpegJs as unknown as JpegCodec;
 
 export interface ImageInfo {
   mime: PostImageMime;
@@ -173,144 +158,74 @@ export function inspectPostImage(bytes: Uint8Array): ImageInfo {
   return { mime, ...size };
 }
 
-function thumbnailSize(width: number, height: number): {
-  width: number;
-  height: number;
-} {
-  const edge = Math.max(width, height);
-  if (edge <= THUMBNAIL_MAX_EDGE) return { width, height };
-  const scale = THUMBNAIL_MAX_EDGE / edge;
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
-  };
-}
-
-function compositeOnWhite(pixels: Uint8Array): void {
-  for (let i = 0; i < pixels.byteLength; i += 4) {
-    const alpha = pixels[i + 3]! / 255;
-    if (alpha >= 1) continue;
-    pixels[i] = Math.round(pixels[i]! * alpha + 255 * (1 - alpha));
-    pixels[i + 1] = Math.round(pixels[i + 1]! * alpha + 255 * (1 - alpha));
-    pixels[i + 2] = Math.round(pixels[i + 2]! * alpha + 255 * (1 - alpha));
-    pixels[i + 3] = 255;
-  }
-}
-
-function resizeRgba(
-  src: Uint8Array,
-  sourceWidth: number,
-  sourceHeight: number,
-  destWidth: number,
-  destHeight: number,
-): Uint8Array {
-  if (sourceWidth === destWidth && sourceHeight === destHeight) return src;
-  const dest = new Uint8Array(destWidth * destHeight * 4);
-  const xRatio = sourceWidth === 1 ? 0 : (sourceWidth - 1) / Math.max(1, destWidth - 1);
-  const yRatio =
-    sourceHeight === 1 ? 0 : (sourceHeight - 1) / Math.max(1, destHeight - 1);
-  for (let y = 0; y < destHeight; y += 1) {
-    const sourceY = y * yRatio;
-    const y0 = Math.floor(sourceY);
-    const y1 = Math.min(sourceHeight - 1, y0 + 1);
-    const fy = sourceY - y0;
-    for (let x = 0; x < destWidth; x += 1) {
-      const sourceX = x * xRatio;
-      const x0 = Math.floor(sourceX);
-      const x1 = Math.min(sourceWidth - 1, x0 + 1);
-      const fx = sourceX - x0;
-      const destIndex = (y * destWidth + x) * 4;
-      for (let channel = 0; channel < 4; channel += 1) {
-        const c00 = src[(y0 * sourceWidth + x0) * 4 + channel]!;
-        const c10 = src[(y0 * sourceWidth + x1) * 4 + channel]!;
-        const c01 = src[(y1 * sourceWidth + x0) * 4 + channel]!;
-        const c11 = src[(y1 * sourceWidth + x1) * 4 + channel]!;
-        dest[destIndex + channel] = Math.round(
-          c00 * (1 - fx) * (1 - fy) +
-            c10 * fx * (1 - fy) +
-            c01 * (1 - fx) * fy +
-            c11 * fx * fy,
-        );
-      }
-    }
-  }
-  return dest;
-}
-
-function decodeRgba(
-  bytes: Uint8Array,
-  info: ImageInfo,
-): { width: number; height: number; data: Uint8Array } {
-  if (info.mime === "image/jpeg") {
-    const decoded = jpeg.decode(bytes, {
-      useTArray: true,
-      maxResolutionInMP: MAX_DECODE_PIXELS / 1_000_000,
-    });
-    return {
-      width: decoded.width,
-      height: decoded.height,
-      data: decoded.data,
-    };
-  }
-  if (info.mime === "image/png") {
-    const png = PNG.sync.read(Buffer.from(bytes));
-    return { width: png.width, height: png.height, data: png.data };
-  }
-  if (info.mime === "image/gif") {
-    const reader = new GifReader(Buffer.from(bytes));
-    const data = new Uint8Array(reader.width * reader.height * 4);
-    reader.decodeAndBlitFrameRGBA(0, data);
-    return { width: reader.width, height: reader.height, data };
-  }
-  throw new PublicError("暂不支持生成该格式的缩略图");
-}
-
-function encodeJpeg(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-): Uint8Array {
-  const encoded = jpeg.encode(
-    { data: pixels, width, height },
-    THUMBNAIL_JPEG_QUALITY,
-  );
-  return encoded.data instanceof Uint8Array
-    ? encoded.data
-    : new Uint8Array(encoded.data);
-}
-
 /** True when both edges already fit the thumbnail bound. */
 export function fitsThumbnailBound(width: number, height: number): boolean {
   return Math.max(width, height) <= THUMBNAIL_MAX_EDGE;
 }
 
+function copyIndependentBytes(data: Uint8Array): Uint8Array {
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return copy;
+}
+
+function isUserImageError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /unsupported image format|corrupt|Input buffer contains unsupported image format|Input file is missing|VipsJpeg|VipsPng|VipsWebP|gifload|limitInputPixels|exceeds pixel limit/i.test(
+    error.message,
+  );
+}
+
 /**
- * Rebuild a JPEG thumbnail from a decodable original. WebP is not decoded
- * here; callers may copy an already-small original as the cache bytes.
+ * Rebuild a lossy WebP thumbnail from a decodable original. Sharp stays
+ * outside the Vite SSR bundle so its platform `@img/sharp-*` addons remain
+ * loadable; runtime-deps.mjs copies the target's prebuilds.
  */
-export function renderPostImageThumbnail(bytes: Uint8Array): ThumbnailBytes {
+export async function renderPostImageThumbnail(
+  bytes: Uint8Array,
+): Promise<ThumbnailBytes> {
   const info = inspectPostImage(bytes);
   if (!canRenderPostImageThumbnail(info.mime)) {
     throw new PublicError("暂不支持生成该格式的缩略图");
   }
-  const target = thumbnailSize(info.width, info.height);
-  const decoded = decodeRgba(bytes, info);
-  compositeOnWhite(decoded.data);
-  const resized = resizeRgba(
-    decoded.data,
-    decoded.width,
-    decoded.height,
-    target.width,
-    target.height,
-  );
-  return {
-    mime: THUMBNAIL_MIME,
-    bytes: encodeJpeg(resized, target.width, target.height),
-    width: target.width,
-    height: target.height,
-  };
+  try {
+    const rendered = await sharp(bytes, {
+      failOn: "error",
+      limitInputPixels: MAX_DECODE_PIXELS,
+      pages: 1,
+      sequentialRead: true,
+    })
+      .rotate()
+      .resize({
+        width: THUMBNAIL_MAX_EDGE,
+        height: THUMBNAIL_MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: THUMBNAIL_WEBP_QUALITY,
+        effort: 4,
+        smartSubsample: true,
+      })
+      .toBuffer({ resolveWithObject: true });
+    return {
+      mime: THUMBNAIL_MIME,
+      bytes: copyIndependentBytes(rendered.data),
+      width: rendered.info.width,
+      height: rendered.info.height,
+    };
+  } catch (error) {
+    if (error instanceof PublicError) throw error;
+    if (isUserImageError(error)) throw new PublicError("无法生成缩略图");
+    throw error;
+  }
 }
 
 export function canRenderPostImageThumbnail(mime: PostImageMime): boolean {
-  return mime === "image/jpeg" || mime === "image/png" || mime === "image/gif";
+  return (
+    mime === "image/jpeg" ||
+    mime === "image/png" ||
+    mime === "image/gif" ||
+    mime === "image/webp"
+  );
 }

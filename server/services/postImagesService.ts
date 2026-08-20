@@ -24,12 +24,9 @@ import {
   type PostImageRecord,
 } from "@/server/data/postImages";
 import {
-  canRenderPostImageThumbnail,
   detectPostImageMime,
-  fitsThumbnailBound,
   inspectPostImage,
   renderPostImageThumbnail,
-  type PostImageMime,
 } from "@/server/infra/imageThumbnail";
 
 export const POST_IMAGE_POOL = "post-images";
@@ -204,20 +201,11 @@ export class PostImageService {
     let width: number;
     let height: number;
     try {
-      if (canRenderPostImageThumbnail(image.mime as PostImageMime)) {
-        const rendered = renderPostImageThumbnail(original);
-        thumbBytes = rendered.bytes;
-        mime = rendered.mime;
-        width = rendered.width;
-        height = rendered.height;
-      } else if (fitsThumbnailBound(image.width, image.height)) {
-        thumbBytes = original;
-        mime = image.mime;
-        width = image.width;
-        height = image.height;
-      } else {
-        throw new PublicError("暂不支持生成该格式的缩略图");
-      }
+      const rendered = await renderPostImageThumbnail(original);
+      thumbBytes = rendered.bytes;
+      mime = rendered.mime;
+      width = rendered.width;
+      height = rendered.height;
     } catch (error) {
       markThumbFailed(this.db, imageId, generation);
       throw error;

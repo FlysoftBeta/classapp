@@ -37,11 +37,11 @@ export default defineConfig({
   },
   ssr: {
     // Keep native addons, ws, and Playwright external. Their self-contained
-    // runtime files are assembled by scripts/prepare-runtime-deps.mjs for each
-    // release. Playwright's CommonJS dependency graph uses __dirname, which
-    // cannot run when Rollup flattens it into this ESM bundle.
+    // runtime files are assembled by runtime-deps.mjs for each release.
+    // Playwright's CommonJS graph uses __dirname; sharp loads platform
+    // `@img/sharp-*` addons. Neither survives Rolldown flattening.
     noExternal: true,
-    external: ["better-sqlite3", "ws", "playwright"],
+    external: ["better-sqlite3", "ws", "playwright", "sharp"],
   },
   build: {
     // Packaged beside the server bundle for private Incident symbolication.
