@@ -75,29 +75,31 @@ handles into historical content, membership, or operational rows.
 
 ## Articles
 
-Every Article belongs to a Group. Access follows current membership. Creation
-may be author or administrator policy, while objective insertion/render
-metadata lives in `ArticleService`/Data.
+Articles are ownerless immutable objects. `origin_group_id` records where they
+were published; it is not an ACL. Access is a signed capability issued when a
+booklist, recent/favorite aggregation, or other legitimate snapshot includes
+the article. Booklists are owned collections with principal access bindings.
+A group chat's article view opens that group's booklist. Schema v27 migrated
+existing group-chat articles as ownerless booklist items, not owned resources.
+
+Creation still requires group membership and posting policy. Objective
+insertion/render metadata lives in `ArticleService`/Data. Bookmarks and resume
+state are user preferences and do not create independent access. See
+[resource authorization](./resource-authorization.md).
 
 Providers are currently:
 
 - text: immutable UTF-16-offset segments of at most 10,000 code units;
 - bundle: immutable source/render archive identity and item count.
 
-Bookmarks, resume offset, furthest progress, reading duration, and list
-membership are actor/user state, not Article core. Title/author presentation
-classification must remain explicit; “everything returned by API is immutable”
-is false.
-
 The Article wire entity contains `user_id`, never `username` or `handle`.
 Client presentation joins its author from `domain_users`; the persisted Article
 core is a positive field list rather than an `Omit` blacklist, so adding a new
 wire presentation field cannot silently expand the immutable core.
 
-Article lists use keyset pagination with `(list_sort_at, id)`. The three current
-views (`all`, `bookmarked`, `recent`) have different server-owned sort values.
-Never restore OFFSET/total merely for UI convenience; Infini consumes bounded
-cursor pages.
+Article Center aggregations are recents, favorites, and reachable booklists,
+not a global “all articles” collection. Booklist pages are finite snapshots.
+Never restore OFFSET/total merely for UI convenience.
 
 ## Cross-domain effects
 

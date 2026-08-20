@@ -3,6 +3,8 @@ import {
   articleSidebarPayloadSchema,
   articleWithMetaSchema,
   adminGroupSchema,
+  booklistSnapshotSchema,
+  booklistSummarySchema,
   conversationEntitySchema,
   groupSchema,
   groupMemberSchema,
@@ -35,7 +37,14 @@ import {
   mediaPlaylistSummarySchema,
   mediaQueueSnapshotSchema,
   mediaTrackSchema,
+  signedMediaTrackSchema,
 } from "@/shared/media/types";
+import {
+  accessBindingSchema,
+  accessGrantSchema,
+  capabilityTokenSchema,
+  principalRefSchema,
+} from "@/shared/access";
 import {
   createPostPayloadSchema,
   createStickerPostPayloadSchema,
@@ -596,6 +605,7 @@ export const actionContracts = {
     object({
       article: articleWithMetaSchema,
       users: z.array(userMetadataSchema),
+      capability: capabilityTokenSchema,
     }),
   ),
   searchNetworkArticlesAction: contract(
@@ -625,6 +635,71 @@ export const actionContracts = {
   listNetworkArticleDownloadsAction: contract(
     noArgs,
     object({ tasks: z.array(articleImportTaskSchema) }),
+  ),
+  articlesLibraryAction: contract(
+    noArgs,
+    object({
+      recents: z.array(articleWithMetaSchema),
+      favorites: z.array(articleWithMetaSchema),
+      booklists: z.array(booklistSummarySchema),
+      users: z.array(userMetadataSchema),
+    }),
+  ),
+  booklistListAction: contract(
+    noArgs,
+    object({ booklists: z.array(booklistSummarySchema) }),
+  ),
+  booklistFetchAction: contract(one(nonEmptyString), booklistSnapshotSchema),
+  booklistForGroupAction: contract(
+    one(object({ groupId: nonEmptyString })),
+    booklistSnapshotSchema.nullable(),
+  ),
+  booklistCreateAction: contract(
+    one(object({ title: z.string().min(1).max(80) })),
+    booklistSnapshotSchema,
+  ),
+  booklistDeleteAction: contract(one(nonEmptyString), okSchema),
+  booklistAddArticleAction: contract(
+    one(
+      object({
+        booklistId: nonEmptyString,
+        articleId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
+    booklistSnapshotSchema,
+  ),
+  booklistRemoveArticleAction: contract(
+    one(
+      object({
+        booklistId: nonEmptyString,
+        articleId: nonEmptyString,
+      }),
+    ),
+    booklistSnapshotSchema,
+  ),
+  booklistGrantAccessAction: contract(
+    one(
+      object({
+        booklistId: nonEmptyString,
+        principal: principalRefSchema,
+        grant: accessGrantSchema,
+      }),
+    ),
+    booklistSnapshotSchema,
+  ),
+  booklistRevokeAccessAction: contract(
+    one(
+      object({
+        booklistId: nonEmptyString,
+        principal: principalRefSchema,
+      }),
+    ),
+    booklistSnapshotSchema,
+  ),
+  booklistListBindingsAction: contract(
+    one(object({ booklistId: nonEmptyString })),
+    object({ bindings: z.array(accessBindingSchema) }),
   ),
   fetchArticleAction: contract(
     one(nonEmptyString),
@@ -661,6 +736,7 @@ export const actionContracts = {
         articleId: nonEmptyString,
         bookmarked: z.boolean(),
         updatedAt: timestamp,
+        capability: capabilityTokenSchema.optional(),
       }),
     ),
     booleanValueSchema,
@@ -1059,7 +1135,7 @@ export const actionContracts = {
         limit: z.number().int().positive().max(50).optional(),
       }),
     ),
-    object({ tracks: z.array(mediaTrackSchema) }),
+    object({ tracks: z.array(signedMediaTrackSchema) }),
   ),
   mediaEnsureTrackAction: contract(
     one(
@@ -1069,11 +1145,16 @@ export const actionContracts = {
         canonicalUrl: z.string().optional(),
       }),
     ),
-    object({ track: mediaTrackSchema }),
+    object({ track: mediaTrackSchema, capability: capabilityTokenSchema }),
   ),
   mediaFetchQueueAction: contract(noArgs, mediaQueueSnapshotSchema),
   mediaAddToQueueAction: contract(
-    one(object({ trackId: nonEmptyString })),
+    one(
+      object({
+        trackId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
     mediaQueueSnapshotSchema,
   ),
   mediaRemoveFromQueueAction: contract(
@@ -1082,7 +1163,12 @@ export const actionContracts = {
   ),
   mediaClearQueueAction: contract(noArgs, mediaQueueSnapshotSchema),
   mediaPlayAction: contract(
-    one(object({ trackId: nonEmptyString })),
+    one(
+      object({
+        trackId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
     object({
       grant_token: z.string(),
       url: z.string(),
@@ -1107,6 +1193,7 @@ export const actionContracts = {
       object({
         playlistId: nonEmptyString,
         trackId: nonEmptyString,
+        capability: capabilityTokenSchema.optional(),
       }),
     ),
     mediaPlaylistSnapshotSchema,
@@ -1128,6 +1215,48 @@ export const actionContracts = {
       }),
     ),
     mediaPlaylistSnapshotSchema,
+  ),
+  mediaGrantPlaylistAccessAction: contract(
+    one(
+      object({
+        playlistId: nonEmptyString,
+        principal: principalRefSchema,
+        grant: accessGrantSchema,
+      }),
+    ),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaRevokePlaylistAccessAction: contract(
+    one(
+      object({
+        playlistId: nonEmptyString,
+        principal: principalRefSchema,
+      }),
+    ),
+    mediaPlaylistSnapshotSchema,
+  ),
+  mediaListPlaylistBindingsAction: contract(
+    one(object({ playlistId: nonEmptyString })),
+    object({ bindings: z.array(accessBindingSchema) }),
+  ),
+  mediaLibraryAction: contract(
+    noArgs,
+    object({
+      recents: z.array(signedMediaTrackSchema),
+      favorites: z.array(signedMediaTrackSchema),
+      playlists: z.array(mediaPlaylistSummarySchema),
+    }),
+  ),
+  mediaSetTrackFavoriteAction: contract(
+    one(
+      object({
+        trackId: nonEmptyString,
+        favorited: z.boolean(),
+        updatedAt: timestamp,
+        capability: capabilityTokenSchema.optional(),
+      }),
+    ),
+    booleanValueSchema,
   ),
   mediaFetchConfigAction: contract(noArgs, mediaConfigSchema),
   mediaAdminUpdateConfigAction: contract(

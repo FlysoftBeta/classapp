@@ -1,78 +1,39 @@
-import React, {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useEffect, useState } from "react";
 import { alpha } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
 import IconButton from "@mui/material/IconButton";
-import Divider from "@mui/material/Divider";
-import Chip from "@mui/material/Chip";
+import Button from "@mui/material/Button";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArticleIcon from "@mui/icons-material/Article";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
+import MenuBookIcon from "@mui/icons-material/MenuBook";
+import AddIcon from "@mui/icons-material/Add";
 import type { Article, Conversation } from "@/client/interact/presentation";
+import type { BooklistSnapshot, BooklistSummary } from "@/shared/types/api";
 import { formatBytes } from "@/shared/bytes";
 import { flexGap, vh } from "@/client/lib/css";
 import { ArticleImportFab } from "./ArticleImportFab";
-import InfiniView from "@/client/components/shared/InfiniView";
-import type { Provider } from "@infini-scroll/core";
-import { useInfini } from "@infini-scroll/react";
+import { AccessibleListRow } from "@/client/components/library/AccessibleListRow";
+import { LibrarySection } from "@/client/components/library/LibrarySection";
 import {
-  listArticles,
-  type ArticleListCursor,
+  createBooklist,
+  fetchArticlesLibrary,
+  fetchGroupBooklist,
 } from "@/client/interact/articles";
-import { useObservedElementHeight } from "@/client/hooks/useObservedElementHeight";
-import { InfiniId } from "@/client/components/debug/InfiniId";
-import { useDebugStore } from "@/client/hooks/useDebugStore";
-
-const RECENT_ARTICLES_ID = "article-list:recent";
-
-interface RecentArticlesRow {
-  kind: "recent";
-  id: typeof RECENT_ARTICLES_ID;
-  articles: Article[];
-}
-
-interface ArticleEntryRow {
-  kind: "article";
-  article: Article;
-  offset: number;
-  cursor: ArticleListCursor;
-}
-
-type ArticleRow = RecentArticlesRow | ArticleEntryRow;
-
-const ARTICLE_PAGE_SIZE = 50;
-const ARTICLE_ROW_HEIGHT = 58;
-interface ArticleCursor {
-  sortAt: string;
-  id: string;
-}
-
-const ARTICLE_OPS = {
-  getId: (row: ArticleRow) => (row.kind === "recent" ? row.id : row.article.id),
-  getCursor: (row: ArticleRow): ArticleCursor => ({
-    sortAt: row.kind === "recent" ? "" : row.cursor.sortAt,
-    id: row.kind === "recent" ? "" : row.cursor.id,
-  }),
-};
-
-function estimateArticleRowSize(row: ArticleRow): number {
-  if (row.kind === "article") return ARTICLE_ROW_HEIGHT;
-  return 28 + (row.articles.length > 0 ? 45 + row.articles.length * 58 : 0);
-}
+import TextField from "@mui/material/TextField";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 
 interface ArticleListProps {
   sidebarArticles?: Article[];
   currentArticleId?: string | null;
   onOpenArticle: (id: string) => void;
+  onOpenBooklist: (booklistId: string) => void;
   refreshKey: number;
   onBack?: () => void;
   token: string;
@@ -92,14 +53,7 @@ function formatArticleSize(a: Article) {
   return `${(a.content_length ?? 0).toLocaleString()}字`;
 }
 
-function formatReadTime(seconds: number) {
-  if (seconds < 60) return `${seconds}秒`;
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}分钟`;
-  return `${Math.floor(mins / 60)}小时${mins % 60}分`;
-}
-
-const ArticleVirtualRow = React.memo(function ArticleVirtualRow({
+function ArticleRow({
   article,
   selected,
   onOpenArticle,
@@ -109,19 +63,22 @@ const ArticleVirtualRow = React.memo(function ArticleVirtualRow({
   onOpenArticle: (id: string) => void;
 }) {
   return (
-    <Box data-infini-id={article.id} sx={{ width: "100%" }}>
-      <InfiniId id={article.id} />
-      <ListItemButton
-        selected={selected}
-        onClick={() => onOpenArticle(article.id)}
-        sx={{
-          width: "calc(100% - 8px)",
-          px: 1.5,
-          py: 0.75,
-          borderRadius: 1,
-          mx: 0.5,
-        }}
-      >
+    <ListItemButton
+      selected={selected}
+      onClick={() => onOpenArticle(article.id)}
+      sx={{
+        width: "calc(100% - 8px)",
+        px: 1.5,
+        py: 0.75,
+        borderRadius: 1,
+        mx: 0.5,
+      }}
+    >
+      {article.is_bookmarked ? (
+        <BookmarkIcon
+          sx={{ mr: 1, fontSize: 14, color: "primary.main", flexShrink: 0 }}
+        />
+      ) : (
         <ArticleIcon
           sx={{
             mr: 1,
@@ -130,172 +87,22 @@ const ArticleVirtualRow = React.memo(function ArticleVirtualRow({
             flexShrink: 0,
           }}
         />
-        <ListItemText
-          primary={article.title}
-          secondary={`${formatDate(article.created_at)} · ${formatArticleSize(article)}`}
-          primaryTypographyProps={{
-            variant: "body2",
-            noWrap: true,
-            fontWeight: selected ? 700 : 400,
-          }}
-          secondaryTypographyProps={{
-            variant: "caption",
-            noWrap: true,
-          }}
-        />
-        {article.is_bookmarked && (
-          <BookmarkIcon
-            sx={{
-              fontSize: 12,
-              ml: 0.5,
-              color: "primary.main",
-              flexShrink: 0,
-            }}
-          />
-        )}
-      </ListItemButton>
-    </Box>
-  );
-});
-
-const RecentArticlesVirtualRow = React.memo(function RecentArticlesVirtualRow({
-  articles,
-  currentArticleId,
-  showEmpty,
-  onOpenArticle,
-}: {
-  articles: Article[];
-  currentArticleId: string | null;
-  showEmpty: boolean;
-  onOpenArticle: (id: string) => void;
-}) {
-  return (
-    <Box
-      data-infini-id={RECENT_ARTICLES_ID}
-      sx={{ width: "100%", overflowX: "hidden" }}
-    >
-      {articles.length > 0 && (
-        <>
-          <Typography
-            variant="caption"
-            sx={{
-              px: 1.5,
-              pt: 1.5,
-              pb: 0.5,
-              display: "flex",
-              alignItems: "center",
-              ...flexGap(0.5),
-              color: "text.disabled",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              fontSize: 10,
-            }}
-          >
-            <ArticleIcon sx={{ fontSize: 11 }} />
-            最近阅读
-          </Typography>
-          <List disablePadding dense>
-            {articles.map((article) => {
-              const selected = currentArticleId === article.id;
-              return (
-                <ListItemButton
-                  key={`recent-${article.id}`}
-                  selected={selected}
-                  onClick={() => onOpenArticle(article.id)}
-                  sx={{
-                    width: "calc(100% - 8px)",
-                    px: 1.5,
-                    py: 0.75,
-                    borderRadius: 1,
-                    mx: 0.5,
-                  }}
-                >
-                  {article.is_bookmarked ? (
-                    <BookmarkIcon
-                      sx={{
-                        mr: 1,
-                        fontSize: 14,
-                        color: "primary.main",
-                        flexShrink: 0,
-                      }}
-                    />
-                  ) : (
-                    <ArticleIcon
-                      sx={{
-                        mr: 1,
-                        fontSize: 14,
-                        color: selected ? "primary.main" : "text.secondary",
-                        flexShrink: 0,
-                      }}
-                    />
-                  )}
-                  <ListItemText
-                    primary={article.title}
-                    secondary={`${formatArticleSize(article)}${
-                      (article.total_read_seconds ?? 0) > 0
-                        ? ` · 已读 ${formatReadTime(article.total_read_seconds ?? 0)}`
-                        : ""
-                    }`}
-                    primaryTypographyProps={{
-                      variant: "body2",
-                      noWrap: true,
-                      fontWeight: selected ? 700 : 500,
-                    }}
-                    secondaryTypographyProps={{
-                      variant: "caption",
-                      noWrap: true,
-                    }}
-                  />
-                  {article.current_offset > 0 && article.content_length > 0 && (
-                    <Chip
-                      label={`${Math.round(
-                        (article.current_offset / article.content_length) * 100,
-                      )}%`}
-                      size="small"
-                      variant="outlined"
-                      sx={{ ml: 0.5, flexShrink: 0, fontSize: 10 }}
-                    />
-                  )}
-                </ListItemButton>
-              );
-            })}
-          </List>
-          <Divider sx={{ my: 1 }} />
-        </>
       )}
-
-      <Typography
-        variant="caption"
-        sx={{
-          px: 1.5,
-          pt: articles.length > 0 ? 0 : 1.5,
-          pb: 0.5,
-          display: "block",
-          color: "text.disabled",
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          fontSize: 10,
+      <ListItemText
+        primary={article.title}
+        secondary={`${formatDate(article.created_at)} · ${formatArticleSize(article)}`}
+        primaryTypographyProps={{
+          variant: "body2",
+          noWrap: true,
+          fontWeight: selected ? 700 : 400,
         }}
-      >
-        全部文章
-      </Typography>
-
-      {showEmpty && (
-        <Box sx={{ p: 2, textAlign: "center" }}>
-          <Typography variant="caption" color="text.disabled">
-            还没有文章
-          </Typography>
-        </Box>
-      )}
-    </Box>
+        secondaryTypographyProps={{ variant: "caption", noWrap: true }}
+      />
+    </ListItemButton>
   );
-});
-
-function ignoreArticleCreated(): void {
-  // article.list_updated owns invalidation, matching the other Infini consumers.
 }
+
+function ignoreArticleCreated(): void {}
 
 export default function ArticleList({
   refreshKey,
@@ -303,7 +110,7 @@ export default function ArticleList({
   ...props
 }: ArticleListProps) {
   return (
-    <ArticleListSession
+    <ArticleLibrary
       key={`${refreshKey}:${conversation?.type ?? "all"}:${conversation?.id ?? "all"}`}
       refreshKey={refreshKey}
       conversation={conversation}
@@ -312,227 +119,48 @@ export default function ArticleList({
   );
 }
 
-function ArticleListSession({
+function ArticleLibrary({
   sidebarArticles = [],
   currentArticleId = null,
   onOpenArticle,
+  onOpenBooklist,
   onBack,
   token,
   downloadEnabled,
   conversation,
 }: ArticleListProps) {
   const groupId = conversation?.type === "group" ? conversation.id : undefined;
-  const scopedSidebarArticles = useMemo(
-    () =>
-      groupId
-        ? sidebarArticles.filter((article) => article.group_id === groupId)
-        : sidebarArticles,
-    [groupId, sidebarArticles],
+  const [recents, setRecents] = useState<Article[]>(sidebarArticles);
+  const [favorites, setFavorites] = useState<Article[]>([]);
+  const [booklists, setBooklists] = useState<BooklistSummary[]>([]);
+  const [groupSnapshot, setGroupSnapshot] = useState<BooklistSnapshot | null>(
+    null,
   );
-  const showInfiniLogs = useDebugStore((state) => state.showInfiniLogs);
-  const [total, setTotal] = useState(0);
-  const totalRef = useRef(0);
-  const sidebarArticlesRef = useRef(scopedSidebarArticles);
-  const [headerRef, headerHeight] = useObservedElementHeight<HTMLDivElement>();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [title, setTitle] = useState("");
 
-  useLayoutEffect(() => {
-    sidebarArticlesRef.current = scopedSidebarArticles;
-  }, [scopedSidebarArticles]);
-
-  const loadRows = useCallback(
-    async (start: number, wanted: number, signal: AbortSignal) => {
-      const rows: ArticleEntryRow[] = [];
-      let offset = Math.max(0, start);
-      let knownTotal = totalRef.current;
-      while (rows.length < wanted) {
-        const data = await listArticles(offset, groupId);
-        if (signal.aborted) throw new Error("article list request superseded");
-        if (!data) throw new Error("article list request failed");
-        knownTotal = data.total ?? 0;
-        totalRef.current = knownTotal;
-        setTotal(knownTotal);
-        const articles = data.articles ?? [];
-        rows.push(
-          ...articles.map<ArticleEntryRow>((article, index) => ({
-            kind: "article",
-            article,
-            offset: offset + index,
-            cursor: {
-              sortAt: article.list_sort_at ?? article.created_at,
-              id: article.id,
-            },
-          })),
-        );
-        offset += articles.length;
-        if (
-          articles.length < ARTICLE_PAGE_SIZE ||
-          offset >= knownTotal ||
-          articles.length === 0
-        ) {
-          break;
-        }
-      }
-      return { rows, total: knownTotal };
-    },
-    [groupId],
-  );
-
-  const provider: Provider<ArticleRow, ArticleCursor, string> = {
-    async bootstrap({ targetSize, signal }) {
-      const wanted = Math.max(
-        ARTICLE_PAGE_SIZE,
-        Math.ceil(targetSize / ARTICLE_ROW_HEIGHT) + 4,
-      );
-      const target = 0;
-      const start = target === 0 ? 0 : Math.max(0, target - wanted / 2);
-      const normalizedStart = Math.floor(start);
-      const loaded = await loadRows(normalizedStart, wanted, signal);
-      const items: ArticleRow[] =
-        normalizedStart === 0
-          ? [
-              {
-                kind: "recent",
-                id: RECENT_ARTICLES_ID,
-                articles: sidebarArticlesRef.current,
-              },
-              ...loaded.rows,
-            ]
-          : loaded.rows;
-      return {
-        items,
-        exhaustedBefore: normalizedStart === 0,
-        exhaustedAfter: normalizedStart + loaded.rows.length >= loaded.total,
+  useEffect(() => {
+    let cancelled = false;
+    if (groupId) {
+      void fetchGroupBooklist(groupId).then((snapshot) => {
+        if (!cancelled) setGroupSnapshot(snapshot);
+      });
+      return () => {
+        cancelled = true;
       };
-    },
-    async fetch({ cursor, direction, targetSize, signal }) {
-      const wanted = Math.max(
-        ARTICLE_PAGE_SIZE,
-        Math.ceil(targetSize / ARTICLE_ROW_HEIGHT) + 4,
-      );
-      if (direction === "before") {
-        if (!cursor.id) {
-          return {
-            items: [],
-            exhaustedBefore: true,
-            exhaustedAfter: false,
-          };
-        }
-        const data = await listArticles(cursor, "before", groupId);
-        if (signal.aborted) throw new Error("article list request superseded");
-        if (!data) throw new Error("article list request failed");
-        const rows = data.articles.map<ArticleEntryRow>((article, index) => ({
-          kind: "article",
-          article,
-          offset: Math.max(0, cursor.id ? -wanted + index : index),
-          cursor: {
-            sortAt: article.list_sort_at ?? article.created_at,
-            id: article.id,
-          },
-        }));
-        const items: ArticleRow[] = !data.hasMore
-          ? [
-              {
-                kind: "recent",
-                id: RECENT_ARTICLES_ID,
-                articles: sidebarArticlesRef.current,
-              },
-              ...rows,
-            ]
-          : rows;
-        return {
-          items,
-          exhaustedBefore: !data.hasMore,
-          exhaustedAfter: false,
-        };
-      }
-      const data = await listArticles(cursor, "after", groupId);
-      if (signal.aborted) throw new Error("article list request superseded");
-      if (!data) throw new Error("article list request failed");
-      return {
-        items: data.articles.map<ArticleEntryRow>((article, index) => ({
-          kind: "article",
-          article,
-          offset: index,
-          cursor: {
-            sortAt: article.list_sort_at ?? article.created_at,
-            id: article.id,
-          },
-        })),
-        exhaustedBefore: false,
-        exhaustedAfter: !data.hasMore,
-      };
-    },
-    async locateOffset({ anchor, signedItemOffset, signal }) {
-      const anchorOffset = anchor.kind === "recent" ? 0 : anchor.offset;
-      const upper = Math.max(0, totalRef.current - 1);
-      const target = Math.max(
-        0,
-        Math.min(upper, anchorOffset + signedItemOffset),
-      );
-      const data = await listArticles(target, groupId);
-      if (signal.aborted)
-        throw new Error("article list locate request superseded");
-      if (!data) throw new Error("article list locate request failed");
-      totalRef.current = data.total ?? 0;
-      setTotal(totalRef.current);
-      return {
-        cursor: {
-          sortAt:
-            data.articles[0]?.list_sort_at ??
-            data.articles[0]?.created_at ??
-            "",
-          id: data.articles[0]?.id ?? "",
-        },
-        targetId: data.articles[0]?.id ?? RECENT_ARTICLES_ID,
-      };
-    },
-  };
+    }
+    void fetchArticlesLibrary().then((library) => {
+      if (cancelled || !library) return;
+      setRecents(library.recents);
+      setFavorites(library.favorites);
+      setBooklists(library.booklists);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId]);
 
-  const { controller, snapshot } = useInfini<ArticleRow, ArticleCursor, string>(
-    {
-      debug: showInfiniLogs ? "ArticleList" : undefined,
-      provider,
-      ops: ARTICLE_OPS,
-      estimateSize: estimateArticleRowSize,
-      initial: { cursor: null, alignment: "start" },
-      residentBefore: 8,
-      residentAfter: 8,
-      defaultItemEstimate: ARTICLE_ROW_HEIGHT,
-    },
-  );
-
-  useLayoutEffect(() => {
-    controller.updateExternal([
-      {
-        kind: "recent",
-        id: RECENT_ARTICLES_ID,
-        articles: scopedSidebarArticles,
-      },
-    ]);
-  }, [controller, scopedSidebarArticles]);
-
-  const renderRow = useCallback(
-    (row: ArticleRow) => {
-      if (row.kind === "recent") {
-        return (
-          <RecentArticlesVirtualRow
-            articles={row.articles}
-            currentArticleId={currentArticleId}
-            showEmpty={snapshot.phase.status === "ready" && total === 0}
-            onOpenArticle={onOpenArticle}
-          />
-        );
-      }
-      return (
-        <ArticleVirtualRow
-          article={row.article}
-          selected={currentArticleId === row.article.id}
-          onOpenArticle={onOpenArticle}
-        />
-      );
-    },
-    [currentArticleId, onOpenArticle, snapshot.phase.status, total],
-  );
+  const groupArticles = groupSnapshot?.articles ?? [];
 
   return (
     <Box
@@ -544,7 +172,6 @@ function ArticleListSession({
       }}
     >
       <Box
-        ref={headerRef}
         sx={(theme) => ({
           px: 1.5,
           py: 1,
@@ -567,39 +194,69 @@ function ArticleListSession({
         )}
         <Typography variant="subtitle2" sx={{ flex: 1, fontWeight: 700 }}>
           {conversation?.type === "group"
-            ? `# ${conversation.name} 的文章`
+            ? `# ${conversation.name} 的文单`
             : "文章"}
         </Typography>
-        {total > 0 && <Chip label={total} size="small" variant="outlined" />}
+        {!groupId && (
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setCreateOpen(true)}
+          >
+            新建文单
+          </Button>
+        )}
       </Box>
 
-      <InfiniView
-        controller={controller}
-        snapshot={snapshot}
-        renderItem={renderRow}
-        beforeLabel="加载较新的文章"
-        afterLabel="加载更多文章"
-        onRetry={controller.retry.bind(controller)}
-        paddingStart={headerHeight}
-        layoutBefore={1800}
-        layoutAfter={1800}
-        anchorRatio={0}
-        rootSx={{
-          position: "relative",
-          minHeight: snapshot.mainLength ? 0 : 96,
-        }}
-        footer={
-          total > 0 && snapshot.exhaustedAfter ? (
-            <Typography
-              variant="caption"
-              color="text.disabled"
-              sx={{ display: "block", py: 1, textAlign: "center" }}
-            >
-              已到末尾 · 共 {total} 篇
-            </Typography>
-          ) : null
-        }
-      />
+      <Box sx={{ overflowY: "auto", pb: 10 }}>
+        {groupId ? (
+          <LibrarySection title="文单内容" empty="这本文单还是空的">
+            {groupArticles.map((article) => (
+              <ArticleRow
+                key={article.id}
+                article={article}
+                selected={currentArticleId === article.id}
+                onOpenArticle={onOpenArticle}
+              />
+            ))}
+          </LibrarySection>
+        ) : (
+          <>
+            <LibrarySection title="最近阅读" empty="还没有阅读记录">
+              {recents.map((article) => (
+                <ArticleRow
+                  key={`recent-${article.id}`}
+                  article={article}
+                  selected={currentArticleId === article.id}
+                  onOpenArticle={onOpenArticle}
+                />
+              ))}
+            </LibrarySection>
+            <LibrarySection title="收藏" empty="还没有收藏文章">
+              {favorites.map((article) => (
+                <ArticleRow
+                  key={`fav-${article.id}`}
+                  article={article}
+                  selected={currentArticleId === article.id}
+                  onOpenArticle={onOpenArticle}
+                />
+              ))}
+            </LibrarySection>
+            <LibrarySection title="文单" empty="还没有可访问的文单">
+              {booklists.map((list) => (
+                <AccessibleListRow
+                  key={list.id}
+                  title={list.title}
+                  subtitle={`${list.item_count} 篇`}
+                  icon={<MenuBookIcon fontSize="small" color="disabled" />}
+                  onOpen={() => onOpenBooklist(list.id)}
+                />
+              ))}
+            </LibrarySection>
+          </>
+        )}
+      </Box>
+
       {conversation?.type === "group" && (
         <ArticleImportFab
           token={token}
@@ -607,6 +264,37 @@ function ArticleListSession({
           downloadEnabled={downloadEnabled}
           onCreated={ignoreArticleCreated}
         />
+      )}
+      {createOpen && (
+        <Dialog open onClose={() => setCreateOpen(false)} fullWidth maxWidth="xs">
+          <DialogTitle>新建文单</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              fullWidth
+              margin="dense"
+              label="文单名称"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button
+              variant="contained"
+              disabled={!title.trim()}
+              onClick={() => {
+                void createBooklist(title.trim()).then((snapshot) => {
+                  setCreateOpen(false);
+                  setTitle("");
+                  if (snapshot) onOpenBooklist(snapshot.list.id);
+                });
+              }}
+            >
+              创建
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
     </Box>
   );

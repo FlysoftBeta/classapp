@@ -8,7 +8,7 @@ import Typography from "@mui/material/Typography";
 import PlaylistAddIcon from "@mui/icons-material/PlaylistAdd";
 import AddIcon from "@mui/icons-material/Add";
 import MusicNoteIcon from "@mui/icons-material/MusicNote";
-import type { MediaListSnapshot } from "@/shared/media/types";
+import type { MediaListView } from "@/shared/media/types";
 import { addTrackToPlaylist } from "@/client/interact/media";
 import { useApplicationStore } from "@/client/interact/appStore";
 import { useMediaStore } from "@/client/interact/mediaStore";
@@ -32,7 +32,7 @@ export function AddToPlaylistButton({
     void addTrackToPlaylist(playlistId, trackId);
   };
 
-  const handleCreated = (snapshot: MediaListSnapshot | null) => {
+  const handleCreated = (snapshot: MediaListView | null) => {
     setCreateOpen(false);
     if (snapshot) void addTrackToPlaylist(snapshot.list.id, trackId);
   };

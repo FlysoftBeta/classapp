@@ -1,10 +1,15 @@
 import type { MediaTrack } from "@/shared/media/types";
 import { lbAssetUrl } from "@/client/lib/loadBalancer";
+import { trackCapability } from "@/client/interact/capabilities";
 
 /** Session-authenticated server cover route; never external image URLs. */
 export function coverUrlForTrack(trackId: string, token: string): string {
+  const capability = trackCapability(trackId);
+  const extra = capability
+    ? `&capability=${encodeURIComponent(capability)}`
+    : "";
   return lbAssetUrl(
-    `/api/media/tracks/${encodeURIComponent(trackId)}/cover?token=${encodeURIComponent(token)}`,
+    `/api/media/tracks/${encodeURIComponent(trackId)}/cover?token=${encodeURIComponent(token)}${extra}`,
   );
 }
 

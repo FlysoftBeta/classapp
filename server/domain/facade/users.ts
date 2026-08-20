@@ -20,7 +20,7 @@ import type { AiService } from "@/server/services/ai/aiService";
 import type { AiBillingService } from "@/server/services/ai/aiBillingService";
 import { PublicError } from "@/server/services/incidentService";
 import type { AuditService } from "@/server/services/auditService";
-import type { UnitOfWork } from "@/server/runtime/unitOfWork";
+import type { AccessService } from "@/server/services/accessService";
 
 export class UserActorFacade {
   constructor(
@@ -37,6 +37,7 @@ export class UserActorFacade {
     private readonly ai: AiService,
     private readonly aiBilling: AiBillingService,
     private readonly audit: AuditService,
+    private readonly access: AccessService,
     private readonly unitOfWork: UnitOfWork,
   ) {}
 
@@ -171,6 +172,7 @@ export class UserActorFacade {
     this.userConfig.purgeUser(userId);
     await this.ai.purgeUser(userId);
     this.aiBilling.purgeUser(userId);
+    this.access.onUserPurged(userId);
     this.users.purgeIdentity(userId);
     this.audit.record({
       actorId: admin.id,

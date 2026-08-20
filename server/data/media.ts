@@ -3,7 +3,6 @@ import type { Database } from "better-sqlite3";
 import type {
   MediaAsset,
   MediaConfig,
-  MediaListSnapshot,
   MediaPlaylistSummary,
   MediaTrack,
 } from "@/shared/media/types";
@@ -12,6 +11,8 @@ import {
   upsertQuotaPool,
   type QuotaPoolPolicy,
 } from "@/server/data/quota";
+import { findQueueListId, setUserQueue } from "@/server/data/access";
+import { EMPTY_ACCESS_FLAGS } from "@/shared/access";
 
 export interface TrackInput {
   source: string;
@@ -39,12 +40,12 @@ export interface MediaAssetRow {
 
 interface MediaListRow {
   id: string;
-  kind: "playlist" | "queue";
-  owner_user_id: string;
+  kind: "playlist" | "queue" | "booklist";
   title: string;
   revision: number;
   retention_days: number;
   expires_at: string | null;
+  origin_group_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +54,12 @@ interface MediaListItemRow {
   track_id: string;
   position: number;
   added_at: string;
+}
+
+export interface MediaListContents {
+  list: MediaPlaylistSummary;
+  items: MediaListItemRow[];
+  tracks: MediaTrack[];
 }
 
 const TRACK_SELECT = `
@@ -284,8 +291,8 @@ export function touchTrack(db: Database, trackId: string): void {
 // ── Lists ────────────────────────────────────────────────────────────────────
 
 const LIST_SELECT = `
-  SELECT l.id, l.kind, l.owner_user_id, l.title, l.revision,
-         l.retention_days, l.expires_at, l.created_at, l.updated_at,
+  SELECT l.id, l.kind, l.title, l.revision,
+         l.retention_days, l.expires_at, l.origin_group_id, l.created_at, l.updated_at,
          (SELECT t.id
             FROM media_list_items i
             JOIN media_tracks t ON t.id = i.track_id
@@ -298,15 +305,19 @@ const QUEUE_TTL_HOURS = 24;
 const QUEUE_TITLE = "播放队列";
 
 export function getOrCreateQueue(db: Database, userId: string): MediaListRow {
+  const existingId = findQueueListId(db, userId);
+  if (existingId) {
+    return db
+      .prepare(`${LIST_SELECT} WHERE id = ?`)
+      .get(existingId) as MediaListRow;
+  }
+  const id = crypto.randomUUID();
   db.prepare(
-    `INSERT INTO media_lists (id, kind, owner_user_id, title, expires_at)
-     VALUES (?, 'queue', ?, ?, datetime('now', '+${QUEUE_TTL_HOURS} hours'))
-     ON CONFLICT(owner_user_id) WHERE kind = 'queue'
-     DO NOTHING`,
-  ).run(crypto.randomUUID(), userId, QUEUE_TITLE);
-  return db
-    .prepare(`${LIST_SELECT} WHERE kind = 'queue' AND owner_user_id = ?`)
-    .get(userId) as MediaListRow;
+    `INSERT INTO media_lists (id, kind, title, expires_at)
+     VALUES (?, 'queue', ?, datetime('now', '+${QUEUE_TTL_HOURS} hours'))`,
+  ).run(id, QUEUE_TITLE);
+  setUserQueue(db, userId, id);
+  return db.prepare(`${LIST_SELECT} WHERE id = ?`).get(id) as MediaListRow;
 }
 
 function touchList(db: Database, list: MediaListRow): void {
@@ -332,9 +343,12 @@ function summaryFromRow(
     retention_days: Number(value.retention_days),
     created_at: String(value.created_at),
     updated_at: String(value.updated_at),
+    origin_group_id:
+      typeof value.origin_group_id === "string" ? value.origin_group_id : null,
     track_count: trackCount,
     cover_track_id:
       typeof value.cover_track_id === "string" ? value.cover_track_id : null,
+    access: EMPTY_ACCESS_FLAGS,
   };
 }
 
@@ -360,7 +374,7 @@ function listSummary(
 export function listSnapshots(
   db: Database,
   rows: Array<Record<string, unknown>>,
-): MediaListSnapshot[] {
+): MediaListContents[] {
   const trackIds = new Set<string>();
   for (const row of rows) {
     for (const item of itemsForList(db, String(row.id))) {
@@ -380,7 +394,7 @@ export function listSnapshots(
   });
 }
 
-export function queueSnapshot(db: Database, userId: string): MediaListSnapshot {
+export function queueSnapshot(db: Database, userId: string): MediaListContents {
   const queue = getOrCreateQueue(db, userId);
   const items = itemsForList(db, queue.id);
   const tracks = listTracks(
@@ -398,7 +412,7 @@ export function addQueueItem(
   db: Database,
   userId: string,
   trackId: string,
-): MediaListSnapshot {
+): MediaListContents {
   const queue = getOrCreateQueue(db, userId);
   const row = db
     .prepare(
@@ -416,7 +430,7 @@ export function removeQueueItem(
   db: Database,
   userId: string,
   trackId: string,
-): MediaListSnapshot {
+): MediaListContents {
   const queue = getOrCreateQueue(db, userId);
   const row = db
     .prepare(
@@ -433,49 +447,43 @@ export function removeQueueItem(
   return queueSnapshot(db, userId);
 }
 
-export function clearQueue(db: Database, userId: string): MediaListSnapshot {
+export function clearQueue(db: Database, userId: string): MediaListContents {
   const queue = getOrCreateQueue(db, userId);
   db.prepare("DELETE FROM media_list_items WHERE list_id = ?").run(queue.id);
   touchList(db, queue);
   return queueSnapshot(db, userId);
 }
 
-export function listPlaylists(
+export function listPlaylistsByIds(
   db: Database,
-  userId: string,
+  listIds: string[],
 ): MediaPlaylistSummary[] {
+  if (listIds.length === 0) return [];
+  const placeholders = listIds.map(() => "?").join(", ");
   const rows = db
     .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ?
+      `${LIST_SELECT} WHERE kind = 'playlist' AND id IN (${placeholders})
        ORDER BY updated_at DESC`,
     )
-    .all(userId) as Array<Record<string, unknown>>;
+    .all(...listIds) as Array<Record<string, unknown>>;
   return rows.map((row) => listSummary(db, row));
 }
 
-export function createPlaylist(
-  db: Database,
-  userId: string,
-  title: string,
-): MediaListSnapshot {
+export function createPlaylistRow(db: Database, title: string): string {
   const id = crypto.randomUUID();
   db.prepare(
-    `INSERT INTO media_lists (id, kind, owner_user_id, title)
-     VALUES (?, 'playlist', ?, ?)`,
-  ).run(id, userId, title);
-  return playlistSnapshot(db, userId, id);
+    `INSERT INTO media_lists (id, kind, title) VALUES (?, 'playlist', ?)`,
+  ).run(id, title);
+  return id;
 }
 
-export function playlistSnapshot(
+export function playlistSnapshotById(
   db: Database,
-  userId: string,
   listId: string,
-): MediaListSnapshot {
+): MediaListContents {
   const row = db
-    .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ? AND id = ?`,
-    )
-    .get(userId, listId) as Record<string, unknown> | undefined;
+    .prepare(`${LIST_SELECT} WHERE kind = 'playlist' AND id = ?`)
+    .get(listId) as Record<string, unknown> | undefined;
   if (!row) throw new Error("playlist not found");
   const items = itemsForList(db, listId);
   return {
@@ -488,18 +496,23 @@ export function playlistSnapshot(
   };
 }
 
-export function addPlaylistItem(
+export function requirePlaylistRow(
   db: Database,
-  userId: string,
+  listId: string,
+): MediaListRow {
+  const list = db
+    .prepare(`${LIST_SELECT} WHERE kind = 'playlist' AND id = ?`)
+    .get(listId) as MediaListRow | undefined;
+  if (!list) throw new Error("playlist not found");
+  return list;
+}
+
+export function addPlaylistItemById(
+  db: Database,
   listId: string,
   trackId: string,
-): MediaListSnapshot {
-  const list = db
-    .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ? AND id = ?`,
-    )
-    .get(userId, listId) as MediaListRow | undefined;
-  if (!list) throw new Error("playlist not found");
+): MediaListContents {
+  const list = requirePlaylistRow(db, listId);
   const existing = db
     .prepare(
       "SELECT 1 FROM media_list_items WHERE list_id = ? AND track_id = ?",
@@ -516,7 +529,77 @@ export function addPlaylistItem(
     ).run(listId, position.position, trackId);
     touchList(db, list);
   }
-  return playlistSnapshot(db, userId, listId);
+  return playlistSnapshotById(db, listId);
+}
+
+export function removePlaylistItemById(
+  db: Database,
+  listId: string,
+  trackId: string,
+): MediaListContents {
+  const list = requirePlaylistRow(db, listId);
+  db.prepare(
+    "DELETE FROM media_list_items WHERE list_id = ? AND track_id = ?",
+  ).run(listId, trackId);
+  renumberItems(db, listId);
+  touchList(db, list);
+  return playlistSnapshotById(db, listId);
+}
+
+export function updatePlaylistRetentionById(
+  db: Database,
+  listId: string,
+  days: number,
+): MediaListContents {
+  requirePlaylistRow(db, listId);
+  db.prepare(
+    `UPDATE media_lists SET retention_days = ?, revision = revision + 1,
+       updated_at = datetime('now') WHERE id = ?`,
+  ).run(days, listId);
+  return playlistSnapshotById(db, listId);
+}
+
+export function deletePlaylistById(db: Database, listId: string): void {
+  requirePlaylistRow(db, listId);
+  db.prepare("DELETE FROM media_list_items WHERE list_id = ?").run(listId);
+  db.prepare("DELETE FROM media_lists WHERE id = ?").run(listId);
+}
+
+export function listPlaylists(
+  db: Database,
+  userId: string,
+): MediaPlaylistSummary[] {
+  void userId;
+  return [];
+}
+
+export function createPlaylist(
+  db: Database,
+  userId: string,
+  title: string,
+): MediaListContents {
+  void userId;
+  const id = createPlaylistRow(db, title);
+  return playlistSnapshotById(db, id);
+}
+
+export function playlistSnapshot(
+  db: Database,
+  userId: string,
+  listId: string,
+): MediaListContents {
+  void userId;
+  return playlistSnapshotById(db, listId);
+}
+
+export function addPlaylistItem(
+  db: Database,
+  userId: string,
+  listId: string,
+  trackId: string,
+): MediaListContents {
+  void userId;
+  return addPlaylistItemById(db, listId, trackId);
 }
 
 export function removePlaylistItem(
@@ -524,19 +607,9 @@ export function removePlaylistItem(
   userId: string,
   listId: string,
   trackId: string,
-): MediaListSnapshot {
-  const list = db
-    .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ? AND id = ?`,
-    )
-    .get(userId, listId) as MediaListRow | undefined;
-  if (!list) throw new Error("playlist not found");
-  db.prepare(
-    "DELETE FROM media_list_items WHERE list_id = ? AND track_id = ?",
-  ).run(listId, trackId);
-  renumberItems(db, listId);
-  touchList(db, list);
-  return playlistSnapshot(db, userId, listId);
+): MediaListContents {
+  void userId;
+  return removePlaylistItemById(db, listId, trackId);
 }
 
 export function updatePlaylistRetention(
@@ -544,18 +617,9 @@ export function updatePlaylistRetention(
   userId: string,
   listId: string,
   days: number,
-): MediaListSnapshot {
-  const list = db
-    .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ? AND id = ?`,
-    )
-    .get(userId, listId) as MediaListRow | undefined;
-  if (!list) throw new Error("playlist not found");
-  db.prepare(
-    `UPDATE media_lists SET retention_days = ?, revision = revision + 1,
-       updated_at = datetime('now') WHERE id = ?`,
-  ).run(days, listId);
-  return playlistSnapshot(db, userId, listId);
+): MediaListContents {
+  void userId;
+  return updatePlaylistRetentionById(db, listId, days);
 }
 
 export function deletePlaylist(
@@ -563,15 +627,8 @@ export function deletePlaylist(
   userId: string,
   listId: string,
 ): void {
-  const list = db
-    .prepare(
-      `${LIST_SELECT} WHERE kind = 'playlist' AND owner_user_id = ? AND id = ?`,
-    )
-    .get(userId, listId) as MediaListRow | undefined;
-  if (!list) throw new Error("playlist not found");
-  // Explicit item deletion guarantees the ref_count triggers run.
-  db.prepare("DELETE FROM media_list_items WHERE list_id = ?").run(listId);
-  db.prepare("DELETE FROM media_lists WHERE id = ?").run(listId);
+  void userId;
+  deletePlaylistById(db, listId);
 }
 
 function renumberItems(db: Database, listId: string): void {

@@ -48,7 +48,10 @@ Cross-stack system documents remain authoritative for behavior.
 | `GroupService`         | aggregation, discovery routes, membership, Group policy                                  |
 | `ConversationService`  | directory, DMs, revisions, read/pin/mute/draft and notifications                                 |
 | `PostService`          | objective Post creation/current revision/tombstone/pagination/side bundles                       |
-| `ArticleService`       | objective text/bundle metadata, object publication, list/progress/bookmark mechanisms and events |
+| `ArticleService`       | objective text/bundle metadata, object publication, progress mechanisms and events |
+| `BooklistService`      | owned booklist mechanics and signed article snapshots |
+| `AccessService`        | principal bindings, materialized flags, ownerless capabilities and recovery |
+| `CapabilityService`    | HMAC sign/verify for ownerless resource tokens |
 | `ArticleImportService` | request view of process import runtime                                                           |
 | `StickerService`       | catalog/pack mechanism; Post creation still uses Post Facade                                     |
 | `AnnouncementService`  | announcement content/publication mechanism                                                       |

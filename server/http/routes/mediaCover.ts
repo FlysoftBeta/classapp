@@ -12,7 +12,10 @@ export async function GET(
   try {
     const { id } = await params;
     const scope = currentScope();
-    scope.actor().requireFeature("media");
+    const user = scope.actor().requireFeature("media");
+    const capability =
+      new URL(_req.url).searchParams.get("capability") ?? undefined;
+    scope.facades().access().authorizeOwnerless(user.id, "track", id, capability);
     const track = getTrack(scope.db, id);
     if (!track) throw new PublicError("曲目不存在");
     // Same acquire-before-read rule as audio: eviction never reclaims a file

@@ -26,7 +26,7 @@ export async function mediaAddToQueueAction(
   input: ActionInput<"mediaAddToQueueAction">,
 ) {
   return withActionScope(async (scope) =>
-    scope.facades().media().addToQueue(input.trackId),
+    scope.facades().media().addToQueue(input.trackId, input.capability),
   );
 }
 
@@ -46,7 +46,7 @@ export async function mediaPlayAction(
   input: ActionInput<"mediaPlayAction">,
 ) {
   return withActionScope(async (scope) =>
-    scope.facades().media().play(input.trackId),
+    scope.facades().media().play(input.trackId, input.capability),
   );
 }
 
@@ -88,7 +88,7 @@ export async function mediaAddToPlaylistAction(
     scope
       .facades()
       .media()
-      .addToPlaylist(input.playlistId, input.trackId),
+      .addToPlaylist(input.playlistId, input.trackId, input.capability),
   );
 }
 
@@ -111,6 +111,56 @@ export async function mediaUpdatePlaylistRetentionAction(
       .facades()
       .media()
       .updatePlaylistRetention(input.playlistId, input.days),
+  );
+}
+
+export async function mediaGrantPlaylistAccessAction(
+  input: ActionInput<"mediaGrantPlaylistAccessAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .media()
+      .grantPlaylistAccess(input.playlistId, input.principal, input.grant),
+  );
+}
+
+export async function mediaRevokePlaylistAccessAction(
+  input: ActionInput<"mediaRevokePlaylistAccessAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .media()
+      .revokePlaylistAccess(input.playlistId, input.principal),
+  );
+}
+
+export async function mediaListPlaylistBindingsAction(
+  input: ActionInput<"mediaListPlaylistBindingsAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().media().playlistBindings(input.playlistId),
+  );
+}
+
+export async function mediaLibraryAction() {
+  return withActionScope(async (scope) => scope.facades().media().library());
+}
+
+export async function mediaSetTrackFavoriteAction(
+  input: ActionInput<"mediaSetTrackFavoriteAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .media()
+      .setTrackFavorite(
+        input.trackId,
+        input.favorited,
+        input.updatedAt,
+        input.capability,
+      ),
   );
 }
 

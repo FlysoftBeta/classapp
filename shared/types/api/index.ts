@@ -35,6 +35,16 @@ export {
   type ArticleSidebarPayload,
 } from "./article";
 export {
+  booklistItemSchema,
+  booklistSnapshotSchema,
+  booklistSummarySchema,
+  signedArticleSchema,
+  type BooklistItem,
+  type BooklistSnapshot,
+  type BooklistSummary,
+  type SignedArticle,
+} from "./booklist";
+export {
   conversationEntitySchema,
   groupConversationSchema,
   dmConversationSchema,

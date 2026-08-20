@@ -20,10 +20,10 @@ import {
   insertBundleArticle,
   insertTextArticle,
   listArticleHistoryRows,
+  listArticlesByIds,
   listArticlesForUser,
   listBookmarkedArticleRows,
   rowToArticle,
-  setArticleBookmarkValue,
   touchArticleProgress,
   upsertArticleProgressOffset,
   purgeArticlesForUser,
@@ -129,6 +129,25 @@ export class ArticleService {
     };
   }
 
+  byIds(
+    userId: string,
+    ids: string[],
+  ): { articles: ArticleWithMeta[]; users: UserMetadata[] } {
+    const articles = listArticlesByIds(this.db, userId, ids);
+    return {
+      articles,
+      users: userMetadataForIds(
+        this.db,
+        articles.map((article) => article.user_id),
+      ),
+    };
+  }
+
+  notifyPreference(userId: string, articleId: string): void {
+    this.publishSidebar(userId, articleId);
+    this.publishList(userId, articleId);
+  }
+
   sidebar(userId: string): ArticleSidebarPayload {
     const currentArticleId = getUserConfig(
       this.db,
@@ -184,7 +203,7 @@ export class ArticleService {
    */
   async storeBundle(
     file: File,
-    owner: { userId: string; groupId: string },
+    owner: { userId: string; booklistId: string },
   ): Promise<StoredArticleBundle & { upload_id: string }> {
     if (!file.size) throw new PublicError("文件不能为空");
     if (file.size > MAX_ARTICLE_SOURCE_BYTES) {
@@ -200,7 +219,7 @@ export class ArticleService {
     insertArticleUpload(this.db, {
       id: uploadId,
       userId: owner.userId,
-      groupId: owner.groupId,
+      booklistId: owner.booklistId,
       sourceBlobId: sourceSlot.id,
       archiveBlobId: archiveSlot.id,
     });
@@ -389,24 +408,6 @@ export class ArticleService {
     );
   }
 
-  setBookmark(
-    userId: string,
-    articleId: string,
-    bookmarked: boolean,
-    updatedAt: number,
-  ) {
-    const value = setArticleBookmarkValue(
-      this.db,
-      userId,
-      articleId,
-      bookmarked,
-      updatedAt,
-    );
-    this.publishSidebar(userId, articleId);
-    this.publishList(userId, articleId);
-    return value;
-  }
-
   saveProgress(
     userId: string,
     articleId: string,
@@ -509,7 +510,7 @@ export class ArticleService {
     userId: string,
     title: string,
     content: string,
-    groupId: string,
+    groupId: string | null,
   ) {
     const id = crypto.randomUUID();
     insertTextArticle(this.db, { id, userId, groupId, title, content });
@@ -608,10 +609,12 @@ export class ArticleService {
     this.publishList(userId, articleId, true);
     const article = findArticleRecord(this.db, articleId);
     if (!article) throw new PublicError("文章不存在");
-    publishGroupArticle(article.group_id, {
-      kind: "article.list_updated",
-      data: { refresh: true },
-    });
+    if (article.group_id) {
+      publishGroupArticle(article.group_id, {
+        kind: "article.list_updated",
+        data: { refresh: true },
+      });
+    }
   }
   private publishReading(userId: string, articleId: string) {
     this.publishSidebar(userId, articleId);

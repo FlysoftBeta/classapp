@@ -7,11 +7,16 @@ import {
   mediaFetchConfig,
   mediaFetchPlaylist,
   mediaFetchQueue,
+  mediaGrantPlaylistAccess,
+  mediaLibrary,
+  mediaListPlaylistBindings,
   mediaListPlaylists,
   mediaPlay,
   mediaRemoveFromPlaylist,
   mediaRemoveFromQueue,
+  mediaRevokePlaylistAccess,
   mediaSearch,
+  mediaSetTrackFavorite,
   mediaUpdatePlaylistRetention,
 } from "@/client/api/media";
 import {
@@ -23,10 +28,16 @@ import {
   putMediaTracks,
 } from "@/client/data/media";
 import { captureActorContext, isActorContextCurrent } from "./actorContext";
+import {
+  adoptMediaListSnapshot,
+  rememberSignedTracks,
+  trackCapability,
+} from "./capabilities";
 import { useMediaStore } from "./mediaStore";
 import { captureDetachedClientIncident } from "./clientIncidents";
+import type { AccessGrant, PrincipalRef } from "@/shared/access";
 import type {
-  MediaListSnapshot,
+  MediaListView,
   MediaPlaylistSummary,
   MediaTrack,
 } from "@/shared/media/types";
@@ -42,13 +53,23 @@ function sortPlaylistsByLastPlayed(
   );
 }
 
+async function persistList(
+  actorUserId: string,
+  kind: "playlist" | "queue",
+  snapshot: Parameters<typeof adoptMediaListSnapshot>[0],
+): Promise<MediaListView> {
+  const view = adoptMediaListSnapshot(snapshot);
+  await putMediaListSnapshot(actorUserId, kind, view);
+  return view;
+}
+
 export async function refreshMediaQueue(): Promise<void> {
   const actor = captureActorContext();
   try {
     const snapshot = await mediaFetchQueue();
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "queue", snapshot);
-    useMediaStore.getState().setQueue(snapshot);
+    const view = await persistList(actor.userId, "queue", snapshot);
+    useMediaStore.getState().setQueue(view);
   } catch (error) {
     const cached = useMediaStore.getState().queue;
     if (cached) {
@@ -84,13 +105,31 @@ export async function refreshMediaPlaylists(): Promise<void> {
   }
 }
 
+export async function refreshMediaLibrary(): Promise<void> {
+  try {
+    const library = await mediaLibrary();
+    const recents = rememberSignedTracks(library.recents);
+    const favorites = rememberSignedTracks(library.favorites);
+    const store = useMediaStore.getState();
+    store.setLibraryRecents(recents);
+    store.setLibraryFavorites(favorites);
+    store.setFavoriteTrackIds(new Set(favorites.map((track) => track.id)));
+    const lastPlayed = store.playlistLastPlayed;
+    store.setPlaylists(
+      sortPlaylistsByLastPlayed(library.playlists, lastPlayed),
+    );
+  } catch (error) {
+    captureDetachedClientIncident("media.library.refresh", error);
+  }
+}
+
 export async function openMediaPlaylist(playlistId: string): Promise<void> {
   const actor = captureActorContext();
   try {
     const snapshot = await mediaFetchPlaylist(playlistId);
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "playlist", snapshot);
-    useMediaStore.getState().setCurrentPlaylist(snapshot);
+    const view = await persistList(actor.userId, "playlist", snapshot);
+    useMediaStore.getState().setCurrentPlaylist(view);
   } catch (error) {
     const cached = await getMediaListSnapshot(
       actor.userId,
@@ -112,8 +151,9 @@ export async function searchMedia(query: string): Promise<void> {
   store.setSearchResults([]);
   try {
     const result = await mediaSearch(query, 20);
-    await putMediaTracks(result.tracks);
-    useMediaStore.getState().setSearchResults(result.tracks);
+    const tracks = rememberSignedTracks(result.tracks);
+    await putMediaTracks(tracks);
+    useMediaStore.getState().setSearchResults(tracks);
   } catch (error) {
     useMediaStore
       .getState()
@@ -126,10 +166,10 @@ export async function searchMedia(query: string): Promise<void> {
 export async function addTrackToQueue(trackId: string): Promise<void> {
   const actor = captureActorContext();
   try {
-    const snapshot = await mediaAddToQueue(trackId);
+    const snapshot = await mediaAddToQueue(trackId, trackCapability(trackId));
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "queue", snapshot);
-    useMediaStore.getState().setQueue(snapshot);
+    const view = await persistList(actor.userId, "queue", snapshot);
+    useMediaStore.getState().setQueue(view);
   } catch (error) {
     captureDetachedClientIncident("media.queue.add", error);
   }
@@ -140,8 +180,8 @@ export async function removeTrackFromQueue(trackId: string): Promise<void> {
   try {
     const snapshot = await mediaRemoveFromQueue(trackId);
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "queue", snapshot);
-    useMediaStore.getState().setQueue(snapshot);
+    const view = await persistList(actor.userId, "queue", snapshot);
+    useMediaStore.getState().setQueue(view);
   } catch (error) {
     captureDetachedClientIncident("media.queue.remove", error);
   }
@@ -152,28 +192,29 @@ export async function clearMediaQueue(): Promise<void> {
   try {
     const snapshot = await mediaClearQueue();
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "queue", snapshot);
-    useMediaStore.getState().setQueue(snapshot);
+    const view = await persistList(actor.userId, "queue", snapshot);
+    useMediaStore.getState().setQueue(view);
   } catch (error) {
     captureDetachedClientIncident("media.queue.clear", error);
   }
 }
 
 export async function requestMediaPlay(trackId: string) {
-  return mediaPlay(trackId);
+  return mediaPlay(trackId, trackCapability(trackId));
 }
 
 export async function createMediaPlaylist(
   title: string,
-): Promise<MediaListSnapshot | null> {
+): Promise<MediaListView | null> {
   const actor = captureActorContext();
   try {
     const snapshot = await mediaCreatePlaylist(title);
     if (!isActorContextCurrent(actor)) return null;
-    await putMediaListSnapshot(actor.userId, "playlist", snapshot);
-    useMediaStore.getState().setCurrentPlaylist(snapshot);
+    const view = await persistList(actor.userId, "playlist", snapshot);
+    useMediaStore.getState().setCurrentPlaylist(view);
     void refreshMediaPlaylists();
-    return snapshot;
+    void refreshMediaLibrary();
+    return view;
   } catch (error) {
     captureDetachedClientIncident("media.playlist.create", error);
     return null;
@@ -202,6 +243,7 @@ export async function deleteMediaPlaylist(playlistId: string): Promise<void> {
     await mediaDeletePlaylist(playlistId);
     useMediaStore.getState().setCurrentPlaylist(null);
     void refreshMediaPlaylists();
+    void refreshMediaLibrary();
   } catch (error) {
     captureDetachedClientIncident("media.playlist.delete", error);
   }
@@ -213,14 +255,19 @@ export async function addTrackToPlaylist(
 ): Promise<void> {
   const actor = captureActorContext();
   try {
-    const snapshot = await mediaAddToPlaylist(playlistId, trackId);
+    const snapshot = await mediaAddToPlaylist(
+      playlistId,
+      trackId,
+      trackCapability(trackId),
+    );
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "playlist", snapshot);
+    const view = await persistList(actor.userId, "playlist", snapshot);
     const store = useMediaStore.getState();
     if (store.currentPlaylist?.list.id === playlistId) {
-      store.setCurrentPlaylist(snapshot);
+      store.setCurrentPlaylist(view);
     }
     void refreshMediaPlaylists();
+    void refreshMediaLibrary();
   } catch (error) {
     captureDetachedClientIncident("media.playlist.add", error);
   }
@@ -234,14 +281,78 @@ export async function removeTrackFromPlaylist(
   try {
     const snapshot = await mediaRemoveFromPlaylist(playlistId, trackId);
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "playlist", snapshot);
+    const view = await persistList(actor.userId, "playlist", snapshot);
     const store = useMediaStore.getState();
     if (store.currentPlaylist?.list.id === playlistId) {
-      store.setCurrentPlaylist(snapshot);
+      store.setCurrentPlaylist(view);
     }
     void refreshMediaPlaylists();
+    void refreshMediaLibrary();
   } catch (error) {
     captureDetachedClientIncident("media.playlist.remove", error);
+  }
+}
+
+export async function grantPlaylistAccess(
+  playlistId: string,
+  principal: PrincipalRef,
+  grant: AccessGrant,
+): Promise<void> {
+  const actor = captureActorContext();
+  try {
+    const snapshot = await mediaGrantPlaylistAccess({
+      playlistId,
+      principal,
+      grant,
+    });
+    if (!isActorContextCurrent(actor)) return;
+    const view = await persistList(actor.userId, "playlist", snapshot);
+    useMediaStore.getState().setCurrentPlaylist(view);
+    void refreshMediaLibrary();
+  } catch (error) {
+    captureDetachedClientIncident("media.playlist.grant", error);
+  }
+}
+
+export async function revokePlaylistAccess(
+  playlistId: string,
+  principal: PrincipalRef,
+): Promise<void> {
+  const actor = captureActorContext();
+  try {
+    const snapshot = await mediaRevokePlaylistAccess({ playlistId, principal });
+    if (!isActorContextCurrent(actor)) return;
+    const view = await persistList(actor.userId, "playlist", snapshot);
+    useMediaStore.getState().setCurrentPlaylist(view);
+    void refreshMediaLibrary();
+  } catch (error) {
+    captureDetachedClientIncident("media.playlist.revoke", error);
+  }
+}
+
+export async function listPlaylistBindings(playlistId: string) {
+  return mediaListPlaylistBindings(playlistId);
+}
+
+export async function setTrackFavorite(
+  trackId: string,
+  favorited: boolean,
+): Promise<void> {
+  try {
+    const result = await mediaSetTrackFavorite({
+      trackId,
+      favorited,
+      updatedAt: Date.now(),
+      capability: trackCapability(trackId),
+    });
+    const store = useMediaStore.getState();
+    const next = new Set(store.favoriteTrackIds);
+    if (result.value) next.add(trackId);
+    else next.delete(trackId);
+    store.setFavoriteTrackIds(next);
+    void refreshMediaLibrary();
+  } catch (error) {
+    captureDetachedClientIncident("media.track.favorite", error);
   }
 }
 
@@ -279,6 +390,8 @@ export function applyMediaMaterializationEvent(data: {
         }
       : track;
   store.setSearchResults(store.searchResults.map(patch));
+  store.setLibraryRecents(store.libraryRecents.map(patch));
+  store.setLibraryFavorites(store.libraryFavorites.map(patch));
   if (store.player.currentTrack) {
     store.patchPlayer({ currentTrack: patch(store.player.currentTrack) });
   }
@@ -304,8 +417,8 @@ export async function updatePlaylistRetention(
   try {
     const snapshot = await mediaUpdatePlaylistRetention(playlistId, days);
     if (!isActorContextCurrent(actor)) return;
-    await putMediaListSnapshot(actor.userId, "playlist", snapshot);
-    useMediaStore.getState().setCurrentPlaylist(snapshot);
+    const view = await persistList(actor.userId, "playlist", snapshot);
+    useMediaStore.getState().setCurrentPlaylist(view);
     void refreshMediaPlaylists();
   } catch (error) {
     captureDetachedClientIncident("media.playlist.retention", error);

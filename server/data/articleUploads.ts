@@ -3,7 +3,7 @@ import type { Database } from "better-sqlite3";
 export interface ArticleUploadRecord {
   id: string;
   user_id: string;
-  group_id: string;
+  booklist_id: string;
   status: "staging" | "published" | "abandoned";
   source_blob_id: string;
   archive_blob_id: string;
@@ -16,19 +16,19 @@ export function insertArticleUpload(
   input: {
     id: string;
     userId: string;
-    groupId: string;
+    booklistId: string;
     sourceBlobId: string;
     archiveBlobId: string;
   },
 ): void {
   db.prepare(
     `INSERT INTO article_uploads
-       (id, user_id, group_id, status, source_blob_id, archive_blob_id)
+       (id, user_id, booklist_id, status, source_blob_id, archive_blob_id)
      VALUES (?, ?, ?, 'staging', ?, ?)`,
   ).run(
     input.id,
     input.userId,
-    input.groupId,
+    input.booklistId,
     input.sourceBlobId,
     input.archiveBlobId,
   );

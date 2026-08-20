@@ -1,5 +1,6 @@
+import { EMPTY_ACCESS_FLAGS } from "@/shared/access";
 import type {
-  MediaListSnapshot,
+  MediaListView,
   MediaPlaylistSummary,
   MediaTrack,
 } from "@/shared/media/types";
@@ -10,6 +11,7 @@ import { extentFiles } from "./files";
 
 export interface StoredMediaListRow {
   id: string;
+  /** Local actor that cached this snapshot, not a server owner. */
   owner_user_id: string;
   kind: "playlist" | "queue";
   title: string;
@@ -57,7 +59,7 @@ export async function getMediaTrack(id: string): Promise<MediaTrack | null> {
 export async function putMediaListSnapshot(
   ownerUserId: string,
   kind: "playlist" | "queue",
-  snapshot: MediaListSnapshot,
+  snapshot: MediaListView,
 ): Promise<void> {
   await runTransaction(
     [STORES.MEDIA_TRACKS, STORES.MEDIA_LISTS, STORES.MEDIA_LIST_ITEMS],
@@ -143,7 +145,7 @@ export async function getMediaListSnapshot(
   ownerUserId: string,
   kind: "playlist" | "queue",
   listId: string,
-): Promise<MediaListSnapshot | null> {
+): Promise<MediaListView | null> {
   return runTransaction(
     [STORES.MEDIA_TRACKS, STORES.MEDIA_LISTS, STORES.MEDIA_LIST_ITEMS],
     "readonly",
@@ -175,6 +177,8 @@ export async function getMediaListSnapshot(
           updated_at: list.updated_at,
           track_count: items.length,
           cover_track_id: list.cover_track_id ?? null,
+          origin_group_id: null,
+          access: EMPTY_ACCESS_FLAGS,
         },
         items,
         tracks,
@@ -213,6 +217,8 @@ export async function listMediaPlaylists(
           updated_at: row.updated_at,
           track_count: items.length,
           cover_track_id: row.cover_track_id ?? null,
+          origin_group_id: null,
+          access: EMPTY_ACCESS_FLAGS,
         });
       }
       return result.sort((left, right) =>

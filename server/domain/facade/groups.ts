@@ -9,11 +9,14 @@ import type {
 import type { AdminGroup, Group } from "@/shared/types/api";
 import type { Actor } from "@/server/runtime/actor";
 import type { AuditService } from "@/server/services/auditService";
+import type { AccessService } from "@/server/services/accessService";
+
 export class GroupActorFacade {
   constructor(
     private readonly actor: Actor,
     private readonly groups: GroupService,
     private readonly audit: AuditService,
+    private readonly access: AccessService,
   ) {}
 
   async create(input: CreateGroupInput): Promise<Group> {
@@ -37,12 +40,15 @@ export class GroupActorFacade {
     password?: string,
   ): Promise<JoinGroupResult> {
     const user = await this.actor.requireUser();
-    return this.groups.join(user.id, groupKey, source, password);
+    const result = this.groups.join(user.id, groupKey, source, password);
+    if (result.ok) this.access.onGroupMembershipChanged(user.id, result.group.id);
+    return result;
   }
 
   async leave(groupKey: string): Promise<void> {
     const user = await this.actor.requireUser();
-    this.groups.leave(user.id, groupKey);
+    const group = this.groups.leave(user.id, groupKey);
+    this.access.onGroupMembershipChanged(user.id, group.id);
   }
 
   async members(groupKey: string): Promise<GroupMembersResult> {
@@ -93,6 +99,7 @@ export class GroupActorFacade {
 
   adminDelete(groupId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
+    this.access.onGroupDeleted(groupId);
     this.groups.adminDelete(groupId);
     this.audit.record({
       actorId: admin.id,
@@ -105,6 +112,7 @@ export class GroupActorFacade {
   adminAddMember(groupId: string, userId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
     this.groups.adminAddMember(groupId, userId);
+    this.access.onGroupMembershipChanged(userId, groupId);
     this.audit.record({
       actorId: admin.id,
       action: "group.member.add",
@@ -117,6 +125,7 @@ export class GroupActorFacade {
   adminRemoveMember(groupId: string, userId: string): void {
     const admin = this.actor.requireRole("advanced_community_manager");
     this.groups.adminRemoveMember(groupId, userId);
+    this.access.onGroupMembershipChanged(userId, groupId);
     this.audit.record({
       actorId: admin.id,
       action: "group.member.remove",

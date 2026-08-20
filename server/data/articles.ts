@@ -21,25 +21,26 @@ export type BundleProvider = {
 type ArticleProvider = TextProvider | BundleProvider;
 
 const META_COLUMNS = `
-  a.id, a.user_id, a.group_id, a.title, a.provider_json, a.created_at,
-  ab.bookmarked AS is_bookmarked,
-  ab.updated_at_ms AS bookmark_updated_at_ms,
+  a.id, a.user_id, a.origin_group_id AS group_id, a.title, a.provider_json, a.created_at,
+  CASE WHEN fav.favorited = 1 THEN 1 ELSE 0 END AS is_bookmarked,
+  COALESCE(fav.updated_at_ms, 0) AS bookmark_updated_at_ms,
   rp.offset AS current_offset,
   rp.updated_at_ms AS current_offset_updated_at,
   rp.locator AS current_locator,
   rp.total_read_seconds AS total_read_seconds,
   rp.updated_at AS last_read_at`;
 const FROM_ARTICLES = ` FROM articles a
-  LEFT JOIN article_bookmarks ab ON ab.user_id = :uid AND ab.article_id = a.id
+  LEFT JOIN user_favorites fav
+    ON fav.user_id = :uid AND fav.resource_kind = 'article' AND fav.resource_id = a.id
   LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id`;
-const FROM_BOOKMARKED_ARTICLES = ` FROM article_bookmarks ab
-  JOIN articles a ON a.id = ab.article_id
+const FROM_BOOKMARKED_ARTICLES = ` FROM user_favorites fav
+  JOIN articles a ON a.id = fav.resource_id
   LEFT JOIN article_read_progress rp ON rp.user_id = :uid AND rp.article_id = a.id`;
 
 export interface ArticleRecord {
   id: string;
   user_id: string | null;
-  group_id: string;
+  group_id: string | null;
   title: string;
   provider: ArticleProvider;
   content_kind: "text" | "bundle";
@@ -54,7 +55,7 @@ export interface ArticleRecord {
 
 export interface ArticleAccessRow {
   user_id: string | null;
-  group_id: string;
+  group_id: string | null;
 }
 
 export type ArticleListView = "all" | "bookmarked" | "recent";
@@ -132,7 +133,7 @@ export function rowToArticle(row: Record<string, unknown>): ArticleWithMeta {
   return {
     id: String(row.id),
     user_id: typeof row.user_id === "string" ? row.user_id : null,
-    group_id: String(row.group_id),
+    group_id: typeof row.group_id === "string" ? row.group_id : null,
     title: String(row.title),
     provider: publicProvider(provider),
     ...providerReadModel(provider),
@@ -171,7 +172,15 @@ export function purgeArticlesForUser(
     };
   });
   db.transaction(() => {
-    db.prepare("DELETE FROM article_bookmarks WHERE user_id = ?").run(userId);
+    db.prepare(
+      "DELETE FROM user_favorites WHERE user_id = ? AND resource_kind = 'article'",
+    ).run(userId);
+    db.prepare(
+      "DELETE FROM user_recents WHERE user_id = ? AND resource_kind = 'article'",
+    ).run(userId);
+    db.prepare(
+      "DELETE FROM resource_possession WHERE user_id = ? AND resource_kind = 'article'",
+    ).run(userId);
     db.prepare("DELETE FROM article_read_progress WHERE user_id = ?").run(
       userId,
     );
@@ -206,7 +215,7 @@ export function findArticleRecord(
 ): ArticleRecord | null {
   const row = db
     .prepare(
-      "SELECT id, user_id, group_id, title, provider_json, created_at FROM articles WHERE id = ?",
+      "SELECT id, user_id, origin_group_id AS group_id, title, provider_json, created_at FROM articles WHERE id = ?",
     )
     .get(articleId) as Record<string, unknown> | undefined;
   if (!row) return null;
@@ -235,7 +244,7 @@ export function findArticleAccessRow(
 ): ArticleAccessRow | null {
   return (
     (db
-      .prepare("SELECT user_id, group_id FROM articles WHERE id = ?")
+      .prepare("SELECT user_id, origin_group_id AS group_id FROM articles WHERE id = ?")
       .get(articleId) as ArticleAccessRow | undefined) ?? null
   );
 }
@@ -245,7 +254,7 @@ export function insertTextArticle(
   input: {
     id: string;
     userId: string;
-    groupId: string;
+    groupId: string | null;
     title: string;
     content: string;
   },
@@ -257,7 +266,7 @@ export function insertTextArticle(
   );
   db.transaction(() => {
     db.prepare(
-      "INSERT INTO articles (id, user_id, group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO articles (id, user_id, origin_group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
     ).run(
       input.id,
       input.userId,
@@ -286,7 +295,7 @@ export function insertBundleArticle(
   input: {
     id: string;
     userId: string;
-    groupId: string;
+    groupId: string | null;
     title: string;
     sourcePath: string;
     archivePath: string;
@@ -298,7 +307,7 @@ export function insertBundleArticle(
   },
 ): void {
   db.prepare(
-    "INSERT INTO articles (id, user_id, group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO articles (id, user_id, origin_group_id, title, provider_json) VALUES (?, ?, ?, ?, ?)",
   ).run(
     input.id,
     input.userId,
@@ -317,10 +326,10 @@ export function insertBundleArticle(
   );
 }
 
-function accessCondition(groupId?: string) {
-  const membership =
-    "EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)";
-  return groupId ? `a.group_id = :groupId AND ${membership}` : membership;
+function accessCondition(view: ArticleListView, groupId?: string) {
+  if (groupId) return `a.origin_group_id = :groupId`;
+  if (view === "bookmarked" || view === "recent") return "1 = 1";
+  return "1 = 0";
 }
 
 export function listArticlesForUser(
@@ -336,14 +345,15 @@ export function listArticlesForUser(
   const view = options.view ?? "all";
   const direction = options.direction ?? "after";
   const from = view === "bookmarked" ? FROM_BOOKMARKED_ARTICLES : FROM_ARTICLES;
-  let where = `WHERE ${accessCondition(options.groupId)}`;
+  let where = `WHERE ${accessCondition(view, options.groupId)}`;
   const sortAt =
     view === "bookmarked"
       ? "COALESCE(rp.updated_at, ab.created_at)"
       : view === "recent"
         ? "rp.updated_at"
         : "a.created_at";
-  if (view === "bookmarked") where += " AND ab.bookmarked = 1";
+  if (view === "bookmarked")
+    where += " AND fav.user_id = :uid AND fav.resource_kind = 'article' AND fav.favorited = 1";
   if (view === "recent")
     where += " AND rp.total_read_seconds >= :minReadSeconds";
   if (options.cursor) {
@@ -380,8 +390,7 @@ export function listArticleHistoryRows(
     .prepare(
       `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
      JOIN article_read_progress history_rp ON history_rp.article_id = a.id AND history_rp.user_id = :uid
-     WHERE EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)
-       AND history_rp.total_read_seconds >= :minSec
+     WHERE history_rp.total_read_seconds >= :minSec
      ORDER BY history_rp.updated_at DESC LIMIT :limit`,
     )
     .all({
@@ -391,42 +400,45 @@ export function listArticleHistoryRows(
     }) as Record<string, unknown>[];
 }
 
+export function listArticlesByIds(
+  db: Database,
+  userId: string,
+  ids: string[],
+): ArticleWithMeta[] {
+  const found: ArticleWithMeta[] = [];
+  for (const id of ids) {
+    const article = findArticleForUser(db, id, userId);
+    if (article) found.push(article);
+  }
+  return found;
+}
+
 export function listBookmarkedArticleRows(
   db: Database,
   userId: string,
 ): Record<string, unknown>[] {
   return db
     .prepare(
-      `SELECT ${META_COLUMNS} ${FROM_ARTICLES}
-     JOIN article_bookmarks bookmarked_ab ON bookmarked_ab.article_id = a.id AND bookmarked_ab.user_id = :uid AND bookmarked_ab.bookmarked = 1
-     WHERE EXISTS (SELECT 1 FROM group_members gm WHERE gm.user_id = :uid AND gm.group_id = a.group_id)
-     ORDER BY COALESCE(rp.updated_at, bookmarked_ab.created_at) DESC`,
+      `SELECT ${META_COLUMNS} ${FROM_BOOKMARKED_ARTICLES}
+     WHERE fav.user_id = :uid AND fav.resource_kind = 'article' AND fav.favorited = 1
+     ORDER BY COALESCE(rp.updated_at, fav.created_at) DESC`,
     )
     .all({ uid: userId }) as Record<string, unknown>[];
 }
 
-export function setArticleBookmarkValue(
-  db: Database,
-  userId: string,
-  articleId: string,
-  bookmarked: boolean,
-  updatedAt: number,
-) {
-  db.prepare(
-    `INSERT INTO article_bookmarks (user_id, article_id, bookmarked, updated_at_ms, created_at)
-     VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET
-       bookmarked = excluded.bookmarked, updated_at_ms = excluded.updated_at_ms,
-       created_at = CASE WHEN excluded.bookmarked = 1 THEN datetime('now') ELSE article_bookmarks.created_at END
-     WHERE excluded.updated_at_ms >= article_bookmarks.updated_at_ms`,
-  ).run(userId, articleId, bookmarked ? 1 : 0, updatedAt);
-  const row = db
-    .prepare(
-      "SELECT bookmarked AS value, updated_at_ms AS updatedAt FROM article_bookmarks WHERE user_id = ? AND article_id = ?",
-    )
-    .get(userId, articleId) as { value: number; updatedAt: number } | undefined;
-  return row
-    ? { value: !!row.value, updatedAt: row.updatedAt }
-    : { value: false, updatedAt: 0 };
+export function deleteArticleById(db: Database, articleId: string): void {
+  db.transaction(() => {
+    db.prepare(
+      "DELETE FROM user_favorites WHERE resource_kind = 'article' AND resource_id = ?",
+    ).run(articleId);
+    db.prepare(
+      "DELETE FROM user_recents WHERE resource_kind = 'article' AND resource_id = ?",
+    ).run(articleId);
+    db.prepare(
+      "DELETE FROM resource_possession WHERE resource_kind = 'article' AND resource_id = ?",
+    ).run(articleId);
+    db.prepare("DELETE FROM articles WHERE id = ?").run(articleId);
+  })();
 }
 
 export function upsertArticleProgressOffset(
@@ -489,10 +501,6 @@ export function touchArticleProgress(
     `INSERT INTO article_read_progress (user_id, article_id, offset, total_read_seconds, updated_at)
      VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(user_id, article_id) DO UPDATE SET updated_at = datetime('now')`,
   ).run(userId, articleId);
-}
-
-export function deleteArticleById(db: Database, articleId: string): void {
-  db.prepare("DELETE FROM articles WHERE id = ?").run(articleId);
 }
 
 export function getArticleTextSegment(

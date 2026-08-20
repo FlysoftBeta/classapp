@@ -74,7 +74,12 @@ export async function setArticleBookmarkAction(
     return await scope
       .facades()
       .articles()
-      .setBookmark(input.articleId, input.bookmarked, input.updatedAt);
+      .setBookmark(
+        input.articleId,
+        input.bookmarked,
+        input.updatedAt,
+        input.capability,
+      );
   });
 }
 
@@ -143,5 +148,98 @@ export async function startNetworkArticleDownloadAction(
 export async function listNetworkArticleDownloadsAction() {
   return withActionScope(async (scope) =>
     scope.facades().articles().listNetworkDownloads(),
+  );
+}
+
+export async function articlesLibraryAction() {
+  return withActionScope(async (scope) => scope.facades().articles().library());
+}
+
+export async function booklistListAction() {
+  return withActionScope(async (scope) => scope.facades().articles().booklists());
+}
+
+export async function booklistFetchAction(
+  booklistId: ActionInput<"booklistFetchAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().articles().fetchBooklist(booklistId),
+  );
+}
+
+export async function booklistForGroupAction(
+  input: ActionInput<"booklistForGroupAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().articles().booklistForGroup(input.groupId),
+  );
+}
+
+export async function booklistCreateAction(
+  input: ActionInput<"booklistCreateAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().articles().createBooklist(input.title),
+  );
+}
+
+export async function booklistDeleteAction(
+  booklistId: ActionInput<"booklistDeleteAction">,
+) {
+  return withActionScope(async (scope) => {
+    await scope.facades().articles().deleteBooklist(booklistId);
+    return { ok: true as const };
+  });
+}
+
+export async function booklistAddArticleAction(
+  input: ActionInput<"booklistAddArticleAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .articles()
+      .addToBooklist(input.booklistId, input.articleId, input.capability),
+  );
+}
+
+export async function booklistRemoveArticleAction(
+  input: ActionInput<"booklistRemoveArticleAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .articles()
+      .removeFromBooklist(input.booklistId, input.articleId),
+  );
+}
+
+export async function booklistGrantAccessAction(
+  input: ActionInput<"booklistGrantAccessAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .articles()
+      .grantBooklistAccess(input.booklistId, input.principal, input.grant),
+  );
+}
+
+export async function booklistRevokeAccessAction(
+  input: ActionInput<"booklistRevokeAccessAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope
+      .facades()
+      .articles()
+      .revokeBooklistAccess(input.booklistId, input.principal),
+  );
+}
+
+export async function booklistListBindingsAction(
+  input: ActionInput<"booklistListBindingsAction">,
+) {
+  return withActionScope(async (scope) =>
+    scope.facades().articles().booklistBindings(input.booklistId),
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type {
-  MediaListSnapshot,
+  MediaListView,
   MediaPlaylistSummary,
 } from "@/shared/media/types";
 import Button from "@mui/material/Button";
@@ -22,7 +22,7 @@ export function CreatePlaylistDialog({
   onCreated,
 }: {
   onClose: () => void;
-  onCreated?: (snapshot: MediaListSnapshot | null) => void;
+  onCreated?: (snapshot: MediaListView | null) => void;
 }) {
   const [title, setTitle] = useState("");
   const [submitting, setSubmitting] = useState(false);

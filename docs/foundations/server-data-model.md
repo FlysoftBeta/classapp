@@ -1,12 +1,16 @@
 # Server data model and migration discipline
 
 The server database is the durable authority. In the examined working tree it
-uses SQLite schema v26. Production deployments are schema v18; development
+uses SQLite schema v27. Production deployments are schema v18; development
 snapshots may still be v17. Migrations accept v17 as the oldest baseline:
-v17 → v18, then one consolidated v18 → v25 step, then v25 → v26. Unlike
+v17 → v18, then one consolidated v18 → v25 step, then v25 → v26, then
+v26 → v27. Unlike
 the reconstructible browser projection, server rows are not casually nuked.
 v26 drops reconstructible cache (media bytes, teach copies, bundle articles,
 old quota ledger) and switches remaining blobs to allocated `blob_id`s.
+v27 replaces playlist `owner_user_id` with principal access bindings, adds
+booklists, capability possession, and treats group-chat articles as ownerless
+objects.
 
 ## Table families
 
@@ -16,12 +20,13 @@ old quota ledger) and switches remaining blobs to allocated `blob_id`s.
 | authority           | `user_admin_roles`, feature bitset on `users`, `admin_audit_log`                            |
 | clients             | `clients`, `client_ips`, `client_associations`, `client_attempts`, `client_last_active`     |
 | community           | `groups`, `group_members`, `dms`, `posts`, `convs_user`                                     |
-| articles            | `articles`, `text_article_segments`, `article_bookmarks`, `article_read_progress`           |
+| articles            | `articles` (origin_group_id is provenance, not ACL), `text_article_segments`, `article_read_progress` |
+| media               | `media_tracks`, `media_assets`, `media_lists` (`playlist` / `queue` / `booklist`), `media_list_items`, `booklist_items`, `media_stream_grants` |
+| access              | `access_bindings`, `access_effective`, `resource_possession`, `user_favorites`, `user_recents`, `user_queues` |
 | AI conversation     | `ai_conversations`, `ai_messages`, `ai_runs`, `ai_run_attempts`, tags and context snapshots |
 | AI workspace        | `ai_workspaces` (ready `blob_id` plus in-flight `staging_blob_id`)                          |
 | AI accounting/tools | policy, enrollments, accounts, reservations, usage, ledger, file operations                 |
 | learning            | `words`, `user_word_progress`                                                               |
-| media               | `media_tracks`, `media_assets`, `media_lists`, `media_list_items`, `media_stream_grants`    |
 | storage quota       | `storage_quota_pools`, `storage_quota_items` (heat ledger; `cache` vs `durable`)            |
 | operations          | `incident_groups`, `incidents`, `teach_documents`, `config`, user configuration             |
 

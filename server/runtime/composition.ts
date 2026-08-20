@@ -69,6 +69,7 @@ import { VersionedUserConfigService } from "@/server/services/versionedUserConfi
 import { MediaActorFacade } from "@/server/domain/facade/media";
 import { MediaService } from "@/server/services/mediaService";
 import { MediaPlaylistService } from "@/server/services/mediaPlaylistService";
+import { BooklistService } from "@/server/services/booklistService";
 import {
   createRoleService,
   type RoleService,
@@ -162,6 +163,7 @@ const mediaService = scopeEntry<MediaService>("MediaService");
 const mediaPlaylistService = scopeEntry<MediaPlaylistService>(
   "MediaPlaylistService",
 );
+const accessService = scopeEntry<AccessService>("AccessService");
 
 const postFacade = scopeEntry<PostActorFacade>("PostActorFacade");
 const groupFacade = scopeEntry<GroupActorFacade>("GroupActorFacade");
@@ -231,6 +233,7 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
         ),
     );
   }
@@ -285,6 +288,7 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
           this.scope.unitOfWork,
         ),
     );
@@ -324,6 +328,8 @@ export class Composition {
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
+          new BooklistService(this.scope.db, this.access()),
         ),
     );
   }
@@ -534,6 +540,17 @@ export class Composition {
     );
   }
 
+  access(): AccessService {
+    return this.scope.getOrInit(
+      accessService,
+      () =>
+        new AccessService(
+          this.scope.db,
+          new CapabilityService(getCapabilitySecret(this.scope.db)),
+        ),
+    );
+  }
+
   media(): MediaActorFacade {
     return this.scope.getOrInit(
       mediaFacade,
@@ -546,11 +563,13 @@ export class Composition {
           ),
           this.scope.getOrInit(
             mediaPlaylistService,
-            () => new MediaPlaylistService(this.scope.db),
+            () =>
+              new MediaPlaylistService(this.scope.db, this.access()),
           ),
           this.scope.getOrInit(auditService, () =>
             createAuditService(this.scope.db),
           ),
+          this.access(),
         ),
     );
   }

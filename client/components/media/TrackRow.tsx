@@ -15,8 +15,10 @@ import GraphicEqIcon from "@mui/icons-material/GraphicEq";
 import QueueMusicIcon from "@mui/icons-material/QueueMusic";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
-import MusicNoteIcon from "@mui/icons-material/MusicNote";
+import FavoriteIcon from "@mui/icons-material/Favorite";
+import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import Typography from "@mui/material/Typography";
+import { setTrackFavorite } from "@/client/interact/media";
 import { AddToPlaylistButton } from "./AddToPlaylistButton";
 
 function stateLabel(track: MediaTrack): string {
@@ -46,6 +48,8 @@ export function TrackRow({
   const playing = useMediaStore((state) => state.player.playing);
   const token = useApplicationStore((state) => state.token);
   const isCurrent = track.id === currentTrackId;
+  const favoriteTrackIds = useMediaStore((state) => state.favoriteTrackIds);
+  const favorited = favoriteTrackIds.has(track.id);
   const coverUrl = trackCoverUrl(track, token);
 
   const handleActivate = () => {
@@ -58,6 +62,21 @@ export function TrackRow({
 
   const secondaryAction: ReactNode = (
     <Box sx={{ display: "flex", alignItems: "center", ...flexGap(0.25) }}>
+      <IconButton
+        edge="end"
+        size="small"
+        title={favorited ? "取消收藏" : "收藏"}
+        onClick={(event) => {
+          event.stopPropagation();
+          void setTrackFavorite(track.id, !favorited);
+        }}
+      >
+        {favorited ? (
+          <FavoriteIcon fontSize="small" color="primary" />
+        ) : (
+          <FavoriteBorderIcon fontSize="small" />
+        )}
+      </IconButton>
       <AddToPlaylistButton trackId={track.id} excludePlaylistId={playlistId} />
       {onQueueAdd && (
         <IconButton

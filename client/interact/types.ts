@@ -39,6 +39,7 @@ export type AppRoute =
     }
   | { view: "media" }
   | { view: "media-playlist"; playlistId: string }
+  | { view: "booklist"; booklistId: string; conversation?: SelectedKey }
   | { view: "learning" }
   | { view: "word-learning" }
   | { view: "wrong-words" }

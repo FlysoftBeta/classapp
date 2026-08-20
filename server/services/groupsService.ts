@@ -105,6 +105,10 @@ export class GroupService {
     return isGroupMember(this.db, userId, groupId);
   }
 
+  get(groupId: string): Group | null {
+    return findGroupById(this.db, groupId);
+  }
+
   private ensureUniqueHandle(handle: string, exceptId?: string): void {
     if (groupHandleExists(this.db, handle, exceptId)) {
       throw new PublicError("该 handle 已被占用");
@@ -303,7 +307,7 @@ export class GroupService {
     return { ok: true, group };
   }
 
-  leave(userId: string, groupKey: string): void {
+  leave(userId: string, groupKey: string): Group {
     const group = this.requireGroup(groupKey);
     const policy = findGroupLeavePolicy(this.db, group.id);
     if (!policy) {
@@ -323,6 +327,7 @@ export class GroupService {
     });
     publishRemoteResubscribe(userId, "membership");
     this.tryDeleteEmptyGroup(group.id);
+    return group;
   }
 
   members(

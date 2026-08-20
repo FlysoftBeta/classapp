@@ -6,10 +6,12 @@ or client trust. Those are independent facts that a public Facade composes.
 
 ## Why authority lives in Facades
 
-ClassApp deliberately does not implement a general capability language. The
-deployment is small and its rules are product-specific. Turning every rule into
-a grantable capability would create a second, limited policy language that is
-harder to read than direct TypeScript and easier to misconfigure.
+ClassApp deliberately does not implement a general capability *policy language*
+for roles, features, mute, or client admission. Those remain independent
+Facade checks. Resource access for ownerless catalog objects and owned lists
+uses a **narrow** capability/binding model described in
+[resource authorization](../systems/resource-authorization.md). That model is
+not a substitute for the dimensions below.
 
 Facades therefore state the rule close to the public operation:
 

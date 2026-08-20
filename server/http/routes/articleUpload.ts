@@ -37,9 +37,12 @@ export async function POST(req: Request) {
     }
 
     const articles = currentScope().facades().articles();
-    // Reject an inaccessible target before consuming a bounded render slot.
-    const userId = await articles.authorizeBundleUpload(groupId);
-    const stored = await articles.storeBundleFile(file, userId, groupId);
+    const authorized = await articles.authorizeBundleUpload(groupId);
+    const stored = await articles.storeBundleFile(
+      file,
+      authorized.userId,
+      authorized.booklistId,
+    );
     try {
       const result = await articles.createBundle({
         title: title || stored.original_filename.replace(/\.pdf$/i, ""),

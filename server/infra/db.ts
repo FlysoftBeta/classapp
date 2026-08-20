@@ -4,6 +4,8 @@ import crypto from "crypto";
 import { rmSync } from "node:fs";
 import { initWordSchema } from "@/server/data/words";
 import { createWordsService } from "@/server/services/wordsService";
+import { AccessService } from "@/server/services/accessService";
+import { CapabilityService } from "@/server/services/capabilityService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
 import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
@@ -26,6 +28,27 @@ export function openCoordinatorDatabase(): Database {
   return db;
 }
 
+function ensureCapabilitySecret(db: Database) {
+  const row = db
+    .prepare("SELECT value FROM config WHERE key = 'capability_secret'")
+    .get() as { value: string } | undefined;
+  if (!row) {
+    db.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run(
+      "capability_secret",
+      crypto.randomBytes(32).toString("hex"),
+    );
+  }
+}
+
+export function getCapabilitySecret(db: Database): string {
+  ensureCapabilitySecret(db);
+  return (
+    db
+      .prepare("SELECT value FROM config WHERE key = 'capability_secret'")
+      .get() as { value: string }
+  ).value;
+}
+
 /** Executor worker: the schema must already exist. Never share this handle across threads. */
 export function openExecutorDatabase(): Database {
   const db = new BetterSQLite3(DB_PATH);
@@ -34,7 +57,7 @@ export function openExecutorDatabase(): Database {
 }
 
 const BASELINE_SCHEMA_VERSION = 17;
-const CURRENT_SCHEMA_VERSION = 26;
+const CURRENT_SCHEMA_VERSION = 27;
 
 interface SchemaMigration {
   /** Schema version after this migration commits. */
@@ -319,19 +342,20 @@ const MEDIA_SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS media_lists (
     id             TEXT PRIMARY KEY,
-    kind           TEXT NOT NULL CHECK (kind IN ('playlist', 'queue')),
-    owner_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL CHECK (kind IN ('playlist', 'queue', 'booklist')),
     title          TEXT NOT NULL,
     revision       INTEGER NOT NULL DEFAULT 0,
     retention_days INTEGER NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365),
     expires_at     TEXT,
+    origin_group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_media_lists_user_queue
-    ON media_lists(owner_user_id) WHERE kind = 'queue';
-  CREATE INDEX IF NOT EXISTS idx_media_lists_user_playlists
-    ON media_lists(owner_user_id, kind, updated_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_owned_lists_group_booklist
+    ON media_lists(origin_group_id)
+    WHERE kind = 'booklist' AND origin_group_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_owned_lists_kind_updated
+    ON media_lists(kind, updated_at DESC);
 
   CREATE TABLE IF NOT EXISTS media_list_items (
     list_id   TEXT NOT NULL REFERENCES media_lists(id) ON DELETE CASCADE,
@@ -399,7 +423,7 @@ const ARTICLE_UPLOADS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS article_uploads (
     id           TEXT PRIMARY KEY,
     user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    booklist_id  TEXT NOT NULL REFERENCES media_lists(id) ON DELETE CASCADE,
     status       TEXT NOT NULL CHECK (status IN ('staging', 'published', 'abandoned')),
     source_blob_id   TEXT NOT NULL,
     archive_blob_id  TEXT NOT NULL,
@@ -410,6 +434,94 @@ const ARTICLE_UPLOADS_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_article_uploads_status_created
     ON article_uploads(status, created_at);
+`;
+
+const ACCESS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS access_bindings (
+    resource_kind  TEXT NOT NULL CHECK (resource_kind IN ('playlist', 'booklist', 'queue')),
+    resource_id    TEXT NOT NULL,
+    principal_kind TEXT NOT NULL CHECK (principal_kind IN ('user', 'group')),
+    principal_id   TEXT NOT NULL,
+    grants_json    TEXT NOT NULL CHECK (json_valid(grants_json)),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (resource_kind, resource_id, principal_kind, principal_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_access_bindings_principal
+    ON access_bindings(principal_kind, principal_id, resource_kind);
+  CREATE INDEX IF NOT EXISTS idx_access_bindings_resource
+    ON access_bindings(resource_kind, resource_id);
+
+  CREATE TABLE IF NOT EXISTS access_effective (
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_kind    TEXT NOT NULL CHECK (resource_kind IN ('playlist', 'booklist', 'queue')),
+    resource_id      TEXT NOT NULL,
+    can_read         INTEGER NOT NULL CHECK (can_read IN (0, 1)),
+    can_write        INTEGER NOT NULL CHECK (can_write IN (0, 1)),
+    can_own          INTEGER NOT NULL CHECK (can_own IN (0, 1)),
+    can_share_read   INTEGER NOT NULL CHECK (can_share_read IN (0, 1)),
+    can_share_write  INTEGER NOT NULL CHECK (can_share_write IN (0, 1)),
+    can_share_own    INTEGER NOT NULL CHECK (can_share_own IN (0, 1)),
+    provenance_json  TEXT NOT NULL CHECK (json_valid(provenance_json)),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, resource_kind, resource_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_access_effective_user_kind
+    ON access_effective(user_id, resource_kind, can_read);
+  CREATE INDEX IF NOT EXISTS idx_access_effective_resource
+    ON access_effective(resource_kind, resource_id);
+
+  CREATE TABLE IF NOT EXISTS resource_possession (
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_kind  TEXT NOT NULL CHECK (resource_kind IN ('track', 'article')),
+    resource_id    TEXT NOT NULL,
+    capability     TEXT NOT NULL,
+    source_kind    TEXT NOT NULL,
+    source_id      TEXT,
+    expires_at_ms  INTEGER NOT NULL,
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, resource_kind, resource_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_resource_possession_expiry
+    ON resource_possession(expires_at_ms);
+
+  CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_kind  TEXT NOT NULL CHECK (resource_kind IN ('track', 'article', 'playlist', 'booklist')),
+    resource_id    TEXT NOT NULL,
+    favorited      INTEGER NOT NULL DEFAULT 1 CHECK (favorited IN (0, 1)),
+    updated_at_ms  INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, resource_kind, resource_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_favorites_user
+    ON user_favorites(user_id, resource_kind, favorited, updated_at_ms DESC);
+
+  CREATE TABLE IF NOT EXISTS user_recents (
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_kind    TEXT NOT NULL CHECK (resource_kind IN ('track', 'article', 'playlist', 'booklist')),
+    resource_id      TEXT NOT NULL,
+    last_used_at     TEXT NOT NULL,
+    last_used_at_ms  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, resource_kind, resource_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_recents_user
+    ON user_recents(user_id, resource_kind, last_used_at_ms DESC);
+
+  CREATE TABLE IF NOT EXISTS user_queues (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    list_id TEXT NOT NULL UNIQUE REFERENCES media_lists(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS booklist_items (
+    list_id     TEXT NOT NULL REFERENCES media_lists(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL CHECK (position >= 0),
+    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    added_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (list_id, position)
+  );
+  CREATE INDEX IF NOT EXISTS idx_booklist_items_article
+    ON booklist_items(article_id, list_id);
 `;
 
 /** v17 → v18: original incident/AI introduction and legacy feature bit. */
@@ -581,10 +693,253 @@ function migrateV25ToV26(db: Database): void {
   rmSync(path.join(DATA_ROOT, "storage"), { recursive: true, force: true });
 }
 
+/**
+ * v26 → v27: ownerless articles/tracks use signed capabilities; playlists and
+ * booklists use principal×resource access bindings. Existing group-chat
+ * articles remain objective resources collected into a group-owned booklist.
+ */
+function migrateV26ToV27(db: Database): void {
+  ensureCapabilitySecret(db);
+
+  const previousLists = db
+    .prepare(
+      `SELECT id, kind, owner_user_id FROM media_lists`,
+    )
+    .all() as Array<{ id: string; kind: "playlist" | "queue"; owner_user_id: string }>;
+
+  db.exec(`
+    CREATE TABLE media_lists_v27 (
+      id              TEXT PRIMARY KEY,
+      kind            TEXT NOT NULL CHECK (kind IN ('playlist', 'queue', 'booklist')),
+      title           TEXT NOT NULL,
+      revision        INTEGER NOT NULL DEFAULT 0,
+      retention_days  INTEGER NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365),
+      expires_at      TEXT,
+      origin_group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE media_list_items_v27 (
+      list_id   TEXT NOT NULL REFERENCES media_lists_v27(id) ON DELETE CASCADE,
+      position  INTEGER NOT NULL CHECK (position >= 0),
+      track_id  TEXT NOT NULL REFERENCES media_tracks(id) ON DELETE CASCADE,
+      added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (list_id, position)
+    );
+    INSERT INTO media_lists_v27
+      (id, kind, title, revision, retention_days, expires_at, created_at, updated_at)
+    SELECT id, kind, title, revision, retention_days, expires_at, created_at, updated_at
+      FROM media_lists;
+    INSERT INTO media_list_items_v27 (list_id, position, track_id, added_at)
+    SELECT list_id, position, track_id, added_at FROM media_list_items;
+  `);
+  db.exec("DROP TRIGGER IF EXISTS media_items_ref_count_insert");
+  db.exec("DROP TRIGGER IF EXISTS media_items_ref_count_delete");
+  db.exec("DROP TABLE media_list_items");
+  db.exec("DROP TABLE media_lists");
+  db.exec("ALTER TABLE media_lists_v27 RENAME TO media_lists");
+  db.exec("ALTER TABLE media_list_items_v27 RENAME TO media_list_items");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_media_list_items_track
+      ON media_list_items(track_id, list_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owned_lists_group_booklist
+      ON media_lists(origin_group_id)
+      WHERE kind = 'booklist' AND origin_group_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_owned_lists_kind_updated
+      ON media_lists(kind, updated_at DESC);
+    CREATE TRIGGER IF NOT EXISTS media_items_ref_count_insert
+    AFTER INSERT ON media_list_items BEGIN
+      UPDATE media_tracks
+         SET ref_count = ref_count + 1,
+             last_used_at = datetime('now')
+       WHERE id = NEW.track_id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS media_items_ref_count_delete
+    AFTER DELETE ON media_list_items BEGIN
+      UPDATE media_tracks
+         SET ref_count = ref_count - 1
+       WHERE id = OLD.track_id AND ref_count > 0;
+      SELECT CASE WHEN changes() = 0
+        THEN RAISE(ABORT, 'media_tracks.ref_count underflow') END;
+    END;
+  `);
+
+  db.exec(ACCESS_SCHEMA);
+  db.exec("DROP TABLE IF EXISTS booklist_items");
+
+  const bindOwner = db.prepare(
+    `INSERT INTO access_bindings (
+       resource_kind, resource_id, principal_kind, principal_id, grants_json
+     ) VALUES (?, ?, 'user', ?, ?)`,
+  );
+  const bindQueue = db.prepare(
+    "INSERT INTO user_queues (user_id, list_id) VALUES (?, ?)",
+  );
+  const ownerGrant = JSON.stringify([{ mode: "owner" }]);
+  for (const list of previousLists) {
+    bindOwner.run(list.kind, list.id, list.owner_user_id, ownerGrant);
+    if (list.kind === "queue") bindQueue.run(list.owner_user_id, list.id);
+  }
+
+  db.exec(`
+    CREATE TABLE articles_v27 (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT REFERENCES users(id) ON DELETE SET NULL,
+      origin_group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
+      title           TEXT NOT NULL,
+      provider_json   TEXT NOT NULL,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO articles_v27 (id, user_id, origin_group_id, title, provider_json, created_at)
+    SELECT id, user_id, group_id, title, provider_json, created_at FROM articles;
+    CREATE TABLE text_article_segments_v27 (
+      article_id    TEXT NOT NULL REFERENCES articles_v27(id) ON DELETE CASCADE,
+      segment_index INTEGER NOT NULL CHECK (segment_index >= 0),
+      start_offset  INTEGER NOT NULL CHECK (start_offset >= 0),
+      char_count    INTEGER NOT NULL CHECK (char_count BETWEEN 1 AND 10000),
+      content       TEXT NOT NULL,
+      PRIMARY KEY (article_id, segment_index),
+      UNIQUE (article_id, start_offset)
+    );
+    INSERT INTO text_article_segments_v27
+    SELECT article_id, segment_index, start_offset, char_count, content
+      FROM text_article_segments;
+    CREATE TABLE article_bookmarks_v27 (
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      article_id    TEXT NOT NULL REFERENCES articles_v27(id) ON DELETE CASCADE,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      bookmarked    INTEGER NOT NULL DEFAULT 1,
+      updated_at_ms INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, article_id)
+    );
+    INSERT INTO article_bookmarks_v27
+    SELECT user_id, article_id, created_at, bookmarked, updated_at_ms FROM article_bookmarks;
+    CREATE TABLE article_read_progress_v27 (
+      user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      article_id         TEXT NOT NULL REFERENCES articles_v27(id) ON DELETE CASCADE,
+      offset             INTEGER NOT NULL DEFAULT 0,
+      locator            TEXT,
+      total_read_seconds INTEGER NOT NULL DEFAULT 0,
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at_ms      INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, article_id)
+    );
+    INSERT INTO article_read_progress_v27
+    SELECT user_id, article_id, offset, locator, total_read_seconds, updated_at, updated_at_ms
+      FROM article_read_progress;
+  `);
+  db.exec("DROP TRIGGER IF EXISTS articles_immutable");
+  db.exec("DROP TRIGGER IF EXISTS text_article_segments_immutable");
+  db.exec("DROP TABLE text_article_segments");
+  db.exec("DROP TABLE article_bookmarks");
+  db.exec("DROP TABLE article_read_progress");
+  db.exec("DROP TABLE articles");
+  db.exec("ALTER TABLE articles_v27 RENAME TO articles");
+  db.exec("ALTER TABLE text_article_segments_v27 RENAME TO text_article_segments");
+  db.exec("ALTER TABLE article_bookmarks_v27 RENAME TO article_bookmarks");
+  db.exec("ALTER TABLE article_read_progress_v27 RENAME TO article_read_progress");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_origin_group ON articles(origin_group_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_created_id ON articles(created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_article_bookmarks_user_state_created
+      ON article_bookmarks(user_id, bookmarked, created_at DESC, article_id DESC);
+    CREATE INDEX IF NOT EXISTS idx_text_article_segments_offset
+      ON text_article_segments(article_id, start_offset);
+    CREATE TRIGGER IF NOT EXISTS articles_immutable
+    BEFORE UPDATE ON articles BEGIN
+      SELECT RAISE(ABORT, 'articles are immutable');
+    END;
+    CREATE TRIGGER IF NOT EXISTS text_article_segments_immutable
+    BEFORE UPDATE ON text_article_segments BEGIN
+      SELECT RAISE(ABORT, 'article segments are immutable');
+    END;
+    CREATE TABLE IF NOT EXISTS booklist_items (
+      list_id     TEXT NOT NULL REFERENCES media_lists(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL CHECK (position >= 0),
+      article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+      added_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (list_id, position)
+    );
+    CREATE INDEX IF NOT EXISTS idx_booklist_items_article
+      ON booklist_items(article_id, list_id);
+  `);
+
+  const groupsWithArticles = db
+    .prepare(
+      `SELECT DISTINCT origin_group_id AS group_id FROM articles
+        WHERE origin_group_id IS NOT NULL`,
+    )
+    .all() as Array<{ group_id: string }>;
+  const insertList = db.prepare(
+    `INSERT INTO media_lists (id, kind, title, origin_group_id)
+     VALUES (?, 'booklist', ?, ?)`,
+  );
+  const insertBookItem = db.prepare(
+    `INSERT INTO booklist_items (list_id, position, article_id)
+     VALUES (?, ?, ?)`,
+  );
+  const bindGroup = db.prepare(
+    `INSERT INTO access_bindings (
+       resource_kind, resource_id, principal_kind, principal_id, grants_json
+     ) VALUES ('booklist', ?, 'group', ?, ?)`,
+  );
+  for (const row of groupsWithArticles) {
+    const group = db
+      .prepare("SELECT id, name FROM groups WHERE id = ?")
+      .get(row.group_id) as { id: string; name: string } | undefined;
+    if (!group) continue;
+    const listId = crypto.randomUUID();
+    insertList.run(listId, `${group.name}的文单`, group.id);
+    bindGroup.run(listId, group.id, ownerGrant);
+    const articles = db
+      .prepare(
+        `SELECT id FROM articles WHERE origin_group_id = ? ORDER BY created_at, id`,
+      )
+      .all(group.id) as Array<{ id: string }>;
+    articles.forEach((article, index) => {
+      insertBookItem.run(listId, index, article.id);
+    });
+  }
+
+  db.exec(`
+    INSERT OR IGNORE INTO user_favorites
+      (user_id, resource_kind, resource_id, favorited, updated_at_ms, created_at)
+    SELECT user_id, 'article', article_id, bookmarked, updated_at_ms, created_at
+      FROM article_bookmarks;
+    INSERT OR IGNORE INTO user_recents
+      (user_id, resource_kind, resource_id, last_used_at, last_used_at_ms)
+    SELECT user_id, 'article', article_id, updated_at, updated_at_ms
+      FROM article_read_progress
+     WHERE total_read_seconds >= 30;
+    DROP TABLE article_bookmarks;
+  `);
+
+  db.exec("DROP TABLE IF EXISTS article_uploads");
+  db.exec(ARTICLE_UPLOADS_SCHEMA);
+
+  const access = new AccessService(
+    db,
+    new CapabilityService(getCapabilitySecret(db)),
+  );
+  const resources = db
+    .prepare(
+      `SELECT DISTINCT resource_kind, resource_id FROM access_bindings`,
+    )
+    .all() as Array<{
+    resource_kind: "playlist" | "booklist" | "queue";
+    resource_id: string;
+  }>;
+  for (const resource of resources) {
+    access.rematerializeResource(resource.resource_kind, resource.resource_id);
+  }
+}
+
 const MIGRATIONS = new Map<number, SchemaMigration>([
   [17, { nextVersion: 18, run: migrateV17ToV18 }],
   [18, { nextVersion: 25, run: consolidatePostV18Schema }],
-  [25, { nextVersion: CURRENT_SCHEMA_VERSION, run: migrateV25ToV26 }],
+  [25, { nextVersion: 26, run: migrateV25ToV26 }],
+  [26, { nextVersion: CURRENT_SCHEMA_VERSION, run: migrateV26ToV27 }],
 ]);
 
 /** Prepare the version ledger and apply every ordered migration transactionally. */
@@ -818,7 +1173,7 @@ function installSchema(db: Database): void {
     CREATE TABLE IF NOT EXISTS articles (
       id            TEXT PRIMARY KEY,
       user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
-      group_id      TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      origin_group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
       title         TEXT NOT NULL,
       provider_json TEXT NOT NULL CHECK (
         json_valid(provider_json) AND
@@ -850,9 +1205,9 @@ function installSchema(db: Database): void {
       UNIQUE (article_id, start_offset)
     );
     CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_articles_group ON articles(group_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_articles_created_id_group
-      ON articles(created_at DESC, id DESC, group_id);
+    CREATE INDEX IF NOT EXISTS idx_articles_origin_group ON articles(origin_group_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_created_id
+      ON articles(created_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS teach_documents (
       id            TEXT PRIMARY KEY,
@@ -866,17 +1221,6 @@ function installSchema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_teach_documents_created
       ON teach_documents(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS article_bookmarks (
-      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      bookmarked INTEGER NOT NULL DEFAULT 1,
-      updated_at_ms INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (user_id, article_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_article_bookmarks_user_state_created
-      ON article_bookmarks(user_id, bookmarked, created_at DESC, article_id DESC);
 
     CREATE TABLE IF NOT EXISTS article_read_progress (
       user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -916,6 +1260,7 @@ function installSchema(db: Database): void {
   db.exec(MEDIA_SCHEMA);
   db.exec(STORAGE_QUOTA_SCHEMA);
   db.exec(ARTICLE_UPLOADS_SCHEMA);
+  db.exec(ACCESS_SCHEMA);
   // Worktree/dev databases created while schema v23 was being developed may
   // already have media_lists without retention_days. Production upgrades from
   // v22 always create the complete table above, so this is a narrow repair.
@@ -1017,11 +1362,9 @@ function installSchema(db: Database): void {
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_articles_user ON articles(user_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_articles_group ON articles(group_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_articles_created_id_group
-      ON articles(created_at DESC, id DESC, group_id);
-    CREATE INDEX IF NOT EXISTS idx_article_bookmarks_user_state_created
-      ON article_bookmarks(user_id, bookmarked, created_at DESC, article_id DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_origin_group ON articles(origin_group_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_created_id
+      ON articles(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_text_article_segments_offset
       ON text_article_segments(article_id, start_offset);
     CREATE TRIGGER IF NOT EXISTS articles_immutable
@@ -1039,6 +1382,7 @@ function initializeDatabase(db: Database): void {
   runMigrations(db);
   installSchema(db);
   ensurePinSecret(db);
+  ensureCapabilitySecret(db);
   ensureConfigDefaults(db);
   initWordSchema(db);
   db.exec(
