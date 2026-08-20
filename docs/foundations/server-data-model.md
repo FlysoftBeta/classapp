@@ -11,7 +11,8 @@ old quota ledger) and switches remaining blobs to allocated `blob_id`s.
 v27 replaces playlist `owner_user_id` with principal access bindings, adds
 booklists as an articles-domain collection (`booklists` / `group_booklists`),
 capability possession, and treats group-chat articles as ownerless objects.
-v28 adds durable post-image originals and a reconstructible thumbnail cache.
+v28 adds durable post-image originals, a reconstructible thumbnail cache, and
+the `post_images` product feature (on by default for new and migrated accounts).
 
 ## Table families
 

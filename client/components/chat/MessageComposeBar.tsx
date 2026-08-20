@@ -28,6 +28,7 @@ import {
 } from "@/client/interact/conversations";
 import { StickerPicker } from "@/client/components/chat/StickerPicker";
 import { parseDbTime } from "@/shared/time";
+import { hasFeature } from "@/shared/features";
 
 function isPostingRestricted(conv: Conversation, user: User): boolean {
   return (
@@ -378,30 +379,34 @@ export function MessageComposeBar({
           onPick={handleStickerPick}
           subscribeConfigEvents={subscribeConfigEvents}
         />
-        <Tooltip title="发送图片">
-          <span>
-            <IconButton
-              size="small"
-              onClick={() => imageInputRef.current?.click()}
-              disabled={loading || !online}
-              aria-label="发送图片"
-              sx={{ mb: 0.5, mr: 0.5 }}
-            >
-              <ImageIcon fontSize="small" />
-            </IconButton>
-          </span>
-        </Tooltip>
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            handleImagePick(file);
-          }}
-        />
+        {hasFeature(currentUser, "post_images") && (
+          <>
+            <Tooltip title="发送图片">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={loading || !online}
+                  aria-label="发送图片"
+                  sx={{ mb: 0.5, mr: 0.5 }}
+                >
+                  <ImageIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                handleImagePick(file);
+              }}
+            />
+          </>
+        )}
         <TextField
           fullWidth
           multiline

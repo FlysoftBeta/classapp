@@ -76,7 +76,8 @@ original keeps its uploaded bytes. Listing or opening a post queues thumbnail
 materialization; the list still returns immediately. Clients show the
 thumbnail until the user opens the original. Upload is a multipart HTTP path
 (`POST /api/posts/images`) because the body is a file, not an Action payload.
-Authorization matches conversation posting/reading. See
+Upload requires the `post_images` product feature, which is on by default.
+Authorization otherwise matches conversation posting/reading. See
 [server blob storage and quota](./server-storage.md).
 
 Posts store author/reply user IDs. Presentation user metadata travels as a

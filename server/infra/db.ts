@@ -7,7 +7,7 @@ import { createWordsService } from "@/server/services/wordsService";
 import { AccessService } from "@/server/services/accessService";
 import { DATA_ROOT } from "./env";
 import { runtimeConfig } from "@/server/infra/runtimeConfig";
-import { DEFAULT_FEATURE_BITSET } from "@/server/data/featureBitset";
+import { DEFAULT_FEATURE_BITSET, featureBit } from "@/server/data/featureBitset";
 import { ADMIN_ROLES } from "@/shared/authority";
 
 const DB_PATH = path.join(DATA_ROOT, "data.db");
@@ -973,6 +973,10 @@ function migrateV26ToV27(db: Database): void {
 
 function migrateV27ToV28(db: Database): void {
   db.exec(POST_IMAGE_SCHEMA);
+  // Enabled by default for existing accounts; new users use DEFAULT_FEATURE_BITSET.
+  db.prepare("UPDATE users SET feature_bitset = feature_bitset | ?").run(
+    featureBit("post_images"),
+  );
 }
 
 const MIGRATIONS = new Map<number, SchemaMigration>([

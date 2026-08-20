@@ -141,6 +141,7 @@ export class PostActorFacade {
     reply_to?: string | null;
   }) {
     const { user, authorizedDirectPeerId } = await this.authorizeCreate(input);
+    this.actor.requireFeature("post_images");
     const ingested = await this.images.ingest(input.file);
     try {
       const result = this.posts.createImage(
