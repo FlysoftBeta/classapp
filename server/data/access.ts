@@ -538,6 +538,8 @@ export function principalExists(
   }
   return !!db.prepare("SELECT id FROM groups WHERE id = ?").get(principal.id);
 }
+
+export function findQueueListId(db: Database, userId: string): string | null {
   const row = db
     .prepare("SELECT list_id FROM user_queues WHERE user_id = ?")
     .get(userId) as { list_id: string } | undefined;

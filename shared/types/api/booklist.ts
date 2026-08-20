@@ -4,7 +4,8 @@ import {
   accessFlagsSchema,
   capabilityTokenSchema,
 } from "@/shared/access";
-import { articleWithMetaSchema, userMetadataSchema } from "./article";
+import { articleWithMetaSchema } from "./article";
+import { userMetadataSchema } from "./user";
 
 const object = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
 
