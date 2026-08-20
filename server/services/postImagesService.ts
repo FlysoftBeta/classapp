@@ -27,6 +27,7 @@ import {
   detectPostImageMime,
   inspectPostImage,
   renderPostImageThumbnail,
+  type PostImageMime,
 } from "@/server/infra/imageThumbnail";
 
 export const POST_IMAGE_POOL = "post-images";
