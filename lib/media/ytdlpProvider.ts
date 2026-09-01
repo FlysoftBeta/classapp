@@ -135,13 +135,16 @@ export class YtDlpProvider implements MediaProvider {
     // ";" parses the youtube key but silently drops plugin keys such as
     // youtubepot-bgutilhttp, so yt-dlp would ignore the configured POT
     // server and fall back to its default local port.
-    args.push("--extractor-args", "youtube:player_client=web_music");
-    if (this.options.potBaseUrl) {
-      args.push(
-        "--extractor-args",
-        `youtubepot-bgutilhttp:base_url=${this.options.potBaseUrl}`,
-      );
-    }
+    // Temporarily use android_vr so stream extraction does not need a PO
+    // Token provider. Restore web_music + youtubepot-bgutilhttp together.
+    args.push("--extractor-args", "youtube:player_client=android_vr");
+    // args.push("--extractor-args", "youtube:player_client=web_music");
+    // if (this.options.potBaseUrl) {
+    //   args.push(
+    //     "--extractor-args",
+    //     `youtubepot-bgutilhttp:base_url=${this.options.potBaseUrl}`,
+    //   );
+    // }
     if (this.options.nodePath) {
       args.push("--js-runtimes", `node:${this.options.nodePath}`);
     }

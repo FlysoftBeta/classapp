@@ -137,26 +137,31 @@ export class MediaRuntime {
       console.warn("[Media] yt-dlp path is not configured; media is disabled");
       return;
     }
-    try {
-      const baseUrl = await this.pot.start();
-      this.provider = new YtDlpProvider({
-        binaryPath: this.config.ytDlpPath,
-        nodePath: process.execPath,
-        pluginDirs: this.config.pluginDirs,
-        potBaseUrl: baseUrl,
-      });
-      console.log(
-        baseUrl
-          ? `[Media] POT provider ready at ${baseUrl}`
-          : "[Media] POT provider not configured",
-      );
-    } catch (error) {
-      recordContainedServerIncident(this.db, BUILD_ID, error, {
-        component: "media-runtime",
-        phase: "pot-start",
-      });
-      console.warn("[Media] POT provider unavailable", error);
-    }
+    // Temporarily skip the GPL POT child process. yt-dlp uses android_vr
+    // instead of web_music + bgutil HTTP. Keep PotServerSupervisor in place.
+    console.log(
+      "[Media] POT provider disabled; using youtube player_client=android_vr",
+    );
+    // try {
+    //   const baseUrl = await this.pot.start();
+    //   this.provider = new YtDlpProvider({
+    //     binaryPath: this.config.ytDlpPath,
+    //     nodePath: process.execPath,
+    //     pluginDirs: this.config.pluginDirs,
+    //     potBaseUrl: baseUrl,
+    //   });
+    //   console.log(
+    //     baseUrl
+    //       ? `[Media] POT provider ready at ${baseUrl}`
+    //       : "[Media] POT provider not configured",
+    //   );
+    // } catch (error) {
+    //   recordContainedServerIncident(this.db, BUILD_ID, error, {
+    //     component: "media-runtime",
+    //     phase: "pot-start",
+    //   });
+    //   console.warn("[Media] POT provider unavailable", error);
+    // }
   }
 
   async stop(): Promise<void> {
