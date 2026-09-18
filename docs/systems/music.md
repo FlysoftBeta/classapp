@@ -48,19 +48,12 @@ recover artist, album, duration, and thumbnail. That costs seconds per track,
 so a 20-track search spent roughly 40-80 s before the request could return.
 `ytdlpProvider.search` therefore uses `--flat-playlist`, and the ClassApp
 `classapp-music-search` extractor plugin reads those fields from the search
-shelf renderer itself. Search still uses the YouTube Music search extractor and
+shelf renderer itself. A 20-track search stays on the `web_music` client and
 returns in about 3 s.
 
 The plugin subclasses yt-dlp's pinned `YoutubeMusicSearchURLIE`; when the
 pinned yt-dlp release is bumped, review the plugin against the new extractor
 API and the live renderer shape.
-
-Stream and info extraction currently uses `youtube:player_client=android_vr`
-so it does not need a PO Token. `MediaRuntime` still owns
-`PotServerSupervisor` and still resolves `potServerEntry`, but it does not
-start the child process or pass `youtubepot-bgutilhttp:base_url`. Restore
-`web_music` and the POT extractor-args together when the provider is enabled
-again.
 
 `ytdlpProvider` passes one `--extractor-args` option per extractor key.
 Joining `youtube:` and `youtubepot-bgutilhttp:` keys with `;` parses the
@@ -224,6 +217,4 @@ pinned yt-dlp/POT versions rather than whatever is latest on the day of the run.
 - Playlist retention (1-365 days) controls the local claim for tracks played
   from that playlist; queue-only plays use the default seven-day claim.
 - POT provider upstream binds all interfaces; deployment firewalls must keep
-  the provider port off the LAN until upstream changes to loopback. The
-  provider process is currently not started; stream extraction uses
-  `android_vr` instead.
+  the provider port off the LAN until upstream changes to loopback.
